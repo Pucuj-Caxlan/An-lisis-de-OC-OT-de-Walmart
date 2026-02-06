@@ -19,7 +19,8 @@ import {
   Target,
   ListOrdered,
   Layers,
-  Search
+  Search,
+  X
 } from 'lucide-react';
 import {
   PieChart,
@@ -84,8 +85,9 @@ export default function VpDashboard() {
     try {
       const date = new Date(dateStr);
       if (!isNaN(date.getFullYear())) return date.getFullYear();
-      const lowerDate = String(dateStr).toLowerCase();
-      const yearMatch = lowerDate.match(/\b(202[2-6])\b/);
+      
+      // Fallback for OCR dates or special formats
+      const yearMatch = String(dateStr).match(/\b(202[2-6])\b/);
       if (yearMatch) return parseInt(yearMatch[1]);
       return null;
     } catch { return null; }
@@ -104,15 +106,31 @@ export default function VpDashboard() {
   const filteredData = useMemo(() => {
     if (!rawOrders) return [];
     return rawOrders.filter(o => {
+      // 1. Filtro de Año
       const orderYear = getOrderYear(o);
       const yearMatch = selectedYear === 'all' || orderYear === selectedYear;
-      const typeMatch = filters.type === 'all' || (o.type || o.header?.type || "").includes(filters.type);
-      const formatMatch = filters.format === 'all' || (o.format || o.projectInfo?.format || "").includes(filters.format);
-      const planMatch = filters.planType === 'all' || (o.plan || "").includes(filters.planType);
-      const coordinatorMatch = filters.coordinator === 'all' || (o.coordinador || "").includes(filters.coordinator);
-      const searchMatch = !filters.projectName || 
-        String(o.projectName || "").toLowerCase().includes(filters.projectName.toLowerCase()) ||
-        String(o.projectId || "").toLowerCase().includes(filters.projectName.toLowerCase());
+      
+      // 2. Filtro de Tipo (OT/OCR/OCI)
+      const oType = String(o.type || o.header?.type || "").toLowerCase();
+      const typeMatch = filters.type === 'all' || oType.includes(filters.type.toLowerCase());
+      
+      // 3. Filtro de Formato
+      const oFormat = String(o.format || o.projectInfo?.format || "").toLowerCase();
+      const formatMatch = filters.format === 'all' || oFormat.includes(filters.format.toLowerCase());
+      
+      // 4. Filtro de Plan
+      const oPlan = String(o.plan || "").toLowerCase();
+      const planMatch = filters.planType === 'all' || oPlan.includes(filters.planType.toLowerCase());
+      
+      // 5. Filtro de Coordinador
+      const oCoordinator = String(o.coordinador || "").toLowerCase();
+      const coordinatorMatch = filters.coordinator === 'all' || oCoordinator.includes(filters.coordinator.toLowerCase());
+      
+      // 6. Filtro de Búsqueda (PID o Nombre)
+      const searchStr = filters.projectName.toLowerCase();
+      const oPid = String(o.projectId || o.projectInfo?.projectId || "").toLowerCase();
+      const oPName = String(o.projectName || o.projectInfo?.projectName || "").toLowerCase();
+      const searchMatch = !searchStr || oPid.includes(searchStr) || oPName.includes(searchStr);
       
       return yearMatch && typeMatch && formatMatch && planMatch && coordinatorMatch && searchMatch;
     });
@@ -126,9 +144,9 @@ export default function VpDashboard() {
   const metrics = useMemo(() => {
     const totalImpact = filteredData.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0);
     const count = filteredData.length;
-    const projectIds = new Set(filteredData.map(o => o.projectId).filter(id => !!id));
-    const projectCount = projectIds.size || 1;
-    const ocPerProjectRatio = (count / projectCount).toFixed(2);
+    const projectIds = new Set(filteredData.map(o => o.projectId || o.projectInfo?.projectId).filter(id => !!id));
+    const projectCount = projectIds.size || (count > 0 ? 1 : 0);
+    const ocPerProjectRatio = projectCount > 0 ? (count / projectCount).toFixed(2) : "0.00";
 
     // Top 10 Recurrencia por Concepto (IA)
     const concepts = filteredData.reduce((acc: any, curr) => {
@@ -178,6 +196,18 @@ export default function VpDashboard() {
     const pct = compTotal > 0 ? ((metrics.totalImpact - compTotal) / compTotal) * 100 : 0;
     return { compTotal, delta, pct };
   }, [metrics.totalImpact, comparisonData, selectedYear]);
+
+  const clearFilters = () => {
+    setFilters({
+      type: 'all',
+      format: 'all',
+      planType: 'all',
+      coordinator: 'all',
+      projectName: ''
+    });
+  };
+
+  const hasActiveFilters = filters.type !== 'all' || filters.format !== 'all' || filters.planType !== 'all' || filters.coordinator !== 'all' || filters.projectName !== '';
 
   if (isLoading) {
     return (
@@ -234,7 +264,7 @@ export default function VpDashboard() {
                 <h2 className="text-2xl font-headline font-bold text-slate-800">{formatCurrency(metrics.totalImpact)}</h2>
                 <div className="flex items-center gap-2 mt-2">
                   <Badge variant="outline" className="text-[9px] bg-primary/5 text-primary border-primary/20">{metrics.count} Órdenes</Badge>
-                  {comparatives && (
+                  {comparatives && selectedYear !== 'all' && (
                     <span className={`text-[10px] font-bold flex items-center ${comparatives.pct > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
                       {comparatives.pct > 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
                       {Math.abs(comparatives.pct).toFixed(1)}% vs {comparisonYear}
@@ -282,14 +312,24 @@ export default function VpDashboard() {
           </div>
 
           {/* Advanced Filters */}
-          <Card className="border-none shadow-sm bg-white p-4">
+          <Card className="border-none shadow-sm bg-white p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <Filter className="h-4 w-4" /> Filtros Ejecutivos
+              </h3>
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="h-7 text-[10px] uppercase font-bold text-rose-500 gap-1 hover:bg-rose-50">
+                  <X className="h-3 w-3" /> Limpiar Filtros
+                </Button>
+              )}
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><Layers className="h-3 w-3" /> Tipo Plan</label>
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Layers className="h-3 w-3" /> Tipo Plan</label>
                 <Select value={filters.planType} onValueChange={(v) => setFilters(f => ({...f, planType: v}))}>
-                  <SelectTrigger className="h-9 bg-slate-50 border-none text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="all">Todos los Planes</SelectItem>
                     <SelectItem value="Preliminares">Preliminares</SelectItem>
                     <SelectItem value="Aperturas">Aperturas</SelectItem>
                     <SelectItem value="Remodelaciones">Remodelaciones</SelectItem>
@@ -297,37 +337,40 @@ export default function VpDashboard() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><Users className="h-3 w-3" /> Coordinador</label>
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Users className="h-3 w-3" /> Coordinador</label>
                 <Select value={filters.coordinator} onValueChange={(v) => setFilters(f => ({...f, coordinator: v}))}>
-                  <SelectTrigger className="h-9 bg-slate-50 border-none text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="all">Todos los Coordinadores</SelectItem>
                     <SelectItem value="Pedro">Pedro (Auditor)</SelectItem>
                     <SelectItem value="Construccion">Área Construcción</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><Target className="h-3 w-3" /> Formato</label>
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Target className="h-3 w-3" /> Formato</label>
                 <Select value={filters.format} onValueChange={(v) => setFilters(f => ({...f, format: v}))}>
-                  <SelectTrigger className="h-9 bg-slate-50 border-none text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="all">Todos los Formatos</SelectItem>
                     <SelectItem value="Sams Club">Sams Club</SelectItem>
                     <SelectItem value="Supercenter">Walmart Supercenter</SelectItem>
                     <SelectItem value="Bodega Aurrera">Bodega Aurrera</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><Search className="h-3 w-3" /> Buscar Proyecto / PID</label>
-                <Input 
-                  placeholder="Ej. Hacienda de Torreón..." 
-                  className="h-9 bg-slate-50 border-none text-xs"
-                  value={filters.projectName}
-                  onChange={(e) => setFilters(f => ({...f, projectName: e.target.value}))}
-                />
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Search className="h-3 w-3" /> Buscar Proyecto / PID</label>
+                <div className="relative">
+                  <Input 
+                    placeholder="Ej. Hacienda de Torreón o 126393..." 
+                    className="h-9 bg-slate-50 border-none text-xs font-medium pl-8"
+                    value={filters.projectName}
+                    onChange={(e) => setFilters(f => ({...f, projectName: e.target.value}))}
+                  />
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                </div>
               </div>
             </div>
           </Card>
@@ -349,8 +392,13 @@ export default function VpDashboard() {
             <TabsContent value="recurrence">
               <Card className="border-none shadow-md overflow-hidden bg-white">
                 <CardHeader className="bg-slate-50/50 border-b">
-                  <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Top 10 Recurrencia de Conceptos (Filtro Semántico)</CardTitle>
-                  <CardDescription>Identificación de desviaciones repetitivas por volumen de órdenes e importe.</CardDescription>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Top 10 Recurrencia de Conceptos (Filtro Semántico)</CardTitle>
+                      <CardDescription>Identificación de desviaciones repetitivas por volumen de órdenes e importe.</CardDescription>
+                    </div>
+                    <Badge variant="outline" className="bg-white">{filteredData.length} Órdenes mostradas</Badge>
+                  </div>
                 </CardHeader>
                 <CardContent className="p-0">
                   <div className="overflow-x-auto">
@@ -365,10 +413,10 @@ export default function VpDashboard() {
                       </thead>
                       <tbody className="divide-y">
                         {metrics.topConcepts.length === 0 ? (
-                          <tr><td colSpan={4} className="p-10 text-center text-slate-400">Sin datos para este periodo.</td></tr>
+                          <tr><td colSpan={4} className="p-10 text-center text-slate-400">Sin datos para este periodo o filtros seleccionados.</td></tr>
                         ) : metrics.topConcepts.map((row: any, i) => (
-                          <tr key={i} className="hover:bg-primary/5 transition-colors">
-                            <td className="p-4 font-bold text-slate-700">{row.name}</td>
+                          <tr key={i} className="hover:bg-primary/5 transition-colors group">
+                            <td className="p-4 font-bold text-slate-700 group-hover:text-primary transition-colors">{row.name}</td>
                             <td className="p-4 text-center">
                               <Badge className="bg-slate-100 text-slate-600 font-bold border-none">{row.count}</Badge>
                             </td>
