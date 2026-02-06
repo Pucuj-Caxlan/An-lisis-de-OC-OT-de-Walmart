@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState } from 'react';
@@ -24,11 +25,11 @@ import { extractPdfData, ExtractPdfDataOutput } from '@/ai/flows/extract-pdf-dat
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore } from '@/firebase';
-import { collection, query, where, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { setDocumentNonBlocking, updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 
 export default function UploadPdfPage() {
   const { toast } = useToast();
@@ -66,9 +67,9 @@ export default function UploadPdfPage() {
 
       // 2. Análisis Semántico con contexto completo
       const semantic = await analyzeOrderSemantically({
-        descripcion: extracted.extractedData.descriptionSection.description,
-        causaDeclarada: extracted.extractedData.projectInfo.rootCauseDeclared,
-        montoTotal: extracted.extractedData.financialImpact.netImpact,
+        descripcion: extracted.extractedData.descriptionSection.description || "",
+        causaDeclarada: extracted.extractedData.projectInfo.rootCauseDeclared || "",
+        montoTotal: extracted.extractedData.financialImpact.netImpact || 0,
         contextoExtendido: extracted.extractedData,
         isSigned: extracted.extractedData.isSigned
       });
@@ -82,8 +83,10 @@ export default function UploadPdfPage() {
       setResults({ ...extracted, extractedData: fullData as any });
 
       // 3. Lógica de Match & Registro
-      const { projectId } = extracted.extractedData.projectInfo;
-      const { orderNumber } = extracted.extractedData.header;
+      const projectId = extracted.extractedData.projectInfo?.projectId;
+      const orderNumber = extracted.extractedData.header?.orderNumber;
+      
+      if (!projectId || !orderNumber) throw new Error("Información crítica faltante en el PDF (PID o No. Orden).");
       
       const ordersRef = collection(db, 'orders');
       const q = query(ordersRef, where('projectId', '==', projectId), where('orderNumber', '==', orderNumber));
@@ -91,9 +94,9 @@ export default function UploadPdfPage() {
       
       if (!querySnapshot.empty) {
         const existingDoc = querySnapshot.docs[0];
-        await updateDoc(doc(db, 'orders', existingDoc.id), {
+        updateDocumentNonBlocking(doc(db, 'orders', existingDoc.id), {
           ...fullData,
-          projectId: projectId, // Asegurar consistencia
+          projectId: projectId,
           orderNumber: orderNumber,
           pdfUrl: 'simulated_url',
           lastUpdatedFromPdf: new Date().toISOString()
@@ -101,7 +104,7 @@ export default function UploadPdfPage() {
         setMatchStatus('MATCHED');
       } else {
         const newId = `pdf_${projectId}_${Date.now()}`;
-        await setDoc(doc(db, 'orders', newId), {
+        setDocumentNonBlocking(doc(db, 'orders', newId), {
           ...fullData,
           id: newId,
           projectId: projectId,
@@ -109,15 +112,14 @@ export default function UploadPdfPage() {
           pdfUrl: 'simulated_url',
           createdFromPdf: true,
           importBatchId: 'PDF_INGEST'
-        });
+        }, { merge: true });
         setMatchStatus('NEW');
       }
       
       toast({ title: "Documento Procesado", description: "Datos extraídos y analizados semánticamente." });
 
     } catch (error: any) {
-      console.error(error);
-      toast({ variant: "destructive", title: "Error", description: error.message });
+      toast({ variant: "destructive", title: "Error en procesamiento", description: error.message || "Fallo técnico en IA." });
     } finally {
       setIsProcessing(false);
     }
@@ -246,15 +248,17 @@ export default function UploadPdfPage() {
                           <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
                             <Info className="h-4 w-4" /> Datos de Proyecto
                           </h4>
-                          <Table className="border rounded-xl overflow-hidden text-[11px]">
-                            <TableBody>
-                              <TableRow className="bg-slate-50/50"><TableCell className="font-bold">Nombre</TableCell><TableCell>{results.extractedData.projectInfo.projectName}</TableCell></TableRow>
-                              <TableRow><TableCell className="font-bold">Formato / Proto</TableCell><TableCell>{results.extractedData.projectInfo.format} / {results.extractedData.projectInfo.proto}</TableCell></TableRow>
-                              <TableRow className="bg-slate-50/50"><TableCell className="font-bold">Área Solicitante</TableCell><TableCell>{results.extractedData.projectInfo.requestingArea}</TableCell></TableRow>
-                              <TableRow><TableCell className="font-bold">Causa Declarada</TableCell><TableCell>{results.extractedData.projectInfo.rootCauseDeclared}</TableCell></TableRow>
-                              <TableRow className="bg-slate-50/50"><TableCell className="font-bold">Planos a Modificar</TableCell><TableCell>{results.extractedData.descriptionSection.modifications || "N/A"}</TableCell></TableRow>
-                            </TableBody>
-                          </Table>
+                          <div className="border rounded-xl overflow-hidden">
+                            <Table className="text-[11px]">
+                              <TableBody>
+                                <TableRow className="bg-slate-50/50"><TableCell className="font-bold">Nombre</TableCell><TableCell>{results.extractedData.projectInfo.projectName}</TableCell></TableRow>
+                                <TableRow><TableCell className="font-bold">Formato / Proto</TableCell><TableCell>{results.extractedData.projectInfo.format} / {results.extractedData.projectInfo.proto}</TableCell></TableRow>
+                                <TableRow className="bg-slate-50/50"><TableCell className="font-bold">Área Solicitante</TableCell><TableCell>{results.extractedData.projectInfo.requestingArea}</TableCell></TableRow>
+                                <TableRow><TableCell className="font-bold">Causa Declarada</TableCell><TableCell>{results.extractedData.projectInfo.rootCauseDeclared}</TableCell></TableRow>
+                                <TableRow className="bg-slate-50/50"><TableCell className="font-bold">Planos a Modificar</TableCell><TableCell>{results.extractedData.descriptionSection.modifications || "N/A"}</TableCell></TableRow>
+                              </TableBody>
+                            </Table>
+                          </div>
                         </div>
 
                         <div className="space-y-4">
@@ -283,36 +287,6 @@ export default function UploadPdfPage() {
                               </TableBody>
                             </Table>
                           </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
-                          <History className="h-4 w-4" /> Límites de Autorización
-                        </h4>
-                        <div className="border rounded-xl overflow-hidden shadow-sm">
-                          <Table className="text-[10px]">
-                            <TableHeader className="bg-slate-50">
-                              <TableRow>
-                                <TableHead>Cargo</TableHead>
-                                <TableHead>Nombre</TableHead>
-                                <TableHead>Fecha Autorización</TableHead>
-                                <TableHead className="text-center">Firma</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {results.extractedData.authorizations.map((auth: any, i: number) => (
-                                <TableRow key={i}>
-                                  <TableCell className="font-bold">{auth.cargo}</TableCell>
-                                  <TableCell>{auth.name}</TableCell>
-                                  <TableCell>{auth.authDate}</TableCell>
-                                  <TableCell className="text-center">
-                                    {auth.hasSignature ? <CheckCircle2 className="h-4 w-4 text-emerald-500 mx-auto" /> : <div className="h-4 w-4 border border-dashed rounded mx-auto" />}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
                         </div>
                       </div>
                     </CardContent>

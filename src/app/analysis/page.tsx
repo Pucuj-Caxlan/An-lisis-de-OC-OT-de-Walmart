@@ -33,7 +33,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, limit, updateDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, limit, doc, writeBatch } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
   Dialog,
@@ -61,7 +61,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from '@/components/ui/separator';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import { updateDocumentNonBlocking, deleteDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -96,14 +97,14 @@ export default function AnalysisPage() {
     try {
       const result = await analyzeOrderSemantically({
         descripcion: order.descripcion || order.descripcionOriginal || order.standardizedDescription || "",
-        causaDeclarada: order.causaRaiz,
-        montoTotal: order.impactoNeto || order.impactAmount,
+        causaDeclarada: order.causaRaiz || "",
+        montoTotal: order.impactoNeto || order.impactAmount || 0,
         contextoExtendido: order,
         isSigned: order.isSigned
       });
 
       if (db) {
-        await updateDoc(doc(db, 'orders', order.id), {
+        updateDocumentNonBlocking(doc(db, 'orders', order.id), {
           semanticAnalysis: result,
           standardizedDescription: result.standardizedDescription,
           processedAt: new Date().toISOString()
@@ -112,7 +113,7 @@ export default function AnalysisPage() {
 
       toast({
         title: "Análisis Exitoso",
-        description: `Registro ${order.projectId} estructurado correctamente.`,
+        description: `Registro ${order.projectId || order.id} estructurado correctamente.`,
       });
     } catch (error) {
       toast({
@@ -141,11 +142,11 @@ export default function AnalysisPage() {
       try {
         const result = await analyzeOrderSemantically({
           descripcion: order.descripcion || order.descripcionOriginal || "",
-          causaDeclarada: order.causaRaiz,
+          causaDeclarada: order.causaRaiz || "",
           montoTotal: order.impactoNeto || 0
         });
         if (db) {
-          await updateDoc(doc(db, 'orders', order.id), {
+          updateDocumentNonBlocking(doc(db, 'orders', order.id), {
             semanticAnalysis: result,
             standardizedDescription: result.standardizedDescription,
             processedAt: new Date().toISOString()
@@ -153,7 +154,7 @@ export default function AnalysisPage() {
           successCount++;
         }
       } catch (e) {
-        console.error("Error en PID:", order.projectId);
+        // Silently continue or handle via counter
       }
     }
 
@@ -164,14 +165,10 @@ export default function AnalysisPage() {
     });
   };
 
-  const handleDeleteOrder = async (orderId: string) => {
+  const handleDeleteOrder = (orderId: string) => {
     if (!db) return;
-    try {
-      await deleteDoc(doc(db, 'orders', orderId));
-      toast({ title: "Registro eliminado" });
-    } catch (error) {
-      toast({ variant: "destructive", title: "Error al eliminar" });
-    }
+    deleteDocumentNonBlocking(doc(db, 'orders', orderId));
+    toast({ title: "Registro eliminado" });
   };
 
   const handleDeleteAll = async () => {
@@ -184,7 +181,7 @@ export default function AnalysisPage() {
       await batch.commit();
       toast({ title: "Base de datos reiniciada" });
     } catch (error) {
-      toast({ variant: "destructive", title: "Error" });
+      toast({ variant: "destructive", title: "Error al purgar datos" });
     }
   };
 
@@ -333,7 +330,7 @@ export default function AnalysisPage() {
                             </Tooltip>
                           </TooltipProvider>
                           <div className="flex flex-col">
-                            <span className="font-bold text-primary">{order.projectId}</span>
+                            <span className="font-bold text-primary">{order.projectId || "S/P"}</span>
                             <span className="text-[10px] text-muted-foreground uppercase truncate max-w-[200px]">{order.projectName || "Sin Nombre"}</span>
                           </div>
                         </div>
@@ -413,30 +410,6 @@ export default function AnalysisPage() {
                                     </div>
                                   </div>
                                 </div>
-                                
-                                {order.lineItems && order.lineItems.length > 0 && (
-                                  <div>
-                                    <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Desglose Financiero</h4>
-                                    <div className="border rounded-lg overflow-hidden">
-                                      <Table>
-                                        <TableHeader className="bg-slate-50">
-                                          <TableRow>
-                                            <TableHead className="text-[10px]">Descripción</TableHead>
-                                            <TableHead className="text-right text-[10px]">Importe</TableHead>
-                                          </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                          {order.lineItems.map((item: any, i: number) => (
-                                            <TableRow key={i}>
-                                              <TableCell className="text-[11px] py-2">{item.descripcion}</TableCell>
-                                              <TableCell className="text-right text-[11px] py-2 font-bold">${formatAmount(item.importe)}</TableCell>
-                                            </TableRow>
-                                          ))}
-                                        </TableBody>
-                                      </Table>
-                                    </div>
-                                  </div>
-                                )}
                               </div>
                             </DialogContent>
                           </Dialog>
@@ -487,4 +460,3 @@ export default function AnalysisPage() {
     </div>
   );
 }
-import { TooltipProvider } from '@/components/ui/tooltip';
