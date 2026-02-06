@@ -43,7 +43,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025];
-const HISTORICAL_YEARS = [2021, 2022, 2023, 2024];
+const HISTORICAL_YEARS = [2022, 2023, 2024, 2025];
 const COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00B8D4', '#FFD600', '#AA00FF', '#37474F', '#9E9E9E'];
 const FORMATS = ['Bodega Aurrera', 'Walmart Supercenter', 'Sams Club', 'Bodega Aurrera Express'];
 
@@ -72,13 +72,18 @@ export default function VpDashboard() {
 
   const { data: rawOrders, isLoading } = useCollection(ordersQuery);
 
+  // Helper para extraer fecha de cualquier fuente (Excel o PDF)
+  const getOrderDate = (o: any) => {
+    return o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate;
+  };
+
   // Conteo de registros por año para el selector
   const countsByYear = useMemo(() => {
     const counts: Record<number, number> = {};
     YEARS.forEach(y => counts[y] = 0);
     if (!rawOrders) return counts;
     rawOrders.forEach(o => {
-      const dateStr = o.fechaSolicitud || o.requestDate;
+      const dateStr = getOrderDate(o);
       if (dateStr) {
         const year = new Date(dateStr).getFullYear();
         if (counts[year] !== undefined) {
@@ -103,8 +108,10 @@ export default function VpDashboard() {
   const filteredData = useMemo(() => {
     if (!rawOrders) return [];
     return rawOrders.filter(o => {
-      const dateStr = o.fechaSolicitud || o.requestDate;
+      const dateStr = getOrderDate(o);
       const orderYear = dateStr ? new Date(dateStr).getFullYear() : null;
+      
+      // Si no hay fecha, no se muestra en el filtrado por año
       const yearMatch = orderYear === selectedYear;
       
       const typeMatch = filters.type === 'all' || o.type === filters.type || (o.header?.type && o.header.type.includes(filters.type));
@@ -113,6 +120,7 @@ export default function VpDashboard() {
       const projectMatch = !filters.projectName || 
         o.projectName?.toLowerCase().includes(filters.projectName.toLowerCase()) ||
         o.projectId?.toLowerCase().includes(filters.projectName.toLowerCase()) ||
+        o.projectInfo?.projectId?.toLowerCase().includes(filters.projectName.toLowerCase()) ||
         o.projectInfo?.projectName?.toLowerCase().includes(filters.projectName.toLowerCase());
       
       return yearMatch && typeMatch && formatMatch && countryMatch && projectMatch;
@@ -138,7 +146,6 @@ export default function VpDashboard() {
     const formatData = Object.entries(byFormat).map(([name, value]) => ({ name, value }));
 
     const byCause = filteredData.reduce((acc: any, curr) => {
-      // Priorizamos la Causa Raíz Real detectada por la IA si existe procesamiento
       const cause = curr.semanticAnalysis?.causaRaizReal || curr.causaRaiz || curr.projectInfo?.rootCauseDeclared || 'No Identificada';
       if (!acc[cause]) acc[cause] = { name: cause, count: 0, impact: 0, processed: 0 };
       acc[cause].count += 1;
@@ -164,7 +171,7 @@ export default function VpDashboard() {
     });
 
     rawOrders.forEach(o => {
-      const dateStr = o.fechaSolicitud || o.requestDate;
+      const dateStr = getOrderDate(o);
       const fmt = o.format || o.projectInfo?.format;
       if (!dateStr || !fmt) return;
       
