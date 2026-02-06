@@ -39,7 +39,7 @@ const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Se
 
 export default function TrendsPage() {
   const db = useFirestore();
-  const [selectedYear, setSelectedYear] = useState(2024);
+  const [selectedYear, setSelectedYear] = useState(2025);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiInsight, setAiInsight] = useState<TrendAnalysisOutput | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -57,7 +57,7 @@ export default function TrendsPage() {
 
   // Helper para extraer fecha de cualquier fuente (Excel o PDF)
   const getOrderDate = (o: any) => {
-    return o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate;
+    return o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate || o.processedAt;
   };
 
   const trendData = useMemo(() => {
@@ -79,7 +79,6 @@ export default function TrendsPage() {
       if (date.getFullYear() === selectedYear) {
         const month = date.getMonth();
         if (monthly[month]) {
-          // Sumamos impacto de Excel (impactoNeto) o PDF (financialImpact.netImpact)
           const impactValue = o.impactoNeto || o.financialImpact?.netImpact || 0;
           monthly[month].impact += impactValue;
           monthly[month].count += 1;
@@ -92,6 +91,42 @@ export default function TrendsPage() {
       return { ...m, cumulative: cumulativeSum };
     });
   }, [orders, selectedYear]);
+
+  // Cálculos dinámicos para la cinta de KPIs
+  const kpis = useMemo(() => {
+    if (trendData.length === 0) return { acceleration: '0', averageOrders: '0', peakMonth: 'N/A', deviation: '0' };
+
+    // 1. Tasa de Aceleración (Crecimiento MoM promedio)
+    let totalGrowth = 0;
+    let growthCounts = 0;
+    for (let i = 1; i < trendData.length; i++) {
+      if (trendData[i-1].impact > 0) {
+        const growth = (trendData[i].impact - trendData[i-1].impact) / trendData[i-1].impact;
+        totalGrowth += growth;
+        growthCounts++;
+      }
+    }
+    const acceleration = growthCounts > 0 ? (totalGrowth / growthCounts) * 100 : 0;
+
+    // 2. Órdenes Promedio/Mes
+    const totalOrders = trendData.reduce((acc, curr) => acc + curr.count, 0);
+    const averageOrders = totalOrders / 12;
+
+    // 3. Mes de Mayor Impacto
+    const peak = trendData.reduce((prev, curr) => (prev.impact > curr.impact) ? prev : curr, trendData[0]);
+
+    // 4. Desviación vs Ppto (Simulado vs un budget de 150M)
+    const annualTotal = trendData.reduce((acc, curr) => acc + curr.impact, 0);
+    const simulatedBudget = 150000000;
+    const deviation = simulatedBudget > 0 ? ((annualTotal - simulatedBudget) / simulatedBudget) * 100 : 0;
+
+    return { 
+      acceleration: acceleration.toFixed(1), 
+      averageOrders: averageOrders.toFixed(1), 
+      peakMonth: peak.impact > 0 ? peak.month : 'N/A', 
+      deviation: deviation.toFixed(1) 
+    };
+  }, [trendData]);
 
   const runAiTrendAnalysis = async () => {
     if (trendData.length === 0) return;
@@ -120,11 +155,6 @@ export default function TrendsPage() {
       maximumFractionDigits: 2 
     }).format(val);
   };
-
-  const peakMonth = useMemo(() => {
-    if (trendData.length === 0) return { month: 'N/A' };
-    return trendData.reduce((prev, curr) => (prev.impact > curr.impact) ? prev : curr, trendData[0]);
-  }, [trendData]);
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50/50">
@@ -321,7 +351,9 @@ export default function TrendsPage() {
                     </div>
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Tasa de Aceleración</p>
-                      <h3 className="text-xl font-headline font-bold text-slate-800">+4.2% mes/mes</h3>
+                      <h3 className="text-xl font-headline font-bold text-slate-800">
+                        {Number(kpis.acceleration) > 0 ? '+' : ''}{kpis.acceleration}% mes/mes
+                      </h3>
                     </div>
                   </div>
                 </CardContent>
@@ -335,7 +367,7 @@ export default function TrendsPage() {
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Órdenes Promedio/Mes</p>
                       <h3 className="text-xl font-headline font-bold text-slate-800">
-                        {(trendData.reduce((acc, curr) => acc + curr.count, 0) / 12).toFixed(1)}
+                        {kpis.averageOrders}
                       </h3>
                     </div>
                   </div>
@@ -350,7 +382,7 @@ export default function TrendsPage() {
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Mes de Mayor Impacto</p>
                       <h3 className="text-xl font-headline font-bold text-slate-800">
-                        {peakMonth.month}
+                        {kpis.peakMonth}
                       </h3>
                     </div>
                   </div>
@@ -364,7 +396,9 @@ export default function TrendsPage() {
                     </div>
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Desviación vs Ppto</p>
-                      <h3 className="text-xl font-headline font-bold text-slate-800">12.5%</h3>
+                      <h3 className="text-xl font-headline font-bold text-slate-800">
+                        {Number(kpis.deviation) > 0 ? '+' : ''}{kpis.deviation}%
+                      </h3>
                     </div>
                   </div>
                 </CardContent>
