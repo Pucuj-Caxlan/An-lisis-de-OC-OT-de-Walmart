@@ -63,8 +63,7 @@ export default function TrendsPage() {
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
   const trendData = useMemo(() => {
-    if (!orders) return [];
-    
+    // Inicializamos con los 12 meses siempre para evitar errores de arreglos vacíos
     const monthly = Array(12).fill(0).map((_, i) => ({
       month: MONTH_NAMES[i],
       impact: 0,
@@ -72,14 +71,18 @@ export default function TrendsPage() {
       cumulative: 0
     }));
 
+    if (!orders) return monthly;
+
     let cumulativeSum = 0;
     orders.forEach(o => {
       if (!o.fechaSolicitud) return;
       const date = new Date(o.fechaSolicitud);
       if (date.getFullYear() === selectedYear) {
         const month = date.getMonth();
-        monthly[month].impact += (o.impactoNeto || 0);
-        monthly[month].count += 1;
+        if (monthly[month]) {
+          monthly[month].impact += (o.impactoNeto || 0);
+          monthly[month].count += 1;
+        }
       }
     });
 
@@ -111,6 +114,12 @@ export default function TrendsPage() {
     if (!mounted) return "$0";
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
   };
+
+  // Encontrar el mes de mayor impacto de forma segura
+  const peakMonth = useMemo(() => {
+    if (trendData.length === 0) return { month: 'N/A' };
+    return trendData.reduce((prev, curr) => (prev.impact > curr.impact) ? prev : curr, trendData[0]);
+  }, [trendData]);
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50/50">
@@ -336,7 +345,7 @@ export default function TrendsPage() {
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Mes de Mayor Impacto</p>
                       <h3 className="text-xl font-headline font-bold text-slate-800">
-                        {trendData.reduce((prev, curr) => (prev.impact > curr.impact) ? prev : curr).month}
+                        {peakMonth.month}
                       </h3>
                     </div>
                   </div>
