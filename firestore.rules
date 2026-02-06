@@ -19,11 +19,10 @@ service cloud.firestore {
     }
 
     match /chatSessions/{sessionId} {
-      // Permitimos lectura (get y list) si el documento pertenece al usuario
+      // Simplificamos la regla de lectura para asegurar compatibilidad con la consulta (list)
+      // Firestore requiere que el filtro del query coincida exactamente con la regla de seguridad.
       allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
-      // Permitimos creación validando que el userId sea el del solicitante
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      // Permitimos actualización y borrado si el documento existente pertenece al usuario
       allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
   }

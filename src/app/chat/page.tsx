@@ -23,7 +23,7 @@ import {
   History
 } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, query, limit, orderBy, doc, where, serverTimestamp } from 'firebase/firestore';
+import { collection, query, limit, orderBy, doc, where } from 'firebase/firestore';
 import { chatWithAi } from '@/ai/flows/chat-assistant-flow';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -34,7 +34,7 @@ import { Separator } from '@/components/ui/separator';
 type Message = {
   role: 'user' | 'model';
   content: string;
-  timestamp: any;
+  timestamp: string;
 };
 
 export default function ChatPage() {
@@ -46,39 +46,43 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Consulta de órdenes para el contexto
+  // Consulta de órdenes para el contexto (limitada para rendimiento)
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), limit(200));
+    return query(collection(db, 'orders'), limit(150));
   }, [db]);
   const { data: orders } = useCollection(ordersQuery);
 
-  // Consulta de sesiones de chat del usuario
+  // Consulta de sesiones de chat del usuario con ordenamiento por fecha
   const chatSessionsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
+    // IMPORTANTE: Esta consulta requiere que el filtro coincida con la regla de seguridad
     return query(
       collection(db, 'chatSessions'),
       where('userId', '==', user.uid),
       orderBy('updatedAt', 'desc'),
-      limit(50)
+      limit(25)
     );
   }, [db, user]);
   const { data: sessions, isLoading: isLoadingSessions } = useCollection(chatSessionsQuery);
 
-  // Sesión actual
+  // Sesión seleccionada actualmente
   const currentSession = sessions?.find(s => s.id === currentSessionId);
   const messages: Message[] = currentSession?.messages || [];
 
+  // Scroll automático al final del chat
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      const scrollElement = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollElement) {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+      }
     }
   }, [messages, isLoading]);
 
   const handleCreateNewChat = () => {
     setCurrentSessionId(null);
     setInput('');
-    toast({ title: "Nuevo chat iniciado", description: "¿En qué puedo ayudarte hoy?" });
   };
 
   const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
@@ -101,36 +105,37 @@ export default function ChatPage() {
     };
 
     let sessionId = currentSessionId;
-    let updatedMessages = [...messages, userMessage];
+    let currentMessages = [...messages, userMessage];
 
-    // Si es un nuevo chat, crear la sesión en Firestore
+    // Lógica de persistencia inicial o actualización
     if (!sessionId) {
       sessionId = `chat_${Date.now()}`;
-      const firstTitle = input.length > 30 ? input.substring(0, 30) + '...' : input;
+      const title = input.length > 35 ? input.substring(0, 35) + '...' : input;
       
       setDocumentNonBlocking(doc(db, 'chatSessions', sessionId), {
         id: sessionId,
         userId: user.uid,
-        title: firstTitle,
+        title: title,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        messages: updatedMessages
+        messages: currentMessages
       }, { merge: true });
       
       setCurrentSessionId(sessionId);
     } else {
       updateDocumentNonBlocking(doc(db, 'chatSessions', sessionId), {
-        messages: updatedMessages,
+        messages: currentMessages,
         updatedAt: new Date().toISOString()
       });
     }
 
+    const userInput = input;
     setInput('');
     setIsLoading(true);
 
     try {
       const response = await chatWithAi({
-        message: input,
+        message: userInput,
         history: messages.map(m => ({ role: m.role, content: m.content })),
         ordersContext: orders || [],
       });
@@ -141,7 +146,7 @@ export default function ChatPage() {
         timestamp: new Date().toISOString(),
       };
 
-      const finalMessages = [...updatedMessages, aiMessage];
+      const finalMessages = [...currentMessages, aiMessage];
       
       updateDocumentNonBlocking(doc(db, 'chatSessions', sessionId), {
         messages: finalMessages,
@@ -178,22 +183,22 @@ export default function ChatPage() {
           </div>
         </header>
 
-        <main className="flex h-[calc(100vh-4rem)]">
+        <main className="flex h-[calc(100vh-4rem)] overflow-hidden">
           {/* Historial Lateral */}
-          <div className="w-80 border-r bg-white flex flex-col hidden lg:flex">
+          <div className="w-80 border-r bg-white flex flex-col hidden lg:flex shrink-0">
             <div className="p-4">
               <Button onClick={handleCreateNewChat} className="w-full gap-2 bg-primary hover:bg-primary/90 shadow-md">
-                <Plus className="h-4 w-4" /> Nuevo Análisis
+                <Plus className="h-4 w-4" /> Nueva Conversación
               </Button>
             </div>
             <Separator />
             <ScrollArea className="flex-1">
               <div className="p-3 space-y-2">
-                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2 mb-2">Historial Reciente</h3>
+                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2 mb-2">Historial Persistente</h3>
                 {isLoadingSessions ? (
                   <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-slate-200" /></div>
                 ) : sessions?.length === 0 ? (
-                  <p className="text-center text-xs text-slate-400 py-8 italic">No hay conversaciones previas.</p>
+                  <p className="text-center text-xs text-slate-400 py-8 italic px-4">No tienes conversaciones guardadas.</p>
                 ) : sessions?.map((session) => (
                   <div 
                     key={session.id} 
@@ -204,9 +209,9 @@ export default function ChatPage() {
                       <MessageSquare className={`h-4 w-4 mt-1 ${currentSessionId === session.id ? 'text-primary' : 'text-slate-400'}`} />
                       <div className="flex-1 min-w-0">
                         <p className={`text-xs font-bold truncate ${currentSessionId === session.id ? 'text-primary' : 'text-slate-700'}`}>
-                          {session.title || 'Conversación sin título'}
+                          {session.title || 'Análisis de OC/OT'}
                         </p>
-                        <p className="text-[9px] text-slate-400 flex items-center gap-1 mt-1">
+                        <p className="text-[9px] text-slate-400 flex items-center gap-1 mt-1 font-medium">
                           <Clock className="h-2 w-2" /> {new Date(session.updatedAt).toLocaleDateString()}
                         </p>
                       </div>
@@ -226,24 +231,24 @@ export default function ChatPage() {
           </div>
 
           {/* Área de Chat */}
-          <div className="flex-1 flex flex-col bg-slate-50/50 relative">
-            <ScrollArea className="flex-1 px-6" ref={scrollRef}>
-              <div className="max-w-4xl mx-auto py-8 space-y-6">
+          <div className="flex-1 flex flex-col bg-slate-50/50 relative overflow-hidden">
+            <ScrollArea className="flex-1" ref={scrollRef}>
+              <div className="max-w-4xl mx-auto py-8 px-6 space-y-6">
                 {messages.length === 0 && !isLoading && (
                   <div className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-6">
                     <div className="bg-primary/10 p-8 rounded-full">
                       <Bot className="h-20 w-20 text-primary" />
                     </div>
                     <div className="space-y-2">
-                      <h2 className="text-2xl font-headline font-bold text-slate-800 tracking-tight">Expertise Digital en Control de Cambios</h2>
-                      <p className="text-slate-500 max-w-md mx-auto text-sm">Auditoría inteligente sobre {orders?.length || 0} registros activos. Pregunta sobre montos, causas raíz o riesgos de cumplimiento.</p>
+                      <h2 className="text-2xl font-headline font-bold text-slate-800 tracking-tight uppercase">Auditoría Inteligente de Construcción</h2>
+                      <p className="text-slate-500 max-w-md mx-auto text-sm">El asistente tiene acceso a {orders?.length || 0} registros activos. Pregunta sobre discrepancias, montos acumulados o riesgos de firmas.</p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
                       {[
                         "¿Cuál es el impacto neto total de este año?",
+                        "¿Qué especialidades tienen más desviaciones?",
                         "Analiza el riesgo de firmas en montos altos.",
-                        "¿Qué especialidad tiene más desviaciones?",
-                        "Dame un resumen de anomalías financieras."
+                        "Resumen de anomalías financieras detectadas."
                       ].map((q, i) => (
                         <Button 
                           key={i} 
@@ -265,10 +270,10 @@ export default function ChatPage() {
                       <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${m.role === 'user' ? 'bg-slate-800 text-white' : 'bg-primary text-white'}`}>
                         {m.role === 'user' ? <User className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
                       </div>
-                      <div className={`p-5 rounded-2xl shadow-sm text-sm leading-relaxed prose prose-slate ${m.role === 'user' ? 'bg-slate-800 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}`}>
+                      <div className={`p-5 rounded-2xl shadow-sm text-sm leading-relaxed ${m.role === 'user' ? 'bg-slate-800 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}`}>
                         <div className="whitespace-pre-wrap">{m.content}</div>
-                        <p className={`text-[8px] mt-2 opacity-50 uppercase font-black ${m.role === 'user' ? 'text-right' : ''}`}>
-                          {new Date(m.timestamp).toLocaleTimeString()}
+                        <p className={`text-[8px] mt-2 opacity-50 uppercase font-black tracking-widest ${m.role === 'user' ? 'text-right' : ''}`}>
+                          {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
                     </div>
@@ -283,7 +288,7 @@ export default function ChatPage() {
                       </div>
                       <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center gap-3">
                         <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                        <span className="text-xs text-slate-400 font-black uppercase tracking-widest italic">WAI Procesando...</span>
+                        <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest italic">WAI Analizando Datos...</span>
                       </div>
                     </div>
                   </div>
@@ -291,12 +296,12 @@ export default function ChatPage() {
               </div>
             </ScrollArea>
 
-            <div className="p-6 bg-gradient-to-t from-slate-50 to-transparent">
+            <div className="p-6 bg-gradient-to-t from-white to-transparent pt-10">
               <div className="max-w-4xl mx-auto">
-                <div className="bg-white border rounded-2xl p-2 shadow-xl flex items-center gap-2">
+                <div className="bg-white border rounded-2xl p-2 shadow-2xl flex items-center gap-2">
                   <Input 
-                    placeholder="Escribe tu consulta de auditoría..." 
-                    className="border-none focus-visible:ring-0 text-sm h-12 bg-transparent"
+                    placeholder="Consulta al Asistente de Auditoría..." 
+                    className="border-none focus-visible:ring-0 text-sm h-12 bg-transparent font-medium"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSend()}
@@ -312,11 +317,11 @@ export default function ChatPage() {
                   </Button>
                 </div>
                 <div className="flex justify-between items-center mt-3 px-2">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                    Persistencia activada en colección /chatSessions
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                    Seguridad: Sesión cifrada y persistente en Firestore
                   </p>
-                  <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight text-slate-400 border-slate-200">
-                    Gemini 2.5 Flash Engine
+                  <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight text-slate-400 border-slate-200 bg-white">
+                    Gemini 2.5 Flash
                   </Badge>
                 </div>
               </div>
