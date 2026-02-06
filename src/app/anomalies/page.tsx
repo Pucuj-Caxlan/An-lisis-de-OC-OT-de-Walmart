@@ -28,6 +28,8 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 export default function AnomaliesPage() {
   const { toast } = useToast();
@@ -76,10 +78,10 @@ export default function AnomaliesPage() {
       const result = await detectAnomalies({ orders: normalizedOrders });
       setAuditResult(result);
 
-      // Guardar histórico
+      // Guardar histórico con manejo de errores contextual
       if (db) {
         const auditId = `audit_${Date.now()}`;
-        await setDoc(doc(db, 'audits', auditId), {
+        const auditData = {
           id: auditId,
           timestamp: new Date().toISOString(),
           globalHealthScore: result.globalHealthScore,
@@ -87,7 +89,17 @@ export default function AnomaliesPage() {
           anomaliesCount: result.anomalies.length,
           sampleSize: orders.length,
           anomalies: result.anomalies
-        });
+        };
+
+        setDoc(doc(db, 'audits', auditId), auditData)
+          .catch(async () => {
+            const permissionError = new FirestorePermissionError({
+              path: `audits/${auditId}`,
+              operation: 'create',
+              requestResourceData: auditData
+            });
+            errorEmitter.emit('permission-error', permissionError);
+          });
       }
 
       toast({ title: "Auditoría Finalizada", description: `Se detectaron ${result.anomalies.length} anomalías.` });
@@ -100,12 +112,15 @@ export default function AnomaliesPage() {
 
   const deleteAudit = async (id: string) => {
     if (!db) return;
-    try {
-      await deleteDoc(doc(db, 'audits', id));
-      toast({ title: "Reporte eliminado" });
-    } catch (e) {
-      toast({ variant: "destructive", title: "Error" });
-    }
+    deleteDoc(doc(db, 'audits', id))
+      .then(() => toast({ title: "Reporte eliminado" }))
+      .catch(async () => {
+        const permissionError = new FirestorePermissionError({
+          path: `audits/${id}`,
+          operation: 'delete'
+        });
+        errorEmitter.emit('permission-error', permissionError);
+      });
   };
 
   const getSeverityColor = (sev: string) => {

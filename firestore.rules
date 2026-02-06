@@ -21,5 +21,12 @@ service cloud.firestore {
       allow create: if isSignedIn() && matchesPathId(auditId);
       allow delete: if isSignedIn();
     }
+
+    match /importBatches/{batchId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && matchesPathId(batchId);
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
   }
 }

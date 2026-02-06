@@ -71,6 +71,25 @@
           }
         }
       }
+    },
+    "ImportBatch": {
+      "title": "Import Batch",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fileName": { "type": "string" },
+        "importDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["PROCESSING", "COMPLETED", "FAILED"] },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "totalRows": { "type": "number" },
+            "processedRows": { "type": "number" },
+            "errorCount": { "type": "number" },
+            "totalImpact": { "type": "number" }
+          }
+        }
+      }
     }
   },
   "auth": {
@@ -78,6 +97,7 @@
   },
   "firestore": {
     "/orders/{orderId}": { "schema": "Order", "description": "Normalized records with semantic AI enrichment" },
-    "/audits/{auditId}": { "schema": "AuditReport", "description": "Historical forensic audit reports" }
+    "/audits/{auditId}": { "schema": "AuditReport", "description": "Historical forensic audit reports" },
+    "/importBatches/{batchId}": { "schema": "ImportBatch", "description": "Tracking for bulk excel uploads" }
   }
 }
