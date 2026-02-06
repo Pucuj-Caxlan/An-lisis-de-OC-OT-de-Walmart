@@ -13,7 +13,8 @@ import {
   TrendingUp,
   BrainCircuit,
   Database,
-  RefreshCcw
+  RefreshCcw,
+  CalendarDays
 } from 'lucide-react';
 import {
   PieChart,
@@ -41,14 +42,14 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 
-const YEARS = [2020, 2021, 2022, 2023, 2024, 2025];
-const HISTORICAL_YEARS = [2022, 2023, 2024, 2025];
+const YEARS = [2022, 2023, 2024, 2025, 2026];
 const COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00B8D4', '#FFD600', '#AA00FF', '#37474F', '#9E9E9E'];
 const FORMATS = ['Bodega Aurrera', 'Walmart Supercenter', 'Sams Club', 'Bodega Aurrera Express'];
 
 export default function VpDashboard() {
   const db = useFirestore();
-  const [selectedYear, setSelectedYear] = useState(2024);
+  const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState<number | 'all'>(currentYear);
   const [mounted, setMounted] = useState(false);
   const [filters, setFilters] = useState({
     type: 'all',
@@ -71,7 +72,8 @@ export default function VpDashboard() {
 
   // Helper robusto para extraer la fecha y el año de cualquier fuente
   const getOrderYear = (o: any): number | null => {
-    const dateStr = o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate;
+    // Intentamos múltiples campos de fecha
+    const dateStr = o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate || o.processedAt;
     if (!dateStr) return null;
     try {
       const date = new Date(dateStr);
@@ -84,10 +86,12 @@ export default function VpDashboard() {
 
   // Conteo de registros por año para el selector
   const countsByYear = useMemo(() => {
-    const counts: Record<number, number> = {};
+    const counts: Record<string, number> = { all: 0 };
     YEARS.forEach(y => counts[y] = 0);
     if (!rawOrders) return counts;
+    
     rawOrders.forEach(o => {
+      counts.all++;
       const yr = getOrderYear(o);
       if (yr && counts[yr] !== undefined) {
         counts[yr]++;
@@ -112,10 +116,10 @@ export default function VpDashboard() {
     return rawOrders.filter(o => {
       const orderYear = getOrderYear(o);
       
-      // Si el registro no tiene año válido, no pasa el filtro de año
-      const yearMatch = orderYear === selectedYear;
+      // Filtro de Año (Soporta 'all' para registros sin año o todos los años)
+      const yearMatch = selectedYear === 'all' || orderYear === selectedYear;
       
-      // Normalizamos campos para comparación de filtros (Excel vs PDF)
+      // Normalizamos campos para comparación de filtros
       const orderType = o.type || o.header?.type || "";
       const orderFormat = o.format || o.projectInfo?.format || "Otros";
       const orderCountry = o.country || "México";
@@ -167,61 +171,6 @@ export default function VpDashboard() {
     return { totalImpact, count, generatorData, formatData, causeTable };
   }, [filteredData]);
 
-  const historicalMetrics = useMemo(() => {
-    if (!rawOrders) return { rows: [], totals: [] };
-    
-    const stats: Record<string, Record<number, { projects: Set<string>, orders: number }>> = {};
-    
-    FORMATS.forEach(f => {
-      stats[f] = {};
-      HISTORICAL_YEARS.forEach(y => {
-        stats[f][y] = { projects: new Set(), orders: 0 };
-      });
-    });
-
-    rawOrders.forEach(o => {
-      const year = getOrderYear(o);
-      const fmt = o.format || o.projectInfo?.format;
-      if (!year || !fmt) return;
-      
-      if (stats[fmt] && stats[fmt][year]) {
-        stats[fmt][year].projects.add(o.projectId || o.projectInfo?.projectId);
-        stats[fmt][year].orders += 1;
-      }
-    });
-
-    const rows = FORMATS.map(f => ({
-      format: f,
-      yearStats: HISTORICAL_YEARS.map(y => ({
-        yr: y,
-        projectCount: stats[f][y].projects.size,
-        orderCount: stats[f][y].orders,
-        ratio: stats[f][y].projects.size > 0 
-          ? (stats[f][y].orders / stats[f][y].projects.size).toFixed(1) 
-          : '0.0'
-      }))
-    }));
-
-    const totals = HISTORICAL_YEARS.map(y => {
-      let totalProjectsInYear = new Set();
-      let totalOrdersInYear = 0;
-      FORMATS.forEach(f => {
-        stats[f][y].projects.forEach(pid => totalProjectsInYear.add(pid));
-        totalOrdersInYear += stats[f][y].orders;
-      });
-      return {
-        yr: y,
-        projectCount: totalProjectsInYear.size,
-        orderCount: totalOrdersInYear,
-        ratio: totalProjectsInYear.size > 0 
-          ? (totalOrdersInYear / totalProjectsInYear.size).toFixed(1) 
-          : '0.0'
-      };
-    });
-
-    return { rows, totals };
-  }, [rawOrders]);
-
   const formatCurrency = (val: number) => {
     if (!mounted) return "$0.00";
     return new Intl.NumberFormat('es-MX', { 
@@ -269,6 +218,13 @@ export default function VpDashboard() {
             </div>
             <Separator orientation="vertical" className="h-8" />
             <div className="flex bg-slate-100 p-1 rounded-lg border gap-1 shadow-inner">
+              <button
+                onClick={() => setSelectedYear('all')}
+                className={`flex flex-col items-center justify-center min-w-[55px] px-2 py-1 rounded-md transition-all ${selectedYear === 'all' ? 'bg-primary text-white shadow-md' : 'text-slate-500 hover:text-slate-800 hover:bg-white/50'}`}
+              >
+                <span className="text-xs font-bold">TODO</span>
+                <span className="text-[9px] font-medium opacity-80">{countsByYear.all}</span>
+              </button>
               {YEARS.map(y => (
                 <button
                   key={y}
@@ -277,7 +233,7 @@ export default function VpDashboard() {
                 >
                   <span className="text-xs font-bold">{y}</span>
                   <span className="text-[9px] font-medium opacity-80">
-                    {countsByYear[y]} reg
+                    {countsByYear[y] || 0}
                   </span>
                 </button>
               ))}
@@ -417,7 +373,7 @@ export default function VpDashboard() {
                     </thead>
                     <tbody className="divide-y bg-white">
                       {metrics.causeTable.length === 0 ? (
-                        <tr><td colSpan={4} className="p-10 text-center text-slate-400 italic">No hay datos para el año seleccionado.</td></tr>
+                        <tr><td colSpan={4} className="p-10 text-center text-slate-400 italic">No hay datos para los filtros seleccionados.</td></tr>
                       ) : metrics.causeTable.slice(0, 10).map((row: any, i) => (
                         <tr key={i} className="hover:bg-primary/5 transition-colors">
                           <td className="p-3">
@@ -441,7 +397,7 @@ export default function VpDashboard() {
                     </tbody>
                     <tfoot className="bg-slate-800 text-white font-black border-t-2">
                       <tr>
-                        <td className="p-3 uppercase tracking-tighter">Total Consolidado ({selectedYear})</td>
+                        <td className="p-3 uppercase tracking-tighter">Total Consolidado ({selectedYear === 'all' ? 'Histórico' : selectedYear})</td>
                         <td className="p-3 text-center">{metrics.count}</td>
                         <td className="p-3 text-right text-accent">{formatCurrency(metrics.totalImpact)}</td>
                         <td className="p-3 text-center">100%</td>
@@ -469,62 +425,6 @@ export default function VpDashboard() {
               </CardContent>
             </Card>
           </div>
-
-          <Card className="border-none shadow-sm overflow-hidden bg-white">
-            <CardHeader className="py-3 px-4 border-b bg-slate-800">
-              <CardTitle className="text-[11px] font-black uppercase text-white tracking-widest">Matriz Histórica: Proyectos vs Desviaciones</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-[10px] border-collapse text-center">
-                  <thead className="bg-slate-700 text-white font-bold">
-                    <tr>
-                      <th className="p-2 border-r text-left bg-slate-800">MÉTRICAS COMPARATIVAS</th>
-                      {HISTORICAL_YEARS.map(yr => (
-                        <th key={yr} colSpan={3} className="p-2 border-r bg-slate-600 uppercase tracking-tighter">{yr}</th>
-                      ))}
-                    </tr>
-                    <tr className="bg-slate-100 text-slate-600 font-black border-b">
-                      <th className="p-2 border-r text-left">FORMATO DE UNIDAD</th>
-                      {HISTORICAL_YEARS.map(yr => (
-                        <React.Fragment key={yr}>
-                          <th className="p-1 border-r">Proyectos</th>
-                          <th className="p-1 border-r">Órdenes</th>
-                          <th className="p-1 border-r bg-primary/10 text-primary">Ratio Desv</th>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y bg-white">
-                    {historicalMetrics.rows?.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                        <td className="p-2 border-r text-left font-bold text-slate-700">{row.format}</td>
-                        {row.yearStats.map((ys, i) => (
-                          <React.Fragment key={i}>
-                            <td className="p-1 border-r">{ys.projectCount}</td>
-                            <td className="p-1 border-r">{ys.orderCount}</td>
-                            <td className="p-1 border-r bg-slate-50 font-bold text-slate-800">{ys.ratio}</td>
-                          </React.Fragment>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-slate-50 font-black border-t-2 text-slate-800">
-                    <tr>
-                      <td className="p-2 border-r text-left uppercase">Totales Consolidados</td>
-                      {historicalMetrics.totals?.map((ts, i) => (
-                        <React.Fragment key={i}>
-                          <td className="p-1 border-r">{ts.projectCount}</td>
-                          <td className="p-1 border-r">{ts.orderCount}</td>
-                          <td className="p-1 border-r bg-slate-100 text-primary">{ts.ratio}</td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
         </main>
       </SidebarInset>
     </div>
