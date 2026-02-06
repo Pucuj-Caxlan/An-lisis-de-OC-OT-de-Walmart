@@ -83,10 +83,20 @@ export default function VpDashboard() {
     const dateStr = o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate || o.processedAt;
     if (!dateStr) return null;
     try {
-      const date = new Date(dateStr);
+      // Intento de parseo de fechas en español (OCR)
+      let cleanedDateStr = String(dateStr).toLowerCase();
+      const monthsEs: Record<string, string> = {
+        'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04', 'mayo': '05', 'junio': '06',
+        'julio': '07', 'agosto': '08', 'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12'
+      };
+      Object.entries(monthsEs).forEach(([name, num]) => {
+        cleanedDateStr = cleanedDateStr.replace(name, num);
+      });
+      cleanedDateStr = cleanedDateStr.replace(/\s/g, ''); // Quitar espacios
+
+      const date = new Date(cleanedDateStr);
       if (!isNaN(date.getFullYear())) return date.getFullYear();
       
-      // Fallback for OCR dates or special formats
       const yearMatch = String(dateStr).match(/\b(202[2-6])\b/);
       if (yearMatch) return parseInt(yearMatch[1]);
       return null;
@@ -103,6 +113,28 @@ export default function VpDashboard() {
     }).format(val);
   };
 
+  // Dinamización de opciones de filtros
+  const filterOptions = useMemo(() => {
+    if (!rawOrders) return { coordinators: [], formats: [], plans: [] };
+    
+    const coordinators = new Set<string>();
+    const formats = new Set<string>();
+    const plans = new Set<string>();
+    
+    rawOrders.forEach(o => {
+      if (o.coordinador) coordinators.add(o.coordinador);
+      const fmt = o.format || o.projectInfo?.format;
+      if (fmt) formats.add(fmt);
+      if (o.plan) plans.add(o.plan);
+    });
+    
+    return {
+      coordinators: Array.from(coordinators).sort(),
+      formats: Array.from(formats).sort(),
+      plans: Array.from(plans).sort()
+    };
+  }, [rawOrders]);
+
   const filteredData = useMemo(() => {
     if (!rawOrders) return [];
     return rawOrders.filter(o => {
@@ -112,7 +144,12 @@ export default function VpDashboard() {
       
       // 2. Filtro de Tipo (OT/OCR/OCI)
       const oType = String(o.type || o.header?.type || "").toLowerCase();
-      const typeMatch = filters.type === 'all' || oType.includes(filters.type.toLowerCase());
+      let typeMatch = filters.type === 'all';
+      if (!typeMatch) {
+        if (filters.type === 'OT') typeMatch = oType.includes('ot') || oType.includes('trabajo');
+        if (filters.type === 'OCR') typeMatch = oType.includes('ocr') || oType.includes('cambio');
+        if (filters.type === 'OCI') typeMatch = oType.includes('oci') || oType.includes('informativa');
+      }
       
       // 3. Filtro de Formato
       const oFormat = String(o.format || o.projectInfo?.format || "").toLowerCase();
@@ -142,10 +179,11 @@ export default function VpDashboard() {
   }, [rawOrders, comparisonYear]);
 
   const metrics = useMemo(() => {
-    const totalImpact = filteredData.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0);
+    const impactValues = filteredData.map(o => o.impactoNeto || o.financialImpact?.netImpact || 0);
+    const totalImpact = impactValues.reduce((acc, curr) => acc + curr, 0);
     const count = filteredData.length;
     const projectIds = new Set(filteredData.map(o => o.projectId || o.projectInfo?.projectId).filter(id => !!id));
-    const projectCount = projectIds.size || (count > 0 ? 1 : 0);
+    const projectCount = projectIds.size;
     const ocPerProjectRatio = projectCount > 0 ? (count / projectCount).toFixed(2) : "0.00";
 
     // Top 10 Recurrencia por Concepto (IA)
@@ -311,7 +349,7 @@ export default function VpDashboard() {
             </Card>
           </div>
 
-          {/* Advanced Filters */}
+          {/* Advanced Filters (Dinámicos) */}
           <Card className="border-none shadow-sm bg-white p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
@@ -330,10 +368,9 @@ export default function VpDashboard() {
                   <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos los Planes</SelectItem>
-                    <SelectItem value="Preliminares">Preliminares</SelectItem>
-                    <SelectItem value="Aperturas">Aperturas</SelectItem>
-                    <SelectItem value="Remodelaciones">Remodelaciones</SelectItem>
-                    <SelectItem value="Mantenimiento">Mantenimiento</SelectItem>
+                    {filterOptions.plans.map(p => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -343,8 +380,9 @@ export default function VpDashboard() {
                   <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos los Coordinadores</SelectItem>
-                    <SelectItem value="Pedro">Pedro (Auditor)</SelectItem>
-                    <SelectItem value="Construccion">Área Construcción</SelectItem>
+                    {filterOptions.coordinators.map(c => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -354,9 +392,9 @@ export default function VpDashboard() {
                   <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos los Formatos</SelectItem>
-                    <SelectItem value="Sams Club">Sams Club</SelectItem>
-                    <SelectItem value="Supercenter">Walmart Supercenter</SelectItem>
-                    <SelectItem value="Bodega Aurrera">Bodega Aurrera</SelectItem>
+                    {filterOptions.formats.map(fmt => (
+                      <SelectItem key={fmt} value={fmt}>{fmt}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -426,7 +464,7 @@ export default function VpDashboard() {
                                 <div className="h-2 flex-1 bg-slate-100 rounded-full overflow-hidden">
                                   <div 
                                     className="h-full bg-primary" 
-                                    style={{ width: `${(row.impact / metrics.totalImpact) * 100}%` }}
+                                    style={{ width: `${metrics.totalImpact > 0 ? (row.impact / metrics.totalImpact) * 100 : 0}%` }}
                                   />
                                 </div>
                                 <span className="text-[10px] font-bold text-slate-400">
