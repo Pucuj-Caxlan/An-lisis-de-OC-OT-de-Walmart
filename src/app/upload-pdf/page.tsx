@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState } from 'react';
@@ -15,7 +14,10 @@ import {
   AlertTriangle, 
   Search,
   BrainCircuit,
-  Link as LinkIcon
+  Link as LinkIcon,
+  ShieldCheck,
+  ShieldAlert,
+  Info
 } from 'lucide-react';
 import { extractPdfData, ExtractPdfDataOutput } from '@/ai/flows/extract-pdf-data-flow';
 import { useToast } from '@/hooks/use-toast';
@@ -23,6 +25,7 @@ import { useFirestore } from '@/firebase';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Separator } from '@/components/ui/separator';
 
 export default function UploadPdfPage() {
   const { toast } = useToast();
@@ -70,7 +73,6 @@ export default function UploadPdfPage() {
       const querySnapshot = await getDocs(q);
       
       if (!querySnapshot.empty) {
-        // Vinculación con registro existente
         const existingDoc = querySnapshot.docs[0];
         await updateDoc(doc(db, 'orders', existingDoc.id), {
           ...extracted.extractedData,
@@ -81,7 +83,6 @@ export default function UploadPdfPage() {
         setMatchStatus('MATCHED');
         toast({ title: "Documento Vinculado", description: "Se actualizó un registro de Excel existente." });
       } else {
-        // Crear registro nuevo
         const newId = `pdf_${projectId}_${Date.now()}`;
         await setDoc(doc(db, 'orders', newId), {
           ...extracted.extractedData,
@@ -108,15 +109,15 @@ export default function UploadPdfPage() {
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-white px-6">
           <SidebarTrigger />
-          <h1 className="text-xl font-headline font-bold text-slate-800">Ingesta de PDFs Inteligente</h1>
+          <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Auditoría Digital de Documentos</h1>
         </header>
 
-        <main className="p-6 md:p-8 max-w-5xl mx-auto w-full">
-          <div className="grid gap-6 md:grid-cols-3">
+        <main className="p-6 md:p-8 max-w-6xl mx-auto w-full">
+          <div className="grid gap-6 md:grid-cols-4">
             <Card className="md:col-span-1 border-none shadow-sm h-fit">
               <CardHeader>
-                <CardTitle className="text-lg">Subir Documento</CardTitle>
-                <CardDescription>Formatos OC/OT estándar de Walmart</CardDescription>
+                <CardTitle className="text-lg">Ingesta PDF</CardTitle>
+                <CardDescription>Cargue el formato oficial de OT/OC</CardDescription>
               </CardHeader>
               <CardContent>
                 <div 
@@ -124,7 +125,7 @@ export default function UploadPdfPage() {
                   onClick={() => !isProcessing && document.getElementById('pdf-upload')?.click()}
                 >
                   <Upload className="h-8 w-8 text-primary mx-auto mb-3" />
-                  <p className="text-xs font-medium text-slate-600">Click para seleccionar PDF</p>
+                  <p className="text-xs font-bold text-slate-600">SELECCIONAR ARCHIVO</p>
                   <Input 
                     id="pdf-upload" 
                     type="file" 
@@ -138,75 +139,100 @@ export default function UploadPdfPage() {
                     <div className="flex items-center justify-between text-[10px] font-bold uppercase text-slate-500">
                       <span className="flex items-center gap-2">
                         <Loader2 className="h-3 w-3 animate-spin text-primary" />
-                        Analizando con Gemini 2.5...
+                        Ocr Semántico...
                       </span>
                     </div>
-                    <Progress value={65} className="h-1" />
+                    <Progress value={75} className="h-1" />
                   </div>
                 )}
               </CardContent>
             </Card>
 
-            <div className="md:col-span-2 space-y-6">
+            <div className="md:col-span-3 space-y-6">
               {results ? (
                 <>
-                  <Card className="border-none shadow-sm">
+                  <Card className="border-none shadow-sm overflow-hidden">
                     <CardHeader className="flex flex-row items-center justify-between bg-slate-50/50 border-b pb-4">
                       <div>
                         <CardTitle className="text-lg flex items-center gap-2">
                           <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                          Resultados de Extracción
+                          Extracción Exitosa
                         </CardTitle>
-                        <CardDescription>Precisión detectada: {(results.confidence * 100).toFixed(0)}%</CardDescription>
+                        <CardDescription>
+                          PID: <span className="font-bold text-slate-800">{results.extractedData.projectId}</span> | 
+                          Orden: <span className="font-bold text-slate-800">{results.extractedData.orderNumber}</span>
+                        </CardDescription>
                       </div>
-                      <Badge variant={matchStatus === 'MATCHED' ? 'default' : 'secondary'}>
-                        {matchStatus === 'MATCHED' ? (
-                          <div className="flex items-center gap-1"><LinkIcon className="h-3 w-3" /> Vinculado a Excel</div>
-                        ) : (
-                          "Nuevo Registro"
-                        )}
+                      <Badge variant={matchStatus === 'MATCHED' ? 'default' : 'secondary'} className="uppercase text-[10px]">
+                        {matchStatus === 'MATCHED' ? 'Vinculado a Excel' : 'Registro Nuevo'}
                       </Badge>
                     </CardHeader>
-                    <CardContent className="pt-6">
-                      <div className="grid grid-cols-2 gap-4 mb-6">
-                        <div className="bg-slate-50 p-3 rounded-lg">
-                          <p className="text-[10px] font-bold text-muted-foreground uppercase">Proyecto / PID</p>
-                          <p className="text-sm font-bold text-slate-800">{results.extractedData.projectName} ({results.extractedData.projectId})</p>
-                        </div>
-                        <div className="bg-slate-50 p-3 rounded-lg">
+                    <CardContent className="pt-6 space-y-6">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-slate-50 p-3 rounded-lg border">
                           <p className="text-[10px] font-bold text-muted-foreground uppercase">Impacto Neto</p>
                           <p className="text-sm font-bold text-primary">{formatCurrency(results.extractedData.impactAmount)}</p>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-lg border">
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase">Monto Acumulado</p>
+                          <p className="text-sm font-bold text-slate-700">{formatCurrency(results.extractedData.accumulatedAmount || 0)}</p>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-lg border">
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase">Apéndice F</p>
+                          <div className="flex items-center gap-1">
+                            {results.extractedData.appendixF ? <ShieldCheck className="h-4 w-4 text-emerald-500" /> : <ShieldAlert className="h-4 w-4 text-rose-500" />}
+                            <span className="text-xs font-bold">{results.extractedData.appendixF ? 'INCLUIDO' : 'NO INCLUIDO'}</span>
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-lg border">
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase">Red Flags</p>
+                          <div className="flex items-center gap-1">
+                            {results.extractedData.redFlagsVerified ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <AlertTriangle className="h-4 w-4 text-amber-500" />}
+                            <span className="text-xs font-bold">{results.extractedData.redFlagsVerified ? 'VERIFICADO' : 'PENDIENTE'}</span>
+                          </div>
                         </div>
                       </div>
 
                       <div className="space-y-4">
-                        <div>
-                          <h4 className="text-xs font-bold text-slate-700 flex items-center gap-2 mb-2">
-                            <BrainCircuit className="h-4 w-4 text-primary" />
-                            Descripción Estandarizada por IA
+                        <div className="bg-primary/5 p-4 rounded-xl border border-primary/10">
+                          <h4 className="text-xs font-black uppercase text-primary mb-3 flex items-center gap-2">
+                            <BrainCircuit className="h-4 w-4" /> Descripción Estandarizada Walmart
                           </h4>
-                          <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg text-sm text-slate-700 italic leading-relaxed">
+                          <p className="text-sm text-slate-700 leading-relaxed italic">
                             {results.extractedData.standardizedDescription}
-                          </div>
+                          </p>
                         </div>
 
-                        <div>
-                          <h4 className="text-xs font-bold text-slate-700 flex items-center gap-2 mb-2">
-                            <AlertTriangle className="h-4 w-4 text-amber-500" />
-                            Análisis de Calidad (QC)
-                          </h4>
-                          <div className="space-y-2">
-                            {results.extractedData.qcAnalysis.map((qc, i) => (
-                              <div key={i} className="flex items-start gap-3 p-3 bg-white border rounded-lg">
-                                <Badge variant={qc.severity === 'High' ? 'destructive' : 'secondary'} className="mt-0.5 text-[8px]">
-                                  {qc.severity}
-                                </Badge>
-                                <div className="text-xs">
-                                  <p className="font-bold text-slate-800">{qc.flag}</p>
-                                  <p className="text-muted-foreground">{qc.message}</p>
+                        <div className="grid md:grid-cols-2 gap-6">
+                          <div className="space-y-3">
+                            <h4 className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+                              <Info className="h-4 w-4" /> Detalles del Proyecto
+                            </h4>
+                            <div className="text-xs space-y-2 bg-slate-50 p-3 rounded-lg border">
+                              <p><span className="text-muted-foreground">Nombre:</span> {results.extractedData.projectName}</p>
+                              <p><span className="text-muted-foreground">Formato:</span> {results.extractedData.format}</p>
+                              <p><span className="text-muted-foreground">Etapa:</span> {results.extractedData.projectStage}</p>
+                              <p><span className="text-muted-foreground">Causa Raíz:</span> {results.extractedData.causaRaiz}</p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            <h4 className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+                              <AlertTriangle className="h-4 w-4 text-amber-500" /> Control de Calidad (QC)
+                            </h4>
+                            <div className="space-y-2">
+                              {results.extractedData.qcAnalysis.map((qc, i) => (
+                                <div key={i} className="flex items-start gap-3 p-2 bg-white border rounded-lg shadow-sm">
+                                  <Badge variant={qc.severity === 'High' ? 'destructive' : 'secondary'} className="text-[8px] h-4">
+                                    {qc.severity}
+                                  </Badge>
+                                  <div className="text-[11px]">
+                                    <p className="font-bold text-slate-800">{qc.flag}</p>
+                                    <p className="text-muted-foreground leading-tight">{qc.message}</p>
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -214,9 +240,10 @@ export default function UploadPdfPage() {
                   </Card>
                 </>
               ) : (
-                <div className="h-[400px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center text-muted-foreground">
-                  <FileText className="h-12 w-12 opacity-10 mb-4" />
-                  <p className="text-sm">Suba un PDF para comenzar el análisis inteligente</p>
+                <div className="h-[500px] border-2 border-dashed rounded-2xl flex flex-col items-center justify-center text-muted-foreground bg-white/50">
+                  <FileText className="h-16 w-16 opacity-10 mb-4" />
+                  <p className="text-sm font-medium">Cargue un PDF para ver el desglose semántico</p>
+                  <p className="text-[10px] mt-1">Soporta formatos oficiales de Desarrollo Inmobiliario</p>
                 </div>
               )}
             </div>

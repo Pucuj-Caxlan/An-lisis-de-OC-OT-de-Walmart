@@ -1,9 +1,9 @@
-
 'use server';
 /**
- * @fileOverview Extrae datos estructurados de documentos PDF de OC/OT de Walmart.
- *
- * - extractPdfData - Función que procesa el documento y retorna el esquema canónico.
+ * @fileOverview Extrae datos estructurados de documentos PDF de OC/OT de Walmart con alta precisión semántica.
+ * 
+ * Basado en el formato oficial: Det, Folio/PID, Nombre proyecto, Formato, Causa Raíz, 
+ * Impacto del Cambio, Anticorrupción (Apéndice F).
  */
 
 import {ai} from '@/ai/genkit';
@@ -16,26 +16,31 @@ export type ExtractPdfDataInput = z.infer<typeof ExtractPdfDataInputSchema>;
 
 const ExtractPdfDataOutputSchema = z.object({
   extractedData: z.object({
-    projectId: z.string().describe("PID o ID Tririga."),
-    projectName: z.string().describe("Nombre de la unidad o proyecto."),
-    orderNumber: z.string().describe("Número de folio de la OC o OT."),
-    type: z.string().describe("Tipo: OC, OT, OCR o OCI."),
-    format: z.string().describe("Formato de tienda."),
-    impactAmount: z.number().describe("Monto del impacto neto."),
-    areaSolicitante: z.string().describe("Área que solicita el cambio."),
-    causaRaiz: z.string().describe("Causa raíz declarada en el documento."),
+    projectId: z.string().describe("Folio/PID (ej. 126393-000)."),
+    det: z.string().optional().describe("Campo 'Det' del encabezado."),
+    projectName: z.string().describe("Nombre del proyecto (ej. Ex Hacienda de Torreon)."),
+    orderNumber: z.string().describe("No de Orden (ej. 4.0)."),
+    type: z.string().describe("Tipo de documento: ORDEN DE TRABAJO, ORDEN DE CAMBIO, etc."),
+    projectStage: z.string().optional().describe("Etapa del proyecto (ej. Previo a construcción)."),
+    requestDate: z.string().optional().describe("Fecha de solicitud (ej. 03/septiembre/2025)."),
+    format: z.string().describe("Formato de tienda (ej. Supercenter)."),
+    proto: z.string().optional().describe("Prototipo (ej. 90 SD)."),
+    areaSolicitante: z.string().describe("Área solicitante."),
+    causaRaiz: z.string().describe("Causa raíz declarada en el formato."),
+    executionType: z.string().optional().describe("Tipo de ejecución (Normal/Urgente)."),
+    descriptionOriginal: z.string().describe("Descripción original del campo '¿Qué se realizará?'."),
+    docsToModify: z.string().optional().describe("Planos o Documentos a Modificar."),
+    impactAmount: z.number().describe("Monto del Impacto Neto de esta solicitud."),
+    accumulatedAmount: z.number().optional().describe("Monto Acumulado total."),
+    appendixF: z.boolean().describe("¿Incluye Apéndice F?"),
+    redFlagsVerified: z.boolean().describe("¿Se verificó que no existe riesgo en Red Flags? (Checkmark en el formato)."),
     standardizedDescription: z.string().describe("Descripción siguiendo la plantilla: Qué / Por qué / Dónde / Especialidad / Documentos / Impacto / Riesgo / Referencias."),
     lineItems: z.array(z.object({
       areaEjerce: z.string(),
       areaGenera: z.string(),
       descripcion: z.string(),
       importe: z.number()
-    })).describe("Tabla de desgloses de incrementos/ahorros."),
-    redFlags: z.object({
-      hasRisks: z.boolean(),
-      riskScore: z.number().describe("Puntuación de 0 a 100."),
-      observations: z.string()
-    }),
+    })).describe("Tabla de desgloses de la sección ÁREAS INCLUIDAS EN LA ORDEN."),
     qcAnalysis: z.array(z.object({
       flag: z.string(),
       severity: z.enum(['High', 'Med', 'Low']),
@@ -46,25 +51,36 @@ const ExtractPdfDataOutputSchema = z.object({
 });
 export type ExtractPdfDataOutput = z.infer<typeof ExtractPdfDataOutputSchema>;
 
-export async function extractPdfData(input: ExtractPdfDataInput): Promise<ExtractPdfDataOutput> {
-  return extractPdfDataFlow(input);
-}
-
 const extractPdfPrompt = ai.definePrompt({
   name: 'extractPdfPrompt',
   input: {schema: ExtractPdfDataInputSchema},
   output: {schema: ExtractPdfDataOutputSchema},
-  prompt: `Eres un experto en auditoría de documentos OC/OT de Walmart. 
-  Analiza el siguiente PDF y extrae todos los campos requeridos.
+  prompt: `Eres un experto en auditoría técnica de Walmart (Desarrollo Inmobiliario). 
+  Analiza el PDF adjunto que corresponde a un formato de ORDEN DE TRABAJO o CAMBIO.
   
-  Instrucciones Especiales:
-  1. Genera una "Descripción Estandarizada" con esta estructura: 
-     Qué se hará / Por qué (causa) / Dónde aplica / Especialidad impactada / Documentos a modificar / Impacto (costo-tiempo) / Riesgo si no se ejecuta / Referencias.
-  2. Identifica Red Flags de anticorrupción (Mejoras municipales, donativos, falta de Apéndice F).
-  3. Realiza un Control de Calidad (QC): detecta si la descripción es vaga, si el monto total no coincide con el desglose, o si faltan firmas.
+  EXTRACCIÓN DE DATOS:
+  - Localiza el Folio/PID, el Det y el No de Orden en la parte superior.
+  - En 'IMPACTO DEL CAMBIO', extrae el 'Impacto Neto' y el 'Monto Acumulado'.
+  - En 'ANTICORRUPCIÓN', verifica si el Apéndice F tiene marcado 'SÍ' o 'NO'.
+  - Verifica si el recuadro de 'Red Flags' tiene la marca de verificación (X o check).
+  - Extrae la descripción literal de '¿Qué se realizará?' y 'Planos o Documentos a Modificar'.
 
-  PDF Document: {{media url=pdfDataUri}}`,
+  NORMALIZACIÓN:
+  - Genera una 'Descripción Estandarizada' estructurada: 
+    [QUÉ]: ... / [POR QUÉ]: ... / [DÓNDE]: ... / [IMPACTO]: ... / [RIESGO]: ...
+  
+  CONTROL DE CALIDAD (QC):
+  - Marca severidad 'High' si el PID no es legible.
+  - Marca severidad 'Med' si la descripción no justifica claramente la Causa Raíz.
+  - Marca severidad 'High' si se detectan Red Flags sin el Apéndice F correspondiente.
+
+  Documento PDF: {{media url=pdfDataUri}}`,
 });
+
+export async function extractPdfData(input: ExtractPdfDataInput): Promise<ExtractPdfDataOutput> {
+  const {output} = await extractPdfDataFlow(input);
+  return output!;
+}
 
 const extractPdfDataFlow = ai.defineFlow(
   {
