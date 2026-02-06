@@ -251,54 +251,61 @@ export default function TrendsPage() {
     if (!reportRef.current) return;
     setIsExporting(true);
     
-    toast({ title: "Preparando Reporte", description: "Generando visuales corporativos multi-página de alta resolución..." });
+    toast({ title: "Preparando Reporte", description: "Generando informe ejecutivo de alta resolución..." });
 
     try {
-      // Esperar a que Recharts termine de renderizar y animar
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Delay to ensure charts and content are fully rendered without animations
+      await new Promise(resolve => setTimeout(resolve, 2500));
 
       const element = reportRef.current;
+      
+      // Force a consistent width for capture to ensure layout stability
+      const originalWidth = element.style.width;
+      element.style.width = '1200px';
+
       const canvas = await html2canvas(element, { 
         scale: 2,
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
-        width: element.scrollWidth,
-        height: element.scrollHeight,
-        windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight,
-        scrollY: 0,
-        x: 0,
-        y: 0
+        width: element.offsetWidth,
+        height: element.offsetHeight,
+        onclone: (clonedDoc) => {
+          // Additional cleanup on cloned element if needed
+          const clonedElement = clonedDoc.querySelector('[data-report-container]') as HTMLElement;
+          if (clonedElement) {
+            clonedElement.style.boxShadow = 'none';
+            clonedElement.style.borderRadius = '0';
+          }
+        }
       });
+
+      // Restore original width
+      element.style.width = originalWidth;
 
       const imgData = canvas.toDataURL('image/png', 1.0);
-      const pdf = new jsPDF({
-        orientation: 'p',
-        unit: 'mm',
-        format: 'a4',
-        compress: true
-      });
-
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
       
       const imgWidth = canvas.width;
       const imgHeight = canvas.height;
       
-      const ratio = pdfWidth / imgWidth;
-      const finalImgHeight = imgHeight * ratio;
+      // Scaling factor to fit image width to PDF width
+      const ratio = pdfWidth / (imgWidth / 2); // Divide by 2 because scale was 2
+      const finalImgHeight = (imgHeight / 2) * ratio;
 
       let heightLeft = finalImgHeight;
       let position = 0;
 
-      // Primera página
+      // Add the first page
       pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, finalImgHeight);
       heightLeft -= pdfHeight;
 
-      // Bucle para páginas adicionales con desplazamiento correcto de imagen
+      // Add additional pages if content overflows
       while (heightLeft > 0) {
-        position -= pdfHeight; // Desplazamos la imagen hacia arriba por cada página
+        position -= pdfHeight;
         pdf.addPage();
         pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, finalImgHeight);
         heightLeft -= pdfHeight;
@@ -306,10 +313,10 @@ export default function TrendsPage() {
 
       pdf.save(`Walmart_Audit_Forensic_${selectedYears.join('_')}.pdf`);
       
-      toast({ title: "Reporte Corporativo Generado", description: "El informe ejecutivo está listo para su distribución." });
+      toast({ title: "Reporte Corporativo Generado", description: "El informe está listo para su distribución." });
     } catch (error) {
       console.error("PDF Export Error:", error);
-      toast({ variant: "destructive", title: "Error al exportar", description: "No se pudo generar el reporte PDF completo. Verifique los datos." });
+      toast({ variant: "destructive", title: "Error al exportar", description: "No se pudo generar el PDF completo." });
     } finally {
       setIsExporting(false);
     }
@@ -374,7 +381,11 @@ export default function TrendsPage() {
 
         <main className="p-6 md:p-8 space-y-6">
           <div className="max-w-[1200px] mx-auto">
-            <div ref={reportRef} className="space-y-8 bg-white p-10 rounded-3xl border shadow-xl overflow-hidden min-h-[1000px]">
+            <div 
+              ref={reportRef} 
+              data-report-container 
+              className="space-y-8 bg-white p-10 rounded-3xl border shadow-xl overflow-hidden min-h-screen"
+            >
               {/* Encabezado Corporativo */}
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6 mb-2">
                  <div className="space-y-2">
@@ -406,8 +417,8 @@ export default function TrendsPage() {
                  </div>
               </div>
 
-              {aiInsight && (
-                <div className="space-y-8 animate-in fade-in slide-in-from-top-4 duration-700">
+              {aiInsight ? (
+                <div className="space-y-8">
                   {/* Executive Summary */}
                   <section className="grid lg:grid-cols-3 gap-8">
                     <Card className="lg:col-span-2 border-none bg-slate-50/50 shadow-none">
@@ -490,6 +501,11 @@ export default function TrendsPage() {
                         ))}
                      </div>
                   </section>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-4">
+                  <BrainCircuit className="h-12 w-12 opacity-20" />
+                  <p className="text-sm font-medium">Inicie el análisis de IA para generar el Action Plan ejecutivo.</p>
                 </div>
               )}
 
