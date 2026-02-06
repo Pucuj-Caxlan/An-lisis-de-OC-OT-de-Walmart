@@ -44,7 +44,6 @@ import { Separator } from '@/components/ui/separator';
 
 const YEARS = [2022, 2023, 2024, 2025, 2026];
 const COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00B8D4', '#FFD600', '#AA00FF', '#37474F', '#9E9E9E'];
-const FORMATS = ['Bodega Aurrera', 'Walmart Supercenter', 'Sams Club', 'Bodega Aurrera Express'];
 
 export default function VpDashboard() {
   const db = useFirestore();
@@ -55,7 +54,6 @@ export default function VpDashboard() {
     type: 'all',
     format: 'all',
     country: 'all',
-    cause: 'all',
     projectName: ''
   });
 
@@ -70,15 +68,41 @@ export default function VpDashboard() {
 
   const { data: rawOrders, isLoading } = useCollection(ordersQuery);
 
-  // Helper robusto para extraer la fecha y el año de cualquier fuente
+  // Helper para normalizar el tipo de orden (PDF a Dashboard)
+  const normalizeOrderType = (type: string = ""): string => {
+    const t = type.toUpperCase();
+    if (t.includes('TRABAJO') || t === 'OT') return 'OT';
+    if (t.includes('CAMBIO') || t === 'OCR') return 'OCR';
+    if (t.includes('INFO') || t === 'OCI') return 'OCI';
+    return t;
+  };
+
+  // Helper para normalizar el formato
+  const normalizeFormat = (format: string = ""): string => {
+    const f = format.toLowerCase();
+    if (f.includes('sams')) return 'Sams Club';
+    if (f.includes('supercenter')) return 'Walmart Supercenter';
+    if (f.includes('express')) return 'Bodega Aurrera Express';
+    if (f.includes('aurrera')) return 'Bodega Aurrera';
+    return format;
+  };
+
+  // Helper robusto para extraer el año, manejando fechas en español del OCR
   const getOrderYear = (o: any): number | null => {
-    // Intentamos múltiples campos de fecha
     const dateStr = o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate || o.processedAt;
     if (!dateStr) return null;
+    
     try {
+      // Caso 1: Fecha ya es un objeto Date o ISO string estándar
       const date = new Date(dateStr);
-      const year = date.getFullYear();
-      return isNaN(year) ? null : year;
+      if (!isNaN(date.getFullYear())) return date.getFullYear();
+
+      // Caso 2: Fecha con formato español (ej: "03 / septiembre / 2025")
+      const lowerDate = String(dateStr).toLowerCase();
+      const yearMatch = lowerDate.match(/\b(202[2-6])\b/);
+      if (yearMatch) return parseInt(yearMatch[1]);
+
+      return null;
     } catch {
       return null;
     }
@@ -116,18 +140,22 @@ export default function VpDashboard() {
     return rawOrders.filter(o => {
       const orderYear = getOrderYear(o);
       
-      // Filtro de Año (Soporta 'all' para registros sin año o todos los años)
+      // Filtro de Año
       const yearMatch = selectedYear === 'all' || orderYear === selectedYear;
       
-      // Normalizamos campos para comparación de filtros
-      const orderType = o.type || o.header?.type || "";
-      const orderFormat = o.format || o.projectInfo?.format || "Otros";
+      // Normalización para filtros ejecutivos
+      const rawType = o.type || o.header?.type || "";
+      const normalizedType = normalizeOrderType(rawType);
+      
+      const rawFormat = o.format || o.projectInfo?.format || "Otros";
+      const normalizedFormat = normalizeFormat(rawFormat);
+
       const orderCountry = o.country || "México";
       const orderPid = String(o.projectId || o.projectInfo?.projectId || "").toLowerCase();
       const orderName = String(o.projectName || o.projectInfo?.projectName || "").toLowerCase();
 
-      const typeMatch = filters.type === 'all' || orderType.includes(filters.type);
-      const formatMatch = filters.format === 'all' || orderFormat === filters.format;
+      const typeMatch = filters.type === 'all' || normalizedType === filters.type;
+      const formatMatch = filters.format === 'all' || normalizedFormat === filters.format;
       const countryMatch = filters.country === 'all' || orderCountry === filters.country;
       const projectMatch = !filters.projectName || 
         orderName.includes(filters.projectName.toLowerCase()) ||
@@ -147,23 +175,25 @@ export default function VpDashboard() {
       acc[gen] = (acc[gen] || 0) + impact;
       return acc;
     }, {});
-    const generatorData = Object.entries(byGenerator).map(([name, value]) => ({ name, value }));
+    const generatorData = Object.entries(byGenerator)
+      .map(([name, value]) => ({ name, value: value as number }))
+      .sort((a, b) => b.value - a.value);
 
     const byFormat = filteredData.reduce((acc: any, curr) => {
-      const fmt = curr.format || curr.projectInfo?.format || 'Otros';
+      const rawFmt = curr.format || curr.projectInfo?.format || 'Otros';
+      const fmt = normalizeFormat(rawFmt);
       const impact = curr.impactoNeto || curr.financialImpact?.netImpact || 0;
       acc[fmt] = (acc[fmt] || 0) + impact;
       return acc;
     }, {});
-    const formatData = Object.entries(byFormat).map(([name, value]) => ({ name, value }));
+    const formatData = Object.entries(byFormat).map(([name, value]) => ({ name, value: value as number }));
 
     const byCause = filteredData.reduce((acc: any, curr) => {
       const cause = curr.semanticAnalysis?.causaRaizReal || curr.causaRaiz || curr.projectInfo?.rootCauseDeclared || 'No Identificada';
       const impact = curr.impactoNeto || curr.financialImpact?.netImpact || 0;
-      if (!acc[cause]) acc[cause] = { name: cause, count: 0, impact: 0, processed: 0 };
+      if (!acc[cause]) acc[cause] = { name: cause, count: 0, impact: 0 };
       acc[cause].count += 1;
       acc[cause].impact += impact;
-      if (curr.semanticAnalysis) acc[cause].processed += 1;
       return acc;
     }, {});
     const causeTable = Object.values(byCause).sort((a: any, b: any) => b.impact - a.impact);
@@ -172,7 +202,7 @@ export default function VpDashboard() {
   }, [filteredData]);
 
   const formatCurrency = (val: number) => {
-    if (!mounted) return "$0.00";
+    if (!mounted) return "$0";
     return new Intl.NumberFormat('es-MX', { 
       style: 'currency', 
       currency: 'MXN', 
