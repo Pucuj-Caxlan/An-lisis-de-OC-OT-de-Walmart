@@ -6,10 +6,6 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    function isOwner(userId) {
-      return request.auth.uid == userId;
-    }
-
     match /orders/{orderId} {
       allow get, list: if isSignedIn();
       allow create: if isSignedIn();
@@ -31,11 +27,14 @@ service cloud.firestore {
     }
 
     match /chatSessions/{sessionId} {
-      allow list: if isSignedIn() && query.limit <= 100 && (resource == null || resource.data.userId == request.auth.uid);
+      // Para listar, validamos que los documentos pertenezcan al usuario autenticado
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      // Acceso individual por ID
       allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      // Creación validando el userId en los datos entrantes
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      // Actualización y borrado validando propiedad
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
   }
 }
