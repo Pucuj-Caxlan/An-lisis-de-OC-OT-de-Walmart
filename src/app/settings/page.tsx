@@ -34,7 +34,7 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useUser, useDoc } from '@/firebase';
 import { doc } from 'firebase/firestore';
-import { updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
+import { setDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 
@@ -50,7 +50,7 @@ export default function SettingsPage() {
   }, []);
 
   const userSettingsRef = user ? doc(db!, 'users', user.uid) : null;
-  const { data: profile, isLoading } = useDoc(userSettingsRef);
+  const { data: profile } = useDoc(userSettingsRef);
 
   const [formData, setFormData] = useState({
     displayName: '',
@@ -71,13 +71,18 @@ export default function SettingsPage() {
         theme: profile.preferences?.theme || 'light',
         iaSensitivity: profile.preferences?.iaSensitivity || 75
       });
+    } else if (user) {
+      setFormData(prev => ({
+        ...prev,
+        displayName: user.displayName || '',
+      }));
     }
   }, [profile, user]);
 
   const handleSave = () => {
     if (!userSettingsRef) return;
 
-    updateDocumentNonBlocking(userSettingsRef, {
+    setDocumentNonBlocking(userSettingsRef, {
       displayName: formData.displayName,
       role: formData.role,
       preferences: {
@@ -89,7 +94,7 @@ export default function SettingsPage() {
         }
       },
       lastUpdated: new Date().toISOString()
-    });
+    }, { merge: true });
 
     toast({
       title: "Configuración Guardada",
