@@ -42,6 +42,7 @@ import { analyzeStrategicTrends, TrendAnalysisOutput } from '@/ai/flows/trend-an
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
@@ -76,8 +77,24 @@ export default function TrendsPage() {
   const getOrderYear = (o: any): number | null => {
     const dateStr = getOrderDate(o);
     if (!dateStr) return null;
-    const date = new Date(dateStr);
-    return isNaN(date.getFullYear()) ? null : date.getFullYear();
+    try {
+      let cleanedDateStr = String(dateStr).toLowerCase();
+      const monthsEs: Record<string, string> = {
+        'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04', 'mayo': '05', 'junio': '06',
+        'julio': '07', 'agosto': '08', 'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12'
+      };
+      Object.entries(monthsEs).forEach(([name, num]) => {
+        cleanedDateStr = cleanedDateStr.replace(name, num);
+      });
+      cleanedDateStr = cleanedDateStr.replace(/\s/g, '');
+
+      const date = new Date(cleanedDateStr);
+      if (!isNaN(date.getFullYear())) return date.getFullYear();
+      
+      const yearMatch = String(dateStr).match(/\b(202[2-6])\b/);
+      if (yearMatch) return parseInt(yearMatch[1]);
+      return null;
+    } catch { return null; }
   };
 
   const availableYears = useMemo(() => {
@@ -107,10 +124,11 @@ export default function TrendsPage() {
     selectedYears.forEach(year => {
       let cumulativeSum = 0;
       orders.forEach(o => {
-        const dateStr = getOrderDate(o);
-        if (!dateStr) return;
-        const date = new Date(dateStr);
-        if (date.getFullYear() === year) {
+        const yr = getOrderYear(o);
+        if (yr === year) {
+          const dateStr = getOrderDate(o);
+          if (!dateStr) return;
+          const date = new Date(dateStr);
           const monthIdx = date.getMonth();
           if (monthIdx >= 0 && monthIdx < 12) {
             const impactValue = o.impactoNeto || o.financialImpact?.netImpact || 0;
@@ -146,7 +164,6 @@ export default function TrendsPage() {
         count: d[`count_${year}`] || 0
       }));
 
-      // Accel for this year
       let yearTotalGrowth = 0;
       let yearGrowthCounts = 0;
       for (let i = 1; i < yearMonthlyData.length; i++) {
@@ -158,15 +175,12 @@ export default function TrendsPage() {
       }
       totalAccel += yearGrowthCounts > 0 ? (yearTotalGrowth / yearGrowthCounts) * 100 : 0;
 
-      // Avg Orders for this year
       const yearTotalOrders = yearMonthlyData.reduce((acc, curr) => acc + curr.count, 0);
       totalAvgOrdersPerMonth += yearTotalOrders / 12;
 
-      // Dev for this year
       const yearAnnualTotal = yearMonthlyData.reduce((acc, curr) => acc + curr.impact, 0);
       totalDev += simulatedBudget > 0 ? ((yearAnnualTotal - simulatedBudget) / simulatedBudget) * 100 : 0;
 
-      // Aggregate for Peak Month
       yearMonthlyData.forEach((d, i) => {
         aggregatedMonthlyImpacts[i] += d.impact;
       });
