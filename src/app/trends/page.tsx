@@ -43,7 +43,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import html2canvas from 'html2canvas';
-import jsPDF from 'jsPDF';
+import { jsPDF } from 'jspdf';
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const YEAR_COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00B8D4', '#AA00FF'];
@@ -552,4 +552,3 @@ export default function TrendsPage() {
     </div>
   );
 }
-
