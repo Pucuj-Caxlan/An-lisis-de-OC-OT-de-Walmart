@@ -43,7 +43,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import jsPDF from 'jsPDF';
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const YEAR_COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00B8D4', '#AA00FF'];
@@ -134,36 +134,52 @@ export default function TrendsPage() {
       return { acceleration: '0', averageOrders: '0', peakMonth: 'N/A', deviation: '0' };
     }
 
-    const primaryYear = selectedYears[0];
-    const primaryData = trendData.map(d => ({
-      month: d.month,
-      impact: d[`impact_${primaryYear}`] || 0,
-      count: d[`count_${primaryYear}`] || 0
-    }));
-
-    let totalGrowth = 0;
-    let growthCounts = 0;
-    for (let i = 1; i < primaryData.length; i++) {
-      if (primaryData[i-1].impact > 0) {
-        const growth = (primaryData[i].impact - primaryData[i-1].impact) / primaryData[i-1].impact;
-        totalGrowth += growth;
-        growthCounts++;
-      }
-    }
-    const acceleration = growthCounts > 0 ? (totalGrowth / growthCounts) * 100 : 0;
-    const totalOrders = primaryData.reduce((acc, curr) => acc + curr.count, 0);
-    const averageOrders = totalOrders / 12;
-    const peak = primaryData.reduce((prev, curr) => (prev.impact > curr.impact) ? prev : curr, primaryData[0]);
-    const annualTotal = primaryData.reduce((acc, curr) => acc + curr.impact, 0);
+    let totalAccel = 0;
+    let totalAvgOrdersPerMonth = 0;
+    let totalDev = 0;
     const simulatedBudget = 150000000;
-    const deviation = simulatedBudget > 0 ? ((annualTotal - simulatedBudget) / simulatedBudget) * 100 : 0;
+    const aggregatedMonthlyImpacts = MONTH_NAMES.map(() => 0);
+
+    selectedYears.forEach(year => {
+      const yearMonthlyData = trendData.map(d => ({
+        impact: d[`impact_${year}`] || 0,
+        count: d[`count_${year}`] || 0
+      }));
+
+      // Accel for this year
+      let yearTotalGrowth = 0;
+      let yearGrowthCounts = 0;
+      for (let i = 1; i < yearMonthlyData.length; i++) {
+        if (yearMonthlyData[i-1].impact > 0) {
+          const growth = (yearMonthlyData[i].impact - yearMonthlyData[i-1].impact) / yearMonthlyData[i-1].impact;
+          yearTotalGrowth += growth;
+          yearGrowthCounts++;
+        }
+      }
+      totalAccel += yearGrowthCounts > 0 ? (yearTotalGrowth / yearGrowthCounts) * 100 : 0;
+
+      // Avg Orders for this year
+      const yearTotalOrders = yearMonthlyData.reduce((acc, curr) => acc + curr.count, 0);
+      totalAvgOrdersPerMonth += yearTotalOrders / 12;
+
+      // Dev for this year
+      const yearAnnualTotal = yearMonthlyData.reduce((acc, curr) => acc + curr.impact, 0);
+      totalDev += simulatedBudget > 0 ? ((yearAnnualTotal - simulatedBudget) / simulatedBudget) * 100 : 0;
+
+      // Aggregate for Peak Month
+      yearMonthlyData.forEach((d, i) => {
+        aggregatedMonthlyImpacts[i] += d.impact;
+      });
+    });
+
+    const numYears = selectedYears.length;
+    const avgPeakIdx = aggregatedMonthlyImpacts.indexOf(Math.max(...aggregatedMonthlyImpacts));
 
     return { 
-      acceleration: acceleration.toFixed(1), 
-      averageOrders: averageOrders.toFixed(1), 
-      peakMonth: peak.impact > 0 ? peak.month : 'N/A', 
-      deviation: deviation.toFixed(1),
-      primaryYear
+      acceleration: (totalAccel / numYears).toFixed(1), 
+      averageOrders: (totalAvgOrdersPerMonth / numYears).toFixed(1), 
+      peakMonth: aggregatedMonthlyImpacts[avgPeakIdx] > 0 ? MONTH_NAMES[avgPeakIdx] : 'N/A', 
+      deviation: (totalDev / numYears).toFixed(1)
     };
   }, [trendData, selectedYears]);
 
@@ -209,7 +225,7 @@ export default function TrendsPage() {
         rootCauseSummary
       });
       setAiInsight(result);
-      toast({ title: "Análisis Estratégico Completo", description: `Planes de acción generados para el año ${primaryYear}.` });
+      toast({ title: "Análisis Estratégico Completo", description: `Planes de acción generados para el periodo seleccionado.` });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Fallo en IA", description: error.message });
     } finally {
@@ -318,7 +334,7 @@ export default function TrendsPage() {
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg flex items-center gap-2 text-primary font-headline">
                       <Zap className="h-5 w-5 text-accent" />
-                      Hojas de Ruta de Mejora Continua ({kpis.primaryYear})
+                      Hojas de Ruta de Mejora Continua
                     </CardTitle>
                     <Badge variant={aiInsight.sentiment === 'Crítico' ? 'destructive' : 'default'} className="uppercase font-bold tracking-tight">
                       Sentimiento: {aiInsight.sentiment}
@@ -468,7 +484,9 @@ export default function TrendsPage() {
                         <TrendingUp className="h-6 w-6 text-emerald-600" />
                       </div>
                       <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Aceleración ({kpis.primaryYear})</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          {selectedYears.length > 1 ? 'Aceleración Promedio' : 'Tasa Aceleración'}
+                        </p>
                         <h3 className="text-xl font-headline font-bold text-slate-800">
                           {Number(kpis.acceleration) > 0 ? '+' : ''}{kpis.acceleration}%
                         </h3>
@@ -483,7 +501,9 @@ export default function TrendsPage() {
                         <LayoutList className="h-6 w-6 text-amber-600" />
                       </div>
                       <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Promedio OC/Mes</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          {selectedYears.length > 1 ? 'Promedio OC/Mes (Multi)' : 'Promedio OC/Mes'}
+                        </p>
                         <h3 className="text-xl font-headline font-bold text-slate-800">
                           {kpis.averageOrders}
                         </h3>
@@ -498,7 +518,9 @@ export default function TrendsPage() {
                         <Target className="h-6 w-6 text-primary" />
                       </div>
                       <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pico de Gasto</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          {selectedYears.length > 1 ? 'Pico Consolidado' : 'Pico de Gasto'}
+                        </p>
                         <h3 className="text-xl font-headline font-bold text-slate-800 uppercase">
                           {kpis.peakMonth}
                         </h3>
@@ -513,7 +535,9 @@ export default function TrendsPage() {
                         <AlertCircle className="h-6 w-6 text-rose-600" />
                       </div>
                       <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Desviación Ppto</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          {selectedYears.length > 1 ? 'Desviación Promedio' : 'Desviación Ppto'}
+                        </p>
                         <h3 className="text-xl font-headline font-bold text-slate-800">
                           {Number(kpis.deviation) > 0 ? '+' : ''}{kpis.deviation}%
                         </h3>
@@ -528,3 +552,4 @@ export default function TrendsPage() {
     </div>
   );
 }
+
