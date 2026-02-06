@@ -12,7 +12,8 @@ import {
   HelpCircle,
   BarChart3,
   Search,
-  FileText
+  FileText,
+  BrainCircuit
 } from "lucide-react"
 
 import {
@@ -111,9 +112,16 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton tooltip="Búsqueda Inteligente">
-                <Search className="h-5 w-5" />
-                <span className="font-medium">IA Asistente</span>
+              <SidebarMenuButton 
+                asChild 
+                isActive={pathname === '/chat'}
+                tooltip="IA Asistente"
+                className={`hover:bg-primary/10 transition-colors duration-200 ${pathname === '/chat' ? 'text-primary bg-primary/5' : ''}`}
+              >
+                <Link href="/chat">
+                  <BrainCircuit className={`h-5 w-5 ${pathname === '/chat' ? 'text-primary' : ''}`} />
+                  <span className="font-medium">IA Asistente</span>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
