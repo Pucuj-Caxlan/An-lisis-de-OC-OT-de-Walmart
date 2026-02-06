@@ -20,7 +20,8 @@ import {
   Play,
   Filter,
   FileText,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Pause
 } from 'lucide-react';
 import {
   Table,
@@ -79,7 +80,7 @@ export default function AnalysisPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), limit(250));
+    return query(collection(db, 'orders'), limit(500));
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -119,10 +120,13 @@ export default function AnalysisPage() {
         description: `Registro ${order.projectId || order.id} estructurado con éxito.`,
       });
     } catch (error: any) {
+      const isQuotaError = error.message?.includes('429') || error.message?.toLowerCase().includes('quota');
       toast({
         variant: "destructive",
-        title: "Fallo en IA",
-        description: error.message || "No se pudo completar la extracción semántica.",
+        title: isQuotaError ? "Límite de IA alcanzado" : "Fallo en IA",
+        description: isQuotaError 
+          ? "Demasiadas solicitudes en poco tiempo. Por favor, espere 1 minuto e intente de nuevo."
+          : error.message || "No se pudo completar la extracción semántica.",
       });
     } finally {
       setIsAnalyzing(null);
@@ -138,13 +142,16 @@ export default function AnalysisPage() {
 
     setIsBulkProcessing(true);
     let successCount = 0;
+    let quotaExceeded = false;
 
     toast({
-      title: "Procesando Lote",
-      description: `Iniciando análisis de ${pendingOrders.length} registros...`,
+      title: "Procesando Lote (Throttled)",
+      description: `Analizando ${pendingOrders.length} registros con pausas de seguridad...`,
     });
 
     for (const order of pendingOrders) {
+      if (!isBulkProcessing) break;
+      
       try {
         const result = await analyzeOrderSemantically({
           projectId: order.projectId || "",
@@ -163,16 +170,33 @@ export default function AnalysisPage() {
           });
           successCount++;
         }
-      } catch (e) {
-        // Continue with next row
+
+        // Artificial delay to stay under Gemini 1.5/2.5 Flash free tier rate limits (approx 15-20 RPM)
+        await new Promise(resolve => setTimeout(resolve, 3500));
+        
+      } catch (error: any) {
+        const isQuotaError = error.message?.includes('429') || error.message?.toLowerCase().includes('quota');
+        if (isQuotaError) {
+          quotaExceeded = true;
+          break; // Stop bulk processing on quota error
+        }
       }
     }
 
     setIsBulkProcessing(false);
-    toast({
-      title: "Lote Finalizado",
-      description: `${successCount} registros estructurados correctamente.`,
-    });
+    
+    if (quotaExceeded) {
+      toast({
+        variant: "destructive",
+        title: "Lote Interrumpido",
+        description: `Se procesaron ${successCount} registros, pero se alcanzó el límite de solicitudes de la IA. El resto permanecerá en cola.`,
+      });
+    } else {
+      toast({
+        title: "Lote Finalizado",
+        description: `${successCount} registros estructurados correctamente.`,
+      });
+    }
   };
 
   const handleDeleteOrder = (orderId: string) => {
@@ -277,7 +301,7 @@ export default function AnalysisPage() {
             <div className="space-y-1">
               <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Control de Procesamiento</h2>
               <p className="text-sm text-slate-500">
-                Extracción detallada y estructuración semántica de registros.
+                Extracción detallada y estructuración semántica de registros. (Límites de IA aplicados para estabilidad).
               </p>
             </div>
             <div className="flex items-center gap-4">
@@ -285,12 +309,12 @@ export default function AnalysisPage() {
                 {pendingCount} PENDIENTES
               </Badge>
               <Button 
-                onClick={handleBulkProcess} 
-                disabled={isBulkProcessing || pendingCount === 0}
-                className="bg-primary hover:bg-primary/90 gap-2 h-11 px-6 shadow-md transition-all active:scale-95"
+                onClick={isBulkProcessing ? () => setIsBulkProcessing(false) : handleBulkProcess} 
+                disabled={!isBulkProcessing && pendingCount === 0}
+                className={`${isBulkProcessing ? 'bg-amber-500 hover:bg-amber-600' : 'bg-primary hover:bg-primary/90'} gap-2 h-11 px-6 shadow-md transition-all active:scale-95`}
               >
-                {isBulkProcessing ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
-                Estructurar Cola
+                {isBulkProcessing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
+                {isBulkProcessing ? 'Detener Cola' : 'Estructurar Cola'}
               </Button>
             </div>
           </div>
