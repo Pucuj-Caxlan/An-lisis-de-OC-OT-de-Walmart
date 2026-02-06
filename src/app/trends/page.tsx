@@ -251,15 +251,13 @@ export default function TrendsPage() {
     if (!reportRef.current) return;
     setIsExporting(true);
     
-    toast({ title: "Preparando Reporte", description: "Generando visuales corporativos multi-página..." });
+    toast({ title: "Preparando Reporte", description: "Generando visuales corporativos multi-página de alta resolución..." });
 
     try {
-      // Esperar un momento extra para asegurar que los gráficos de Recharts estén renderizados y las animaciones terminen
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Esperar a que Recharts termine de renderizar y animar
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       const element = reportRef.current;
-      
-      // Capturamos con html2canvas asegurando que tomamos el scrollHeight completo
       const canvas = await html2canvas(element, { 
         scale: 2,
         useCORS: true,
@@ -288,7 +286,6 @@ export default function TrendsPage() {
       const imgWidth = canvas.width;
       const imgHeight = canvas.height;
       
-      // Calculamos el ancho y alto proporcional al PDF
       const ratio = pdfWidth / imgWidth;
       const finalImgHeight = imgHeight * ratio;
 
@@ -299,9 +296,9 @@ export default function TrendsPage() {
       pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, finalImgHeight);
       heightLeft -= pdfHeight;
 
-      // Si el reporte es más largo que una página, agregamos las siguientes
+      // Bucle para páginas adicionales con desplazamiento correcto de imagen
       while (heightLeft > 0) {
-        position = heightLeft - finalImgHeight;
+        position -= pdfHeight; // Desplazamos la imagen hacia arriba por cada página
         pdf.addPage();
         pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, finalImgHeight);
         heightLeft -= pdfHeight;
@@ -309,10 +306,10 @@ export default function TrendsPage() {
 
       pdf.save(`Walmart_Audit_Forensic_${selectedYears.join('_')}.pdf`);
       
-      toast({ title: "Reporte Corporativo Generado", description: "El entregable ejecutivo ha sido descargado completamente." });
+      toast({ title: "Reporte Corporativo Generado", description: "El informe ejecutivo está listo para su distribución." });
     } catch (error) {
       console.error("PDF Export Error:", error);
-      toast({ variant: "destructive", title: "Error al exportar", description: "No se pudo generar el reporte PDF completo." });
+      toast({ variant: "destructive", title: "Error al exportar", description: "No se pudo generar el reporte PDF completo. Verifique los datos." });
     } finally {
       setIsExporting(false);
     }
@@ -377,7 +374,7 @@ export default function TrendsPage() {
 
         <main className="p-6 md:p-8 space-y-6">
           <div className="max-w-[1200px] mx-auto">
-            <div ref={reportRef} className="space-y-8 bg-white p-10 rounded-3xl border shadow-xl overflow-hidden">
+            <div ref={reportRef} className="space-y-8 bg-white p-10 rounded-3xl border shadow-xl overflow-hidden min-h-[1000px]">
               {/* Encabezado Corporativo */}
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6 mb-2">
                  <div className="space-y-2">
