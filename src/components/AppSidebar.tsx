@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -10,7 +11,8 @@ import {
   Settings,
   HelpCircle,
   BarChart3,
-  Search
+  Search,
+  FileText
 } from "lucide-react"
 
 import {
@@ -41,9 +43,14 @@ const navigation = [
     url: "/analysis",
   },
   {
-    title: "Carga de Datos",
+    title: "Carga Excel",
     icon: UploadCloud,
     url: "/upload",
+  },
+  {
+    title: "Carga PDF",
+    icon: FileText,
+    url: "/upload-pdf",
   },
   {
     title: "Tendencias e Impacto",

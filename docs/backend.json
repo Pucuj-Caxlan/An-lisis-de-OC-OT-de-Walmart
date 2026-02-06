@@ -28,12 +28,31 @@
         "areaEjerceRecurso": { "type": "string" },
         "estatus": { "type": "string" },
         "fechaSolicitud": { "type": "string", "format": "date-time" },
-        "fechaAprobacionGerente": { "type": "string", "format": "date-time" },
-        "fechaPptoProyectista": { "type": "string", "format": "date-time" },
         "proveedor": { "type": "string" },
         "qcFlags": { "type": "array", "items": { "type": "string" } },
-        "rowNumber": { "type": "number" },
-        "sheetName": { "type": "string" }
+        "createdFromPdf": { "type": "boolean" },
+        "pdfUrl": { "type": "string" },
+        "standardizedDescription": { "type": "string" },
+        "redFlags": {
+          "type": "object",
+          "properties": {
+            "hasRisks": { "type": "boolean" },
+            "riskScore": { "type": "number" },
+            "observations": { "type": "string" }
+          }
+        },
+        "lineItems": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "areaEjerce": { "type": "string" },
+              "areaGenera": { "type": "string" },
+              "descripcion": { "type": "string" },
+              "importe": { "type": "number" }
+            }
+          }
+        }
       }
     },
     "ImportBatch": {
@@ -52,18 +71,6 @@
             "errorCount": { "type": "number" },
             "totalImpact": { "type": "number" }
           }
-        },
-        "errors": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "row": { "type": "number" },
-              "sheet": { "type": "string" },
-              "field": { "type": "string" },
-              "error": { "type": "string" }
-            }
-          }
         }
       }
     }
@@ -72,9 +79,7 @@
     "providers": ["password", "anonymous"]
   },
   "firestore": {
-    "structure": [
-      { "path": "/orders/{orderId}", "definition": { "entityName": "Order", "schema": { "$ref": "#/backend/entities/Order" } } },
-      { "path": "/importBatches/{importBatchId}", "definition": { "entityName": "ImportBatch", "schema": { "$ref": "#/backend/entities/ImportBatch" } } }
-    ]
+    "/orders/{orderId}": { "schema": "Order", "description": "Normalized records of OC/OT from Excel or PDF" },
+    "/importBatches/{importBatchId}": { "schema": "ImportBatch", "description": "Tracking for batch ingestions" }
   }
 }
