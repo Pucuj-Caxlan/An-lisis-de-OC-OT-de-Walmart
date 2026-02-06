@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview Motor de Detección de Anomalías e Inteligencia Forense.
@@ -20,7 +21,16 @@ const AnomalySchema = z.object({
 });
 
 const AnomalyDetectionInputSchema = z.object({
-  orders: z.array(z.any()).describe("Lote de órdenes a analizar"),
+  orders: z.array(z.object({
+    id: z.string(),
+    projectId: z.string(),
+    impactoNeto: z.number(),
+    causaRaiz: z.string(),
+    isSigned: z.boolean(),
+    appendixF: z.boolean(),
+    descripcion: z.string(),
+    semanticAnalysis: z.any().nullable()
+  })).describe("Lote de órdenes normalizadas para analizar"),
 });
 export type AnomalyDetectionInput = z.infer<typeof AnomalyDetectionInputSchema>;
 
@@ -35,23 +45,26 @@ const anomalyPrompt = ai.definePrompt({
   name: 'anomalyPrompt',
   input: {schema: AnomalyDetectionInputSchema},
   output: {schema: AnomalyDetectionOutputSchema},
-  prompt: `Eres un Auditor Forense Senior de Walmart especializado en Desarrollo Inmobiliario. 
-  Tu misión es encontrar "Red Flags" en este lote de órdenes de cambio (OC/OT).
+  prompt: `Eres un Auditor Forense Senior de Walmart especializado en Desarrollo Inmobiliario y Control de Cambios. 
+  Tu misión es encontrar "Red Flags" y discrepancias críticas en este lote de órdenes de cambio (OC/OT).
 
-  DATOS PARA ANALIZAR:
+  DATOS PARA ANALIZAR (NORMALIZADOS):
   {{#each orders}}
-  - ID: {{{id}}} | PID: {{{projectId}}} | Monto: \${{{impactoNeto}}} | Causa: {{{causaRaiz}}} | Firmado: {{{isSigned}}} | Apéndice F: {{{antiCorruption.appendixF}}}
+  - ID: {{{id}}} | PID: {{{projectId}}} | Monto: \${{{impactoNeto}}} | Causa Declarada: {{{causaRaiz}}} | Firmado: {{#if isSigned}} SÍ {{else}} NO {{/if}} | Apéndice F: {{#if appendixF}} SÍ {{else}} NO {{/if}}
     Descripción: {{{descripcion}}}
-    IA Concepto: {{{semanticAnalysis.conceptoNormalizado}}} | IA Causa Real: {{{semanticAnalysis.causaRaizReal}}}
+    IA Concepto Previo: {{{semanticAnalysis.conceptoNormalizado}}} | IA Causa Real Previa: {{{semanticAnalysis.causaRaizReal}}}
   {{/each}}
 
-  CRITERIOS DE DETECCIÓN:
-  1. DISCREPANCIA SEMÁNTICA: Si la 'Causa Real' inferida por IA difiere drásticamente de la 'Causa Declarada' (ej. Error de diseño vs Autoridad).
-  2. RIESGO DE CUMPLIMIENTO: Órdenes de >$1M sin firmas o sin Apéndice F cuando la causa involucra autoridades.
-  3. FRAGMENTACIÓN: Múltiples órdenes para el mismo PID en fechas cercanas que parecen dividir un costo mayor.
-  4. ANOMALÍA FINANCIERA: Montos inusualmente altos para conceptos simples (ej. $500k por un trámite administrativo).
+  CRITERIOS DE AUDITORÍA FORENSE:
+  1. DISCREPANCIA SEMÁNTICA CRÍTICA: La descripción revela un error de diseño o coordinación (ej. "ajuste por omisión de planos") pero se declara como "Regulatorio" o "Autoridad" para evitar penalizaciones.
+  2. RIESGO DE COMPLIANCE FINANCIERO: Órdenes con montos > $1M (MXN) que NO están firmadas o carecen de Apéndice F cuando la descripción menciona trámites o autoridades.
+  3. FRAGMENTACIÓN DE COSTOS (SPLITTING): Identifica si un mismo PID tiene múltiples órdenes en fechas cercanas que sumadas exceden límites de autorización.
+  4. ANOMALÍA OPERACIONAL: Montos desproporcionados para la descripción técnica provista (ej. $500k por "limpieza de terreno" en una unidad pequeña).
 
-  Genera un reporte técnico con hallazgos precisos.`,
+  INSTRUCCIONES DE SALIDA:
+  - Sé específico en el hallazgo (no genérico).
+  - El Health Score debe bajar drásticamente si hay discrepancias semánticas o falta de firmas en montos altos.
+  - El resumen debe ser de nivel ejecutivo (VP).`,
 });
 
 export async function detectAnomalies(input: AnomalyDetectionInput): Promise<AnomalyDetectionOutput> {
