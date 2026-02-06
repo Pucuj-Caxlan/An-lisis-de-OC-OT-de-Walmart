@@ -5,38 +5,37 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+    
     function isOwner(userId) {
       return request.auth.uid == userId;
-    }
-    function matchesPathId(idFromPath) {
-      return request.resource.data.id == idFromPath;
     }
 
     match /orders/{orderId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && matchesPathId(orderId);
+      allow create: if isSignedIn();
       allow update: if isSignedIn();
       allow delete: if isSignedIn();
     }
 
     match /audits/{auditId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && matchesPathId(auditId);
+      allow create: if isSignedIn();
       allow delete: if isSignedIn();
     }
 
     match /importBatches/{batchId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && matchesPathId(batchId);
+      allow create: if isSignedIn();
       allow update: if isSignedIn();
       allow delete: if isSignedIn();
     }
 
     match /chatSessions/{sessionId} {
-      allow get, list: if isSignedIn() && isOwner(resource.data.userId);
-      allow create: if isSignedIn() && isOwner(request.resource.data.userId);
-      allow update: if isSignedIn() && isOwner(resource.data.userId);
-      allow delete: if isSignedIn() && isOwner(resource.data.userId);
+      allow list: if isSignedIn() && query.limit <= 100 && (resource == null || resource.data.userId == request.auth.uid);
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
   }
 }

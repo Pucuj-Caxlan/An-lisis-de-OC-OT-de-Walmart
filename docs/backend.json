@@ -43,7 +43,8 @@
             "preventiveChecks": { "type": "array", "items": { "type": "string" } }
           }
         }
-      }
+      },
+      "required": ["projectId", "impactoNeto"]
     },
     "AuditReport": {
       "title": "Audit Report",
@@ -70,7 +71,8 @@
             }
           }
         }
-      }
+      },
+      "required": ["id", "timestamp", "globalHealthScore"]
     },
     "ImportBatch": {
       "title": "Import Batch",
@@ -111,7 +113,8 @@
             }
           }
         }
-      }
+      },
+      "required": ["userId", "createdAt"]
     }
   },
   "auth": {
