@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
@@ -25,8 +26,6 @@ import {
 import {
   AreaChart,
   Area,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -251,23 +250,51 @@ export default function TrendsPage() {
   const handleDownloadPdf = async () => {
     if (!reportRef.current) return;
     setIsExporting(true);
+    
+    toast({ title: "Preparando Reporte", description: "Generando visuales corporativos..." });
+
     try {
-      const canvas = await html2canvas(reportRef.current, { 
+      // Esperar un momento para asegurar que los gráficos de Recharts estén renderizados
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      const element = reportRef.current;
+      const canvas = await html2canvas(element, { 
         scale: 2,
         useCORS: true,
         logging: false,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        width: element.scrollWidth,
+        height: element.scrollHeight,
+        windowWidth: element.scrollWidth,
+        windowHeight: element.scrollHeight
       });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgProps = pdf.getImageProperties(imgData);
+
+      const imgData = canvas.toDataURL('image/png', 1.0);
+      const pdf = new jsPDF({
+        orientation: 'p',
+        unit: 'mm',
+        format: 'a4',
+        compress: true
+      });
+
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
       
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Walmart_Auditoria_Forense_${selectedYears.join('_')}.pdf`);
+      const finalImgWidth = imgWidth * ratio;
+      const finalImgHeight = imgHeight * ratio;
+
+      // Centrar el reporte en la página PDF
+      const xOffset = (pdfWidth - finalImgWidth) / 2;
+      
+      pdf.addImage(imgData, 'PNG', xOffset, 0, finalImgWidth, finalImgHeight);
+      pdf.save(`Walmart_Audit_Forensic_${selectedYears.join('_')}.pdf`);
+      
       toast({ title: "Reporte Corporativo Generado", description: "El entregable ejecutivo ha sido descargado." });
     } catch (error) {
+      console.error("PDF Export Error:", error);
       toast({ variant: "destructive", title: "Error al exportar", description: "No se pudo generar el reporte PDF." });
     } finally {
       setIsExporting(false);
@@ -332,216 +359,219 @@ export default function TrendsPage() {
         </header>
 
         <main className="p-6 md:p-8 space-y-6">
-          <div ref={reportRef} className="space-y-8 bg-white p-10 rounded-3xl border shadow-xl max-w-[1200px] mx-auto overflow-hidden">
-            {/* Encabezado Corporativo (Solo PDF/Reporte) */}
-            <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6 mb-2">
-               <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-slate-900 p-2 rounded-lg">
-                      <Building2 className="text-white h-6 w-6" />
-                    </div>
-                    <div>
-                      <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Walmart International</h2>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Real Estate & Construction Development • Forensic Audit</p>
-                    </div>
-                  </div>
-                  <h3 className="text-4xl font-headline font-bold text-slate-800 pt-4">Informe Estratégico de Control de Cambios</h3>
-                  <div className="flex items-center gap-6 pt-2">
-                    <div className="flex items-center gap-2 text-slate-500">
-                      <CalendarDays className="h-4 w-4" />
-                      <span className="text-xs font-bold uppercase">Periodo: {selectedYears.sort().join(' - ')}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-slate-500">
-                      <ShieldCheck className="h-4 w-4" />
-                      <span className="text-xs font-bold uppercase">Estado: Auditado por WAI (Gemini 2.5)</span>
-                    </div>
-                  </div>
-               </div>
-               <div className="text-right space-y-1">
-                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Confidencialidad</p>
-                 <Badge variant="destructive" className="uppercase text-[9px] font-bold tracking-tight">Privado - Uso Interno</Badge>
-                 <p className="text-[10px] text-slate-400 font-medium pt-4">Generado: {new Date().toLocaleDateString('es-MX')}</p>
-               </div>
-            </div>
-
-            {aiInsight && (
-              <div className="space-y-8 animate-in fade-in slide-in-from-top-4 duration-700">
-                {/* Executive Summary */}
-                <section className="grid lg:grid-cols-3 gap-8">
-                  <Card className="lg:col-span-2 border-none bg-slate-50/50 shadow-none">
-                    <CardHeader className="pb-2">
-                      <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">01. Resumen Ejecutivo Transversal</h4>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <p className="text-lg font-medium text-slate-800 leading-relaxed border-l-4 border-primary pl-6 py-2 italic">
-                        "{aiInsight.narrative}"
-                      </p>
-                      <div className="grid md:grid-cols-2 gap-4 mt-6">
-                        <div className="space-y-2">
-                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                            <Target className="h-3 w-3 text-primary" /> Drivers de Costo Identificados
-                          </p>
-                          <ul className="space-y-1">
-                            {aiInsight.keyDrivers.map((d, i) => (
-                              <li key={i} className="text-xs text-slate-600 flex gap-2 font-medium">
-                                <span className="text-primary">•</span> {d}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                            <TrendingUp className="h-3 w-3 text-emerald-500" /> Proyecciones Estratégicas
-                          </p>
-                          <p className="text-[11px] text-slate-600 leading-relaxed">{aiInsight.projections}</p>
-                        </div>
+          <div className="max-w-[1200px] mx-auto">
+            <div ref={reportRef} className="space-y-8 bg-white p-10 rounded-3xl border shadow-xl overflow-hidden">
+              {/* Encabezado Corporativo */}
+              <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6 mb-2">
+                 <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-slate-900 p-2 rounded-lg">
+                        <Building2 className="text-white h-6 w-6" />
                       </div>
-                    </CardContent>
-                  </Card>
+                      <div>
+                        <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Walmart International</h2>
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Real Estate & Construction Development • Forensic Audit</p>
+                      </div>
+                    </div>
+                    <h3 className="text-4xl font-headline font-bold text-slate-800 pt-4">Informe Estratégico de Control de Cambios</h3>
+                    <div className="flex items-center gap-6 pt-2">
+                      <div className="flex items-center gap-2 text-slate-500">
+                        <CalendarDays className="h-4 w-4" />
+                        <span className="text-xs font-bold uppercase">Periodo: {selectedYears.sort().join(' - ')}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-500">
+                        <ShieldCheck className="h-4 w-4" />
+                        <span className="text-xs font-bold uppercase">Estado: Auditado por WAI (Gemini 2.5)</span>
+                      </div>
+                    </div>
+                 </div>
+                 <div className="text-right space-y-1">
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Confidencialidad</p>
+                   <Badge variant="destructive" className="uppercase text-[9px] font-bold tracking-tight">Privado - Uso Interno</Badge>
+                   <p className="text-[10px] text-slate-400 font-medium pt-4">Generado: {new Date().toLocaleDateString('es-MX')}</p>
+                 </div>
+              </div>
 
-                  <div className="space-y-6">
-                    <Card className="bg-slate-900 text-white border-none shadow-xl">
-                      <CardContent className="pt-6">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Sentiment de Gestión</p>
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-4xl font-headline font-bold">{aiInsight.sentiment}</h3>
-                          <Zap className={`h-10 w-10 ${aiInsight.sentiment === 'Optimista' ? 'text-emerald-400' : aiInsight.sentiment === 'Estable' ? 'text-amber-400' : 'text-rose-400'}`} />
-                        </div>
-                        <Separator className="bg-white/10 my-4" />
-                        <div className="space-y-2">
-                          {aiInsight.recommendations.slice(0, 3).map((r, i) => (
-                            <div key={i} className="flex gap-2 text-[10px] opacity-80 italic">
-                              <ArrowRight className="h-3 w-3 shrink-0" /> {r}
-                            </div>
-                          ))}
+              {aiInsight && (
+                <div className="space-y-8 animate-in fade-in slide-in-from-top-4 duration-700">
+                  {/* Executive Summary */}
+                  <section className="grid lg:grid-cols-3 gap-8">
+                    <Card className="lg:col-span-2 border-none bg-slate-50/50 shadow-none">
+                      <CardHeader className="pb-2">
+                        <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">01. Resumen Ejecutivo Transversal</h4>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <p className="text-lg font-medium text-slate-800 leading-relaxed border-l-4 border-primary pl-6 py-2 italic">
+                          "{aiInsight.narrative}"
+                        </p>
+                        <div className="grid md:grid-cols-2 gap-4 mt-6">
+                          <div className="space-y-2">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                              <Target className="h-3 w-3 text-primary" /> Drivers de Costo Identificados
+                            </p>
+                            <ul className="space-y-1">
+                              {aiInsight.keyDrivers.map((d, i) => (
+                                <li key={i} className="text-xs text-slate-600 flex gap-2 font-medium">
+                                  <span className="text-primary">•</span> {d}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div className="space-y-2">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                              <TrendingUp className="h-3 w-3 text-emerald-500" /> Proyecciones Estratégicas
+                            </p>
+                            <p className="text-[11px] text-slate-600 leading-relaxed">{aiInsight.projections}</p>
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
-                  </div>
-                </section>
 
-                {/* Intelligent Action Plan */}
-                <section className="space-y-4">
-                   <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-4">02. Hoja de Ruta para Mejora Continua</h4>
-                   <div className="grid md:grid-cols-3 gap-4">
-                      {aiInsight.actionPlan.map((plan, i) => (
-                        <div key={i} className="bg-white border-2 border-slate-100 p-6 rounded-2xl shadow-sm hover:border-primary/20 transition-all group">
-                          <div className="flex items-start justify-between mb-4">
-                            <h5 className="text-sm font-black text-slate-900 uppercase leading-tight group-hover:text-primary transition-colors">{plan.title}</h5>
-                            <Target className="h-5 w-5 text-primary opacity-20" />
+                    <div className="space-y-6">
+                      <Card className="bg-slate-900 text-white border-none shadow-xl">
+                        <CardContent className="pt-6">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Sentiment de Gestión</p>
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-4xl font-headline font-bold">{aiInsight.sentiment}</h3>
+                            <Zap className={`h-10 w-10 ${aiInsight.sentiment === 'Optimista' ? 'text-emerald-400' : aiInsight.sentiment === 'Estable' ? 'text-amber-400' : 'text-rose-400'}`} />
                           </div>
-                          <ul className="space-y-3 mb-6">
-                            {plan.steps.map((step, si) => (
-                              <li key={si} className="text-[11px] text-slate-600 flex gap-3 leading-relaxed">
-                                <span className="h-4 w-4 bg-slate-100 text-slate-900 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0">{si + 1}</span>
-                                {step}
-                              </li>
+                          <Separator className="bg-white/10 my-4" />
+                          <div className="space-y-2">
+                            {aiInsight.recommendations.slice(0, 3).map((r, i) => (
+                              <div key={i} className="flex gap-2 text-[10px] opacity-80 italic">
+                                <ArrowRight className="h-3 w-3 shrink-0" /> {r}
+                              </div>
                             ))}
-                          </ul>
-                          <div className="pt-4 border-t border-dashed border-slate-100 flex items-center justify-between">
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Impacto Estimado</span>
-                            <Badge variant="outline" className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border-emerald-100">
-                              {plan.expectedImpact}
-                            </Badge>
                           </div>
-                        </div>
-                      ))}
-                   </div>
-                </section>
-              </div>
-            )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </section>
 
-            {/* Charts Section */}
-            <section className="space-y-6 pt-6">
-              <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">03. Visualización Analítica de Datos</h4>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <Card className="lg:col-span-2 border-none shadow-none bg-white">
-                  <CardHeader className="px-0">
-                    <CardTitle className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
-                      <Layers className="h-4 w-4 text-primary" /> Impacto Mensual Comparativo (Agregado)
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="h-[350px] px-0 pt-4">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={trendData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis 
-                          dataKey="month" 
-                          axisLine={false} 
-                          tickLine={false} 
-                          tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }} 
-                        />
-                        <YAxis 
-                          axisLine={false} 
-                          tickLine={false} 
-                          tick={{ fontSize: 10, fill: '#64748b' }} 
-                          tickFormatter={(v) => `$${Math.round(v/1000)}k`}
-                        />
-                        <Tooltip 
-                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
-                          formatter={(value) => formatCurrency(value as number)}
-                        />
-                        <Legend verticalAlign="top" align="right" height={36} iconType="circle" />
-                        {selectedYears.map((yr, i) => (
-                          <Area 
-                            key={yr}
-                            type="monotone" 
-                            dataKey={`impact_${yr}`} 
-                            name={`${yr}`}
-                            stroke={YEAR_COLORS[i % YEAR_COLORS.length]} 
-                            fill={YEAR_COLORS[i % YEAR_COLORS.length]}
-                            fillOpacity={0.05}
-                            strokeWidth={3}
-                            activeDot={{ r: 6 }}
-                          />
+                  {/* Intelligent Action Plan */}
+                  <section className="space-y-4">
+                     <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-4">02. Hoja de Ruta para Mejora Continua</h4>
+                     <div className="grid md:grid-cols-3 gap-4">
+                        {aiInsight.actionPlan.map((plan, i) => (
+                          <div key={i} className="bg-white border-2 border-slate-100 p-6 rounded-2xl shadow-sm hover:border-primary/20 transition-all group">
+                            <div className="flex items-start justify-between mb-4">
+                              <h5 className="text-sm font-black text-slate-900 uppercase leading-tight group-hover:text-primary transition-colors">{plan.title}</h5>
+                              <Target className="h-5 w-5 text-primary opacity-20" />
+                            </div>
+                            <ul className="space-y-3 mb-6">
+                              {plan.steps.map((step, si) => (
+                                <li key={si} className="text-[11px] text-slate-600 flex gap-3 leading-relaxed">
+                                  <span className="h-4 w-4 bg-slate-100 text-slate-900 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0">{si + 1}</span>
+                                  {step}
+                                </li>
+                              ))}
+                            </ul>
+                            <div className="pt-4 border-t border-dashed border-slate-100 flex items-center justify-between">
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Impacto Estimado</span>
+                              <Badge variant="outline" className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border-emerald-100">
+                                {plan.expectedImpact}
+                              </Badge>
+                            </div>
+                          </div>
                         ))}
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                <div className="grid grid-cols-1 gap-4 h-fit">
-                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Total Auditado</p>
-                      <h3 className="text-2xl font-headline font-bold text-slate-900">{formatCurrency(trendData.reduce((acc, curr) => {
-                        let sum = 0;
-                        selectedYears.forEach(y => sum += curr[`impact_${y}`] || 0);
-                        return acc + sum;
-                      }, 0))}</h3>
-                      <div className="flex items-center gap-2 mt-2">
-                        <TrendingUp className="h-3 w-3 text-emerald-500" />
-                        <span className="text-[10px] font-bold text-slate-500 uppercase">Tendencia {kpis.acceleration}%</span>
-                      </div>
-                   </div>
-                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Promedio de Órdenes / Mes</p>
-                      <h3 className="text-2xl font-headline font-bold text-slate-900">{kpis.averageOrders} OC</h3>
-                      <div className="flex items-center gap-2 mt-2">
-                        <LayoutList className="h-3 w-3 text-primary" />
-                        <span className="text-[10px] font-bold text-slate-500 uppercase">Muestra Multi-anual</span>
-                      </div>
-                   </div>
-                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Pico de Gasto Detectado</p>
-                      <h3 className="text-2xl font-headline font-bold text-rose-600 uppercase">{kpis.peakMonth}</h3>
-                      <div className="flex items-center gap-2 mt-2">
-                        <AlertCircle className="h-3 w-3 text-rose-500" />
-                        <span className="text-[10px] font-bold text-slate-500 uppercase">Riesgo Estacional</span>
-                      </div>
-                   </div>
+                     </div>
+                  </section>
                 </div>
-              </div>
-            </section>
+              )}
 
-            {/* Footer Corporativo */}
-            <div className="pt-12 mt-12 border-t border-slate-100 flex items-center justify-between opacity-50">
-               <div className="flex items-center gap-3">
-                  <div className="h-6 w-6 bg-slate-900 rounded flex items-center justify-center">
-                    <BarChart3 className="text-white h-3 w-3" />
+              {/* Charts Section */}
+              <section className="space-y-6 pt-6">
+                <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">03. Visualización Analítica de Datos</h4>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <Card className="lg:col-span-2 border-none shadow-none bg-white min-h-[400px]">
+                    <CardHeader className="px-0">
+                      <CardTitle className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                        <Layers className="h-4 w-4 text-primary" /> Impacto Mensual Comparativo (Agregado)
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-[350px] px-0 pt-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={trendData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="month" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }} 
+                          />
+                          <YAxis 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 10, fill: '#64748b' }} 
+                            tickFormatter={(v) => `$${Math.round(v/1000)}k`}
+                          />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
+                            formatter={(value) => formatCurrency(value as number)}
+                          />
+                          <Legend verticalAlign="top" align="right" height={36} iconType="circle" />
+                          {selectedYears.map((yr, i) => (
+                            <Area 
+                              key={yr}
+                              type="monotone" 
+                              dataKey={`impact_${yr}`} 
+                              name={`${yr}`}
+                              stroke={YEAR_COLORS[i % YEAR_COLORS.length]} 
+                              fill={YEAR_COLORS[i % YEAR_COLORS.length]}
+                              fillOpacity={0.05}
+                              strokeWidth={3}
+                              activeDot={{ r: 6 }}
+                              isAnimationActive={false} // Desactivar para captura de PDF más fiable
+                            />
+                          ))}
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  <div className="grid grid-cols-1 gap-4 h-fit">
+                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Total Auditado</p>
+                        <h3 className="text-2xl font-headline font-bold text-slate-900">{formatCurrency(trendData.reduce((acc, curr) => {
+                          let sum = 0;
+                          selectedYears.forEach(y => sum += curr[`impact_${y}`] || 0);
+                          return acc + sum;
+                        }, 0))}</h3>
+                        <div className="flex items-center gap-2 mt-2">
+                          <TrendingUp className="h-3 w-3 text-emerald-500" />
+                          <span className="text-[10px] font-bold text-slate-500 uppercase">Tendencia {kpis.acceleration}%</span>
+                        </div>
+                     </div>
+                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Promedio de Órdenes / Mes</p>
+                        <h3 className="text-2xl font-headline font-bold text-slate-900">{kpis.averageOrders} OC</h3>
+                        <div className="flex items-center gap-2 mt-2">
+                          <LayoutList className="h-3 w-3 text-primary" />
+                          <span className="text-[10px] font-bold text-slate-500 uppercase">Muestra Multi-anual</span>
+                        </div>
+                     </div>
+                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Pico de Gasto Detectado</p>
+                        <h3 className="text-2xl font-headline font-bold text-rose-600 uppercase">{kpis.peakMonth}</h3>
+                        <div className="flex items-center gap-2 mt-2">
+                          <AlertCircle className="h-3 w-3 text-rose-500" />
+                          <span className="text-[10px] font-bold text-slate-500 uppercase">Riesgo Estacional</span>
+                        </div>
+                     </div>
                   </div>
-                  <span className="text-[8px] font-black text-slate-900 uppercase tracking-widest">WAI Forensic Intelligence Platform</span>
-               </div>
-               <p className="text-[8px] text-slate-400 font-bold uppercase">Página 01 / 01 • Folio Interno: {selectedYears.join('-')}-{Date.now().toString().slice(-6)}</p>
+                </div>
+              </section>
+
+              {/* Footer Corporativo */}
+              <div className="pt-12 mt-12 border-t border-slate-100 flex items-center justify-between opacity-50">
+                 <div className="flex items-center gap-3">
+                    <div className="h-6 w-6 bg-slate-900 rounded flex items-center justify-center">
+                      <BarChart3 className="text-white h-3 w-3" />
+                    </div>
+                    <span className="text-[8px] font-black text-slate-900 uppercase tracking-widest">WAI Forensic Intelligence Platform</span>
+                 </div>
+                 <p className="text-[8px] text-slate-400 font-bold uppercase">Página 01 / 01 • Folio Interno: {selectedYears.join('-')}-{Date.now().toString().slice(-6)}</p>
+              </div>
             </div>
           </div>
         </main>
