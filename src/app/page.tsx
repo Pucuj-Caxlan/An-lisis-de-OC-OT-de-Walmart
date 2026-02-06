@@ -68,41 +68,65 @@ export default function VpDashboard() {
 
   const { data: rawOrders, isLoading } = useCollection(ordersQuery);
 
+  // Conteo de registros por año para el selector
+  const countsByYear = useMemo(() => {
+    const counts: Record<number, number> = {};
+    YEARS.forEach(y => counts[y] = 0);
+    if (!rawOrders) return counts;
+    rawOrders.forEach(o => {
+      const dateStr = o.fechaSolicitud || o.requestDate;
+      if (dateStr) {
+        const year = new Date(dateStr).getFullYear();
+        if (counts[year] !== undefined) {
+          counts[year]++;
+        }
+      }
+    });
+    return counts;
+  }, [rawOrders]);
+
   const filteredData = useMemo(() => {
     if (!rawOrders) return [];
     return rawOrders.filter(o => {
-      const yearMatch = o.fechaSolicitud ? new Date(o.fechaSolicitud).getFullYear() === selectedYear : true;
-      const typeMatch = filters.type === 'all' || o.type === filters.type;
-      const formatMatch = filters.format === 'all' || o.format === filters.format;
+      const dateStr = o.fechaSolicitud || o.requestDate;
+      const orderYear = dateStr ? new Date(dateStr).getFullYear() : null;
+      const yearMatch = orderYear === selectedYear;
+      
+      const typeMatch = filters.type === 'all' || o.type === filters.type || (o.header?.type && o.header.type.includes(filters.type));
+      const formatMatch = filters.format === 'all' || o.format === filters.format || o.projectInfo?.format === filters.format;
       const countryMatch = filters.country === 'all' || o.country === filters.country;
-      const projectMatch = !filters.projectName || o.projectName?.toLowerCase().includes(filters.projectName.toLowerCase());
+      const projectMatch = !filters.projectName || 
+        o.projectName?.toLowerCase().includes(filters.projectName.toLowerCase()) ||
+        o.projectId?.toLowerCase().includes(filters.projectName.toLowerCase()) ||
+        o.projectInfo?.projectName?.toLowerCase().includes(filters.projectName.toLowerCase());
+      
       return yearMatch && typeMatch && formatMatch && countryMatch && projectMatch;
     });
   }, [rawOrders, selectedYear, filters]);
 
   const metrics = useMemo(() => {
-    const totalImpact = filteredData.reduce((acc, curr) => acc + (curr.impactoNeto || 0), 0);
+    const totalImpact = filteredData.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0);
     const count = filteredData.length;
     
     const byGenerator = filteredData.reduce((acc: any, curr) => {
-      const gen = curr.generadorDesviacion || 'Sin asignar';
-      acc[gen] = (acc[gen] || 0) + (curr.impactoNeto || 0);
+      const gen = curr.generadorDesviacion || curr.projectInfo?.requestingArea || 'Sin asignar';
+      acc[gen] = (acc[gen] || 0) + (curr.impactoNeto || curr.financialImpact?.netImpact || 0);
       return acc;
     }, {});
     const generatorData = Object.entries(byGenerator).map(([name, value]) => ({ name, value }));
 
     const byFormat = filteredData.reduce((acc: any, curr) => {
-      const fmt = curr.format || 'Otros';
-      acc[fmt] = (acc[fmt] || 0) + (curr.impactoNeto || 0);
+      const fmt = curr.format || curr.projectInfo?.format || 'Otros';
+      acc[fmt] = (acc[fmt] || 0) + (curr.impactoNeto || curr.financialImpact?.netImpact || 0);
       return acc;
     }, {});
     const formatData = Object.entries(byFormat).map(([name, value]) => ({ name, value }));
 
     const byCause = filteredData.reduce((acc: any, curr) => {
-      const cause = curr.causaRaiz || 'N/A';
+      const cause = curr.causaRaiz || curr.projectInfo?.rootCauseDeclared || 'N/A';
       if (!acc[cause]) acc[cause] = { name: cause, count: 0, impact: 0 };
       acc[cause].count += 1;
-      acc[cause].impact += (curr.impactoNeto || 0);
+      acc[cause].impact += (curr.impactoNeto || curr.financialImpact?.netImpact || 0);
       return acc;
     }, {});
     const causeTable = Object.values(byCause).sort((a: any, b: any) => b.impact - a.impact);
@@ -123,11 +147,13 @@ export default function VpDashboard() {
     });
 
     rawOrders.forEach(o => {
-      if (!o.fechaSolicitud || !o.format) return;
-      const year = new Date(o.fechaSolicitud).getFullYear();
-      const fmt = o.format;
+      const dateStr = o.fechaSolicitud || o.requestDate;
+      const fmt = o.format || o.projectInfo?.format;
+      if (!dateStr || !fmt) return;
+      
+      const year = new Date(dateStr).getFullYear();
       if (stats[fmt] && stats[fmt][year]) {
-        stats[fmt][year].projects.add(o.projectId);
+        stats[fmt][year].projects.add(o.projectId || o.projectInfo?.projectId);
         stats[fmt][year].orders += 1;
       }
     });
@@ -192,14 +218,17 @@ export default function VpDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex bg-slate-100 p-1 rounded-lg border">
+            <div className="flex bg-slate-100 p-1 rounded-lg border gap-1">
               {YEARS.map(y => (
                 <button
                   key={y}
                   onClick={() => setSelectedYear(y)}
-                  className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${selectedYear === y ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                  className={`flex flex-col items-center justify-center min-w-[60px] px-2 py-1 rounded-md transition-all ${selectedYear === y ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                 >
-                  {y}
+                  <span className="text-xs font-bold">{y}</span>
+                  <span className="text-[9px] font-medium opacity-80">
+                    {countsByYear[y]} reg
+                  </span>
                 </button>
               ))}
             </div>
