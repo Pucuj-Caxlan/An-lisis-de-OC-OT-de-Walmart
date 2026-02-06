@@ -1,9 +1,9 @@
 'use server';
 /**
- * @fileOverview Extractor de datos de alta precisión para documentos PDF de OC/OT de Walmart.
+ * @fileOverview Extractor de datos de ultra-precisión para formatos oficiales de OC/OT de Walmart.
  * 
- * Captura campos clave, montos financieros, fechas de solicitud, validaciones de cumplimiento 
- * y desgloses de partidas con una semántica orientada a la auditoría técnica.
+ * Captura la anatomía completa del documento: Información General, Descripción, 
+ * Áreas a cargo, Anticorrupción, Impacto Financiero y Firmas de Autorización.
  */
 
 import {ai} from '@/ai/genkit';
@@ -16,34 +16,66 @@ export type ExtractPdfDataInput = z.infer<typeof ExtractPdfDataInputSchema>;
 
 const ExtractPdfDataOutputSchema = z.object({
   extractedData: z.object({
-    projectId: z.string().describe("Folio o PID del proyecto (ej. 126393-000)."),
-    orderNumber: z.string().describe("Número de Orden de Cambio o Trabajo."),
-    projectName: z.string().describe("Nombre oficial del proyecto."),
-    type: z.string().describe("Tipo de documento (OC, OT, OCI, OCR)."),
-    format: z.string().describe("Formato de tienda (Supercenter, Sam's, etc.)."),
-    causaRaiz: z.string().describe("Causa raíz declarada literalmente en el formato."),
-    areaSolicitante: z.string().describe("Área que solicita el cambio."),
-    fechaSolicitud: z.string().optional().describe("Fecha de solicitud encontrada en el documento."),
-    descripcionOriginal: z.string().describe("Texto íntegro de la sección '¿Qué se realizará?'."),
-    docsToModify: z.string().optional().describe("Planos o documentos mencionados para modificación."),
-    impactAmount: z.number().describe("Monto del impacto neto de esta solicitud."),
-    accumulatedAmount: z.number().optional().describe("Monto acumulado total hasta la fecha."),
-    appendixF: z.boolean().describe("Indica si el Apéndice F está marcado como SÍ."),
-    redFlagsVerified: z.boolean().describe("Indica si la sección de Red Flags tiene marca de verificación."),
-    standardizedDescription: z.string().describe("Descripción estructurada: QUÉ / POR QUÉ / DÓNDE / IMPACTO / RIESGO."),
-    lineItems: z.array(z.object({
-      areaEjerce: z.string(),
-      areaGenera: z.string(),
-      descripcion: z.string(),
-      importe: z.number()
-    })).describe("Desglose detallado de la tabla de incrementos/ahorros."),
-    qcAnalysis: z.array(z.object({
-      flag: z.string(),
-      severity: z.enum(['High', 'Med', 'Low']),
-      message: z.string()
-    })).describe("Hallazgos de auditoría y control de calidad sobre el documento.")
+    envelopeId: z.string().optional().describe("ID de sobre de DocuSign si está presente."),
+    header: z.object({
+      type: z.string().describe("Tipo de Orden (Trabajo/Cambio/Informativa/Rediseño)."),
+      orderNumber: z.string().describe("No. de Orden."),
+      issuingArea: z.string().describe("Área emisora."),
+      projectStage: z.string().describe("Etapa del proyecto (ej. En construcción)."),
+      requestDate: z.string().describe("Fecha de solicitud.")
+    }),
+    projectInfo: z.object({
+      det: z.string().describe("Detalle (Det)."),
+      projectId: z.string().describe("Folio/PID del proyecto."),
+      projectName: z.string().describe("Nombre del proyecto."),
+      unitName: z.string().optional().describe("Nombre de la unidad."),
+      format: z.string().describe("Formato (ej. Sams Club)."),
+      proto: z.string().describe("Prototipo (Proto)."),
+      requestingArea: z.string().describe("Área solicitante."),
+      rootCauseDeclared: z.string().describe("Causa Raíz declarada en el formato."),
+      executionType: z.string().describe("Tipo de ejecución (Normal/Urgente).")
+    }),
+    orderClassification: z.object({
+      isOriginal: z.boolean(),
+      isComplementary: z.boolean(),
+      originalOrderRef: z.string().optional().describe("No. de la orden original referenciada.")
+    }),
+    descriptionSection: z.object({
+      description: z.string().describe("Texto íntegro de '¿Qué se realizará?'."),
+      modifications: z.string().optional().describe("Planos o Documentos a Modificar.")
+    }),
+    associates: z.array(z.object({
+      area: z.string(),
+      name: z.string(),
+      timestamp: z.string().optional(),
+      hasSignature: z.boolean().describe("Detección visual de firma o sello digital.")
+    })).describe("Sección ÁREAS INCLUIDAS EN LA ORDEN / ASOCIADO A CARGO."),
+    antiCorruption: z.object({
+      appendixF: z.boolean().describe("Incluye Apéndice F (SÍ/NO)."),
+      isDonation: z.boolean().optional(),
+      isVoluntary: z.boolean().optional(),
+      isImprovement: z.boolean().optional(),
+      redFlagsChecked: z.boolean().describe("Detección visual del check en el recuadro de Red Flags.")
+    }),
+    financialImpact: z.object({
+      netImpact: z.number().describe("Monto del Impacto Neto de esta solicitud."),
+      accumulatedAmount: z.number().describe("Monto Acumulado total informado."),
+      originalImpactAmount: z.number().optional(),
+      complementaryImpacts: z.array(z.number()).optional(),
+      deliveryDateBefore: z.string().optional().describe("Fecha G.O. / Entrega antes del cambio."),
+      impactDaysDesign: z.string().optional(),
+      impactDaysExecution: z.string().optional()
+    }),
+    authorizations: z.array(z.object({
+      cargo: z.string(),
+      area: z.string(),
+      name: z.string(),
+      authDate: z.string().optional(),
+      hasSignature: z.boolean().describe("Detección visual de firma en la sección de límites de autorización.")
+    })),
+    isSigned: z.boolean().describe("Flag general que indica si el documento tiene firmas visibles.")
   }),
-  confidence: z.number().describe("Nivel de confianza de la extracción (0.0 a 1.0).")
+  confidence: z.number().describe("Confianza del OCR semántico (0.0 a 1.0).")
 });
 export type ExtractPdfDataOutput = z.infer<typeof ExtractPdfDataOutputSchema>;
 
@@ -51,21 +83,22 @@ const extractPdfPrompt = ai.definePrompt({
   name: 'extractPdfPrompt',
   input: {schema: ExtractPdfDataInputSchema},
   output: {schema: ExtractPdfDataOutputSchema},
-  prompt: `Eres un Auditor Senior de Desarrollo Inmobiliario en Walmart. Tu tarea es procesar el PDF adjunto con precisión quirúrgica.
+  prompt: `Eres un Auditor Senior de Desarrollo Inmobiliario en Walmart especializado en Control de Cambios. 
+Tu tarea es analizar el PDF adjunto y extraer CADA CAMPO con precisión técnica.
 
-REGLAS DE EXTRACCIÓN:
-1. IDENTIFICACIÓN: Localiza el PID (Folio) y el No. de Orden. Son vitales para el match.
-2. FINANZAS: Extrae el 'Impacto Neto' y el 'Monto Acumulado'. Si el acumulado es menor al neto, genera un hallazgo de QC.
-3. COMPLIANCE: Verifica visualmente si el Apéndice F y las Red Flags tienen marcas (X, Check).
-4. DESGLOSE: Mapea cada fila de la tabla de 'Áreas incluidas en la orden' al objeto lineItems.
-5. SEMÁNTICA: Genera una 'Descripción Estandarizada' que resuma el QUÉ, POR QUÉ y el RIESGO de no ejecutarlo.
+REGLAS DE ORO:
+1. IDENTIFICACIÓN: El Folio/PID (ej. 124634-000) y el No. de Orden son obligatorios.
+2. ANTICORRUPCIÓN: Observa cuidadosamente el recuadro de 'Red Flags' al final del formato. Si tiene una 'X', un 'check' o una marca visual, marca 'redFlagsChecked' como true. Haz lo mismo para 'Apéndice F'.
+3. FIRMAS: Analiza las secciones de 'Asociado a Cargo' y 'Límites de Autorización'. Si detectas trazos de firmas manuscritas o sellos de DocuSign (como el ID de sobre en la parte superior), marca 'hasSignature' para ese registro y setea 'isSigned' en true.
+4. FINANZAS: Extrae el 'Impacto Neto' y el 'Monto Acumulado'. Si el formato indica montos de órdenes complementarias, lístalos.
+5. DESCRIPCIÓN: Captura la descripción completa. Si menciona planos específicos (ej. Plano de acometida), regístralo en 'modifications'.
 
-Documento PDF: {{media url=pdfDataUri}}`,
+DOCUMENTO: {{media url=pdfDataUri}}`,
 });
 
 export async function extractPdfData(input: ExtractPdfDataInput): Promise<ExtractPdfDataOutput> {
   const {output} = await extractPdfPrompt(input);
-  if (!output) throw new Error("La IA no pudo procesar el contenido del PDF.");
+  if (!output) throw new Error("Fallo en la extracción de datos del PDF.");
   return output;
 }
 
