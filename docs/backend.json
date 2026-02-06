@@ -1,0 +1,289 @@
+{
+  "entities": {
+    "Order": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Order",
+      "type": "object",
+      "description": "Represents a normalized order from the ingested Excel files.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the order."
+        },
+        "importBatchId": {
+          "type": "string",
+          "description": "Reference to the ImportBatch that this order belongs to. (Relationship: ImportBatch 1:N Order)"
+        },
+        "projectId": {
+          "type": "string",
+          "description": "Project identifier (PID/Tririga)."
+        },
+        "type": {
+          "type": "string",
+          "description": "Type of order (OT/OCR/OCI)."
+        },
+        "format": {
+          "type": "string",
+          "description": "Format of the order."
+        },
+        "country": {
+          "type": "string",
+          "description": "Country of the order."
+        },
+        "state": {
+          "type": "string",
+          "description": "State of the order."
+        },
+        "municipality": {
+          "type": "string",
+          "description": "Municipality of the order."
+        },
+        "plan": {
+          "type": "string",
+          "description": "Plan associated with the order."
+        },
+        "etapaProyecto": {
+          "type": "string",
+          "description": "Project stage of the order."
+        },
+        "coordinador": {
+          "type": "string",
+          "description": "Coordinator responsible for the order."
+        },
+        "causaRaizId": {
+          "type": "string",
+          "description": "Reference to the RootCause. (Relationship: RootCause 1:N Order)"
+        },
+        "descripcion": {
+          "type": "string",
+          "description": "Original description of the order."
+        },
+        "conceptoNormalizado": {
+          "type": "string",
+          "description": "Normalized concept for the order. Populated in Stage 4."
+        },
+        "montoDeductiva": {
+          "type": "number",
+          "description": "Deductible amount for the order."
+        },
+        "montoAditiva": {
+          "type": "number",
+          "description": "Additive amount for the order."
+        },
+        "impactoNeto": {
+          "type": "number",
+          "description": "Net impact of the order (aditiva - deductiva)."
+        },
+        "areaSolicitante": {
+          "type": "string",
+          "description": "Requesting area for the order."
+        },
+        "generadorDesviacion": {
+          "type": "string",
+          "description": "Generator of the deviation."
+        },
+        "areaEjerceRecurso": {
+          "type": "string",
+          "description": "Area that exercises the resource."
+        },
+        "estatus": {
+          "type": "string",
+          "description": "Status of the order (Autorizada/Cancelada/En proceso)."
+        },
+        "fechaSolicitud": {
+          "type": "string",
+          "description": "Date of the order request.",
+          "format": "date-time"
+        },
+        "fechaAprobacionGerente": {
+          "type": "string",
+          "description": "Date of manager approval.",
+          "format": "date-time"
+        },
+        "fechaPptoProyectista": {
+          "type": "string",
+          "description": "Date of project planner budget.",
+          "format": "date-time"
+        },
+        "proveedor": {
+          "type": "string",
+          "description": "Supplier for the order."
+        },
+        "qcFlags": {
+          "type": "array",
+          "description": "Quality control flags for the order.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "importBatchId",
+        "projectId",
+        "type",
+        "format",
+        "country",
+        "plan",
+        "etapaProyecto",
+        "descripcion",
+        "areaSolicitante",
+        "estatus"
+      ]
+    },
+    "Project": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Project",
+      "type": "object",
+      "description": "Represents a project.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the project."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the project."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the project."
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "ImportBatch": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ImportBatch",
+      "type": "object",
+      "description": "Represents a batch of imported data from an Excel file.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the import batch."
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Name of the imported Excel file."
+        },
+        "storageReference": {
+          "type": "string",
+          "description": "Reference to the file in cloud storage."
+        },
+        "importDate": {
+          "type": "string",
+          "description": "Date and time of the import.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "fileName",
+        "storageReference",
+        "importDate"
+      ]
+    },
+    "RootCause": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "RootCause",
+      "type": "object",
+      "description": "Represents a root cause from a catalog.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the root cause."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the root cause."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the root cause."
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/orders/{orderId}",
+        "definition": {
+          "entityName": "Order",
+          "schema": {
+            "$ref": "#/backend/entities/Order"
+          },
+          "description": "Stores normalized order data ingested from Excel files.",
+          "params": [
+            {
+              "name": "orderId",
+              "description": "Unique identifier for the order."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/projects/{projectId}",
+        "definition": {
+          "entityName": "Project",
+          "schema": {
+            "$ref": "#/backend/entities/Project"
+          },
+          "description": "Stores project metadata.",
+          "params": [
+            {
+              "name": "projectId",
+              "description": "Unique identifier for the project."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/importBatches/{importBatchId}",
+        "definition": {
+          "entityName": "ImportBatch",
+          "schema": {
+            "$ref": "#/backend/entities/ImportBatch"
+          },
+          "description": "Tracks batches of imported data from Excel files.",
+          "params": [
+            {
+              "name": "importBatchId",
+              "description": "Unique identifier for the import batch."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/rootCauses/{rootCauseId}",
+        "definition": {
+          "entityName": "RootCause",
+          "schema": {
+            "$ref": "#/backend/entities/RootCause"
+          },
+          "description": "Stores a catalog of root causes.",
+          "params": [
+            {
+              "name": "rootCauseId",
+              "description": "Unique identifier for the root cause."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The Firestore structure is designed to support the ingestion, normalization, and analysis of order data from Excel files, focusing on authorization independence, clear segregation of data, and predictable schema. It incorporates `orders`, `projects`, `importBatches`, and `rootCauses` collections. The structure emphasizes denormalization for authorization independence and segregation of data for security. Specifically, the `orders` collection holds the normalized order data, linking to `importBatches` and `rootCauses`. `projects` collection stores project metadata. `importBatches` tracks the ingested Excel files, and `rootCauses` contains a catalog of root causes. This structure ensures data integrity, facilitates efficient queries, and simplifies security rules.\n\n**Authorization Independence:** The design achieves authorization independence by avoiding hierarchical authorization dependencies (`get()`). Security rules can be written independently for each collection without needing to retrieve data from parent documents.\n\n**QAPs (Rules are not Filters):**\n*   List operations are secured by path-based access control, ensuring that users can only access data they are authorized to view.\n*   The segregation of `orders`, `projects`, `importBatches`, and `rootCauses` into separate collections allows for specific security rules tailored to each type of data, preventing unauthorized access.\n*   The structure allows secure `list` operations and avoids filtering on the client-side, aligning with the principle that \"Rules are not Filters\"."
+  }
+}

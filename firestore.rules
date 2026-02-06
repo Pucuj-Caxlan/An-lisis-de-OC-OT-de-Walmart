@@ -1,0 +1,137 @@
+/**
+ * FIRESTORE SECURITY RULES (PROTOTYPING MODE)
+ * 
+ * CORE PHILOSOPHY:
+ * This ruleset implements an internal organizational access model. While the system is in 
+ * a prototyping phase, it enforces strict authentication requirements for all data access 
+ * while maintaining flexibility regarding the specific fields stored within documents.
+ * 
+ * DATA STRUCTURE:
+ * The data is organized into four top-level collections representing the ingestion pipeline:
+ * - /orders: Normalized data from Excel imports.
+ * - /projects: Project-level metadata (PID/Tririga).
+ * - /importBatches: Tracking information for every Excel file processed.
+ * - /rootCauses: A master catalog used to classify order discrepancies.
+ * 
+ * KEY SECURITY DECISIONS:
+ * 1. Authenticated Access: Only users authenticated via Firebase Auth (including anonymous 
+ *    for initial onboarding) can interact with the database.
+ * 2. Flat Authorization: The model utilizes "Authorization Independence," meaning access 
+ *    to orders or batches does not require nested lookups (get() calls) to parent projects.
+ * 3. Relational Integrity: On creation and update, the rules enforce that the document's 
+ *    internal 'id' field remains consistent with the document path and immutable thereafter.
+ * 4. Missing Ownership Fields: Note that the current schema lacks explicit 'ownerId' or 
+ *    'creatorId' fields. Until these are added, writes are permitted for any signed-in 
+ *    user to facilitate rapid prototyping, but this should be tightened for production.
+ * 
+ * DENORMALIZATION FOR AUTHORIZATION:
+ * - Primary IDs (orderId, projectId, etc.) are expected to be present inside the document 
+ *   to allow for path-consistency checks without performing additional reads.
+ */
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- GLOBAL HELPER FUNCTIONS ---
+
+    /**
+     * @description Checks if the user is currently authenticated.
+     */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /**
+     * @description Checks if the document exists in the database.
+     * Used for update and delete operations to ensure state change is valid.
+     */
+    function exists() {
+      return resource != null;
+    }
+
+    /**
+     * @description Validates that the internal ID field matches the document path ID.
+     */
+    function matchesPathId(idFromPath) {
+      return request.resource.data.id == idFromPath;
+    }
+
+    /**
+     * @description Prevents the modification of the internal ID field during updates.
+     */
+    function isIdImmutable() {
+      return request.resource.data.id == resource.data.id;
+    }
+
+    // --- COLLECTION RULES ---
+
+    /**
+     * @description Rules for the 'orders' collection.
+     * @path /orders/{orderId}
+     * @allow (create) if authenticated and data.id matches {orderId}.
+     * @deny (create) if user is not signed in or ID mismatch.
+     * @principle Validates relational integrity between path and data.
+     */
+    match /orders/{orderId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && matchesPathId(orderId);
+      allow update: if isSignedIn() && exists() && isIdImmutable();
+      allow delete: if isSignedIn() && exists();
+
+      // CRITICAL: Cannot implement owner-only writes. The 'Order' entity is missing an 'ownerId' or 'authorId' field.
+      // TODO: Add owner validation once the schema is updated with an ownership field (e.g., request.resource.data.creatorId == request.auth.uid).
+    }
+
+    /**
+     * @description Rules for the 'projects' collection.
+     * @path /projects/{projectId}
+     * @allow (get) if authenticated.
+     * @deny (update) if the document does not already exist.
+     * @principle Ensures authenticated-only access to metadata.
+     */
+    match /projects/{projectId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && matchesPathId(projectId);
+      allow update: if isSignedIn() && exists() && isIdImmutable();
+      allow delete: if isSignedIn() && exists();
+
+      // CRITICAL: Cannot implement owner-only writes. The 'Project' entity is missing an 'ownerId' field.
+      // TODO: Restrict project creation/modification to admin roles or designated owners.
+    }
+
+    /**
+     * @description Rules for tracking Excel import batches.
+     * @path /importBatches/{importBatchId}
+     * @allow (list) if signed in.
+     * @deny (delete) if user is not signed in.
+     * @principle Provides auditability of ingestion processes.
+     */
+    match /importBatches/{importBatchId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && matchesPathId(importBatchId);
+      allow update: if isSignedIn() && exists() && isIdImmutable();
+      allow delete: if isSignedIn() && exists();
+
+      // CRITICAL: Cannot implement owner-only writes. The 'ImportBatch' entity is missing an 'ownerId' field.
+      // TODO: Ensure only the user who uploaded the file can manage this batch record.
+    }
+
+    /**
+     * @description Rules for the root causes catalog.
+     * @path /rootCauses/{rootCauseId}
+     * @allow (get) if signed in.
+     * @deny (create) if user is not signed in.
+     * @principle Standard catalog access pattern.
+     */
+    match /rootCauses/{rootCauseId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && matchesPathId(rootCauseId);
+      allow update: if isSignedIn() && exists() && isIdImmutable();
+      allow delete: if isSignedIn() && exists();
+
+      // CRITICAL: Catalog items are usually managed by admins.
+      // TODO: Restrict create/update/delete permissions to users with 'admin' custom claims.
+    }
+  }
+}
