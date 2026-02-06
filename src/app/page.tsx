@@ -587,39 +587,39 @@ export default function VpDashboard() {
         </main>
 
         <Dialog open={!!drilldownConcept} onOpenChange={(open) => !open && setDrilldownConcept(null)}>
-          <DialogContent className="max-w-5xl max-h-[85vh] flex flex-col p-0 overflow-hidden bg-white">
-            <DialogHeader className="p-6 bg-slate-50 border-b">
-              <div className="flex items-center gap-3 mb-1">
-                <div className="p-2 bg-primary/10 rounded-lg">
-                  <BrainCircuit className="h-6 w-6 text-primary" />
+          <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col p-0 overflow-hidden bg-white shadow-2xl border-none">
+            <DialogHeader className="p-6 bg-slate-50 border-b shrink-0">
+              <div className="flex items-center gap-4 mb-1">
+                <div className="p-3 bg-primary/10 rounded-2xl">
+                  <BrainCircuit className="h-7 w-7 text-primary" />
                 </div>
                 <div>
-                  <DialogTitle className="text-xl font-headline font-bold text-slate-800">
+                  <DialogTitle className="text-2xl font-headline font-bold text-slate-800 tracking-tight">
                     Detalle de Recurrencia: {drilldownConcept}
                   </DialogTitle>
-                  <DialogDescription className="text-sm">
-                    Análisis de las {drilldownOrders.length} frecuencias detectadas para este concepto.
+                  <DialogDescription className="text-sm text-slate-500 font-medium">
+                    Auditoría de las {drilldownOrders.length} frecuencias detectadas para este concepto.
                   </DialogDescription>
                 </div>
               </div>
             </DialogHeader>
             
-            <div className="flex-1 overflow-hidden">
-              <ScrollArea className="h-full">
+            <div className="flex-1 min-h-0 relative">
+              <ScrollArea className="h-full w-full">
                 <div className="p-6">
                   <Table>
-                    <TableHeader className="bg-slate-50/50">
-                      <TableRow>
-                        <TableHead className="w-[180px]">PID / Proyecto</TableHead>
-                        <TableHead>Coordinador</TableHead>
-                        <TableHead>Causa Raíz Real</TableHead>
-                        <TableHead>Descripción / Riesgo</TableHead>
-                        <TableHead className="text-right">Impacto Neto</TableHead>
+                    <TableHeader className="bg-slate-50/50 sticky top-0 z-20">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-[180px] font-black uppercase text-[10px] tracking-widest">PID / Proyecto</TableHead>
+                        <TableHead className="font-black uppercase text-[10px] tracking-widest">Coordinador</TableHead>
+                        <TableHead className="font-black uppercase text-[10px] tracking-widest">Causa Raíz Real</TableHead>
+                        <TableHead className="font-black uppercase text-[10px] tracking-widest">Descripción / Riesgo</TableHead>
+                        <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Impacto Neto</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {drilldownOrders.map((order) => (
-                        <TableRow key={order.id} className="hover:bg-slate-50 transition-colors">
+                        <TableRow key={order.id} className="hover:bg-primary/5 transition-colors group">
                           <TableCell className="font-medium">
                             <div className="flex flex-col">
                               <span className="text-primary font-bold">{order.projectId || "S/P"}</span>
@@ -638,7 +638,7 @@ export default function VpDashboard() {
                           </TableCell>
                           <TableCell>
                             <div className="max-w-[250px] space-y-1">
-                              <p className="text-[10px] leading-tight text-slate-600 line-clamp-2 italic">
+                              <p className="text-[11px] leading-relaxed text-slate-600 line-clamp-3 italic">
                                 {order.standardizedDescription || order.descripcion}
                               </p>
                               {order.semanticAnalysis?.especialidadImpactada && (
@@ -648,7 +648,7 @@ export default function VpDashboard() {
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="text-right font-bold text-slate-900">
+                          <TableCell className="text-right font-black text-slate-900 tabular-nums">
                             {formatCurrency(order.impactoNeto || order.financialImpact?.netImpact || 0)}
                           </TableCell>
                         </TableRow>
@@ -659,16 +659,16 @@ export default function VpDashboard() {
               </ScrollArea>
             </div>
 
-            <div className="p-4 bg-slate-50 border-t flex items-center justify-between">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Auditoría Semántica Consolidada</p>
-              <div className="flex items-center gap-4">
+            <div className="p-6 bg-slate-50 border-t shrink-0 flex items-center justify-between shadow-[0_-4px_10px_rgba(0,0,0,0.03)]">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Auditoría Semántica Consolidada VP</p>
+              <div className="flex items-center gap-6">
                 <div className="text-right">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase">Impacto Total Concepto</p>
-                  <p className="text-sm font-black text-primary">
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Impacto Total Concepto</p>
+                  <p className="text-xl font-black text-primary tabular-nums">
                     {formatCurrency(drilldownOrders.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0))}
                   </p>
                 </div>
-                <Button size="sm" onClick={() => setDrilldownConcept(null)}>Cerrar</Button>
+                <Button size="lg" className="h-11 px-8 shadow-md" onClick={() => setDrilldownConcept(null)}>Cerrar Detalle</Button>
               </div>
             </div>
           </DialogContent>
