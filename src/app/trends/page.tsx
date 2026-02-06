@@ -251,13 +251,15 @@ export default function TrendsPage() {
     if (!reportRef.current) return;
     setIsExporting(true);
     
-    toast({ title: "Preparando Reporte", description: "Generando visuales corporativos..." });
+    toast({ title: "Preparando Reporte", description: "Generando visuales corporativos multi-página..." });
 
     try {
-      // Esperar un momento para asegurar que los gráficos de Recharts estén renderizados
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // Esperar un momento extra para asegurar que los gráficos de Recharts estén renderizados y las animaciones terminen
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       const element = reportRef.current;
+      
+      // Capturamos con html2canvas asegurando que tomamos el scrollHeight completo
       const canvas = await html2canvas(element, { 
         scale: 2,
         useCORS: true,
@@ -266,7 +268,10 @@ export default function TrendsPage() {
         width: element.scrollWidth,
         height: element.scrollHeight,
         windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight
+        windowHeight: element.scrollHeight,
+        scrollY: 0,
+        x: 0,
+        y: 0
       });
 
       const imgData = canvas.toDataURL('image/png', 1.0);
@@ -279,23 +284,35 @@ export default function TrendsPage() {
 
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
+      
       const imgWidth = canvas.width;
       const imgHeight = canvas.height;
-      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
       
-      const finalImgWidth = imgWidth * ratio;
+      // Calculamos el ancho y alto proporcional al PDF
+      const ratio = pdfWidth / imgWidth;
       const finalImgHeight = imgHeight * ratio;
 
-      // Centrar el reporte en la página PDF
-      const xOffset = (pdfWidth - finalImgWidth) / 2;
-      
-      pdf.addImage(imgData, 'PNG', xOffset, 0, finalImgWidth, finalImgHeight);
+      let heightLeft = finalImgHeight;
+      let position = 0;
+
+      // Primera página
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, finalImgHeight);
+      heightLeft -= pdfHeight;
+
+      // Si el reporte es más largo que una página, agregamos las siguientes
+      while (heightLeft > 0) {
+        position = heightLeft - finalImgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, finalImgHeight);
+        heightLeft -= pdfHeight;
+      }
+
       pdf.save(`Walmart_Audit_Forensic_${selectedYears.join('_')}.pdf`);
       
-      toast({ title: "Reporte Corporativo Generado", description: "El entregable ejecutivo ha sido descargado." });
+      toast({ title: "Reporte Corporativo Generado", description: "El entregable ejecutivo ha sido descargado completamente." });
     } catch (error) {
       console.error("PDF Export Error:", error);
-      toast({ variant: "destructive", title: "Error al exportar", description: "No se pudo generar el reporte PDF." });
+      toast({ variant: "destructive", title: "Error al exportar", description: "No se pudo generar el reporte PDF completo." });
     } finally {
       setIsExporting(false);
     }
@@ -521,7 +538,7 @@ export default function TrendsPage() {
                               fillOpacity={0.05}
                               strokeWidth={3}
                               activeDot={{ r: 6 }}
-                              isAnimationActive={false} // Desactivar para captura de PDF más fiable
+                              isAnimationActive={false}
                             />
                           ))}
                         </AreaChart>
