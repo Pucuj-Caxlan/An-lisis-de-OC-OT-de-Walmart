@@ -20,7 +20,8 @@ import {
   ListOrdered,
   Layers,
   Search,
-  X
+  X,
+  ArrowRight
 } from 'lucide-react';
 import {
   PieChart,
@@ -50,6 +51,22 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 const YEARS = [2022, 2023, 2024, 2025, 2026];
 const COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00B8D4', '#FFD600', '#AA00FF', '#37474F', '#9E9E9E'];
@@ -60,6 +77,7 @@ export default function VpDashboard() {
   const [selectedYear, setSelectedYear] = useState<number | 'all'>(currentYear);
   const [comparisonYear, setComparisonYear] = useState<number>(2024);
   const [mounted, setMounted] = useState(false);
+  const [drilldownConcept, setDrilldownConcept] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     type: 'all',
     format: 'all',
@@ -83,7 +101,6 @@ export default function VpDashboard() {
     const dateStr = o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate || o.processedAt;
     if (!dateStr) return null;
     try {
-      // Intento de parseo de fechas en español (OCR)
       let cleanedDateStr = String(dateStr).toLowerCase();
       const monthsEs: Record<string, string> = {
         'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04', 'mayo': '05', 'junio': '06',
@@ -92,7 +109,7 @@ export default function VpDashboard() {
       Object.entries(monthsEs).forEach(([name, num]) => {
         cleanedDateStr = cleanedDateStr.replace(name, num);
       });
-      cleanedDateStr = cleanedDateStr.replace(/\s/g, ''); // Quitar espacios
+      cleanedDateStr = cleanedDateStr.replace(/\s/g, '');
 
       const date = new Date(cleanedDateStr);
       if (!isNaN(date.getFullYear())) return date.getFullYear();
@@ -113,7 +130,6 @@ export default function VpDashboard() {
     }).format(val);
   };
 
-  // Dinamización de opciones de filtros
   const filterOptions = useMemo(() => {
     if (!rawOrders) return { coordinators: [], formats: [], plans: [] };
     
@@ -138,11 +154,9 @@ export default function VpDashboard() {
   const filteredData = useMemo(() => {
     if (!rawOrders) return [];
     return rawOrders.filter(o => {
-      // 1. Filtro de Año
       const orderYear = getOrderYear(o);
       const yearMatch = selectedYear === 'all' || orderYear === selectedYear;
       
-      // 2. Filtro de Tipo (OT/OCR/OCI)
       const oType = String(o.type || o.header?.type || "").toLowerCase();
       let typeMatch = filters.type === 'all';
       if (!typeMatch) {
@@ -151,19 +165,15 @@ export default function VpDashboard() {
         if (filters.type === 'OCI') typeMatch = oType.includes('oci') || oType.includes('informativa');
       }
       
-      // 3. Filtro de Formato
       const oFormat = String(o.format || o.projectInfo?.format || "").toLowerCase();
       const formatMatch = filters.format === 'all' || oFormat.includes(filters.format.toLowerCase());
       
-      // 4. Filtro de Plan
       const oPlan = String(o.plan || "").toLowerCase();
       const planMatch = filters.planType === 'all' || oPlan.includes(filters.planType.toLowerCase());
       
-      // 5. Filtro de Coordinador
       const oCoordinator = String(o.coordinador || "").toLowerCase();
       const coordinatorMatch = filters.coordinator === 'all' || oCoordinator.includes(filters.coordinator.toLowerCase());
       
-      // 6. Filtro de Búsqueda (PID o Nombre)
       const searchStr = filters.projectName.toLowerCase();
       const oPid = String(o.projectId || o.projectInfo?.projectId || "").toLowerCase();
       const oPName = String(o.projectName || o.projectInfo?.projectName || "").toLowerCase();
@@ -172,6 +182,14 @@ export default function VpDashboard() {
       return yearMatch && typeMatch && formatMatch && planMatch && coordinatorMatch && searchMatch;
     });
   }, [rawOrders, selectedYear, filters]);
+
+  const drilldownOrders = useMemo(() => {
+    if (!drilldownConcept) return [];
+    return filteredData.filter(o => {
+      const concept = o.semanticAnalysis?.conceptoNormalizado || o.descripcion?.split('/')[0] || 'Otros';
+      return concept === drilldownConcept;
+    });
+  }, [filteredData, drilldownConcept]);
 
   const comparisonData = useMemo(() => {
     if (!rawOrders || selectedYear === 'all') return null;
@@ -186,7 +204,6 @@ export default function VpDashboard() {
     const projectCount = projectIds.size;
     const ocPerProjectRatio = projectCount > 0 ? (count / projectCount).toFixed(2) : "0.00";
 
-    // Top 10 Recurrencia por Concepto (IA)
     const concepts = filteredData.reduce((acc: any, curr) => {
       const concept = curr.semanticAnalysis?.conceptoNormalizado || curr.descripcion?.split('/')[0] || 'Otros';
       const impact = curr.impactoNeto || curr.financialImpact?.netImpact || 0;
@@ -197,7 +214,6 @@ export default function VpDashboard() {
     }, {});
     const topConcepts = Object.values(concepts).sort((a: any, b: any) => b.count - a.count).slice(0, 10);
 
-    // Top 10 Causa Raíz Real
     const causes = filteredData.reduce((acc: any, curr) => {
       const cause = curr.semanticAnalysis?.causaRaizReal || curr.causaRaiz || 'No definida';
       const impact = curr.impactoNeto || curr.financialImpact?.netImpact || 0;
@@ -208,7 +224,6 @@ export default function VpDashboard() {
     }, {});
     const topCauses = Object.values(causes).sort((a: any, b: any) => b.impact - a.impact).slice(0, 10);
 
-    // Distribución por Tipo de Plan
     const plans = filteredData.reduce((acc: any, curr) => {
       const plan = curr.plan || 'Otros';
       acc[plan] = (acc[plan] || 0) + (curr.impactoNeto || curr.financialImpact?.netImpact || 0);
@@ -294,7 +309,6 @@ export default function VpDashboard() {
         </header>
 
         <main className="p-6 space-y-6">
-          {/* Top KPIs Section */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <Card className="border-none shadow-md bg-white border-l-4 border-l-primary overflow-hidden">
               <CardContent className="pt-6">
@@ -349,7 +363,6 @@ export default function VpDashboard() {
             </Card>
           </div>
 
-          {/* Advanced Filters (Dinámicos) */}
           <Card className="border-none shadow-sm bg-white p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
@@ -413,7 +426,6 @@ export default function VpDashboard() {
             </div>
           </Card>
 
-          {/* Core Analysis Sections */}
           <Tabs defaultValue="recurrence" className="w-full">
             <TabsList className="bg-slate-100 p-1 mb-6 rounded-xl border">
               <TabsTrigger value="recurrence" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
@@ -433,7 +445,7 @@ export default function VpDashboard() {
                   <div className="flex items-center justify-between">
                     <div>
                       <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Top 10 Recurrencia de Conceptos (Filtro Semántico)</CardTitle>
-                      <CardDescription>Identificación de desviaciones repetitivas por volumen de órdenes e importe.</CardDescription>
+                      <CardDescription>Identificación de desviaciones repetitivas. Haz clic en una fila para ver el detalle de los registros.</CardDescription>
                     </div>
                     <Badge variant="outline" className="bg-white">{filteredData.length} Órdenes mostradas</Badge>
                   </div>
@@ -453,8 +465,15 @@ export default function VpDashboard() {
                         {metrics.topConcepts.length === 0 ? (
                           <tr><td colSpan={4} className="p-10 text-center text-slate-400">Sin datos para este periodo o filtros seleccionados.</td></tr>
                         ) : metrics.topConcepts.map((row: any, i) => (
-                          <tr key={i} className="hover:bg-primary/5 transition-colors group">
-                            <td className="p-4 font-bold text-slate-700 group-hover:text-primary transition-colors">{row.name}</td>
+                          <tr 
+                            key={i} 
+                            className="hover:bg-primary/5 transition-colors group cursor-pointer"
+                            onClick={() => setDrilldownConcept(row.name)}
+                          >
+                            <td className="p-4 font-bold text-slate-700 group-hover:text-primary transition-colors flex items-center justify-between">
+                              {row.name}
+                              <ArrowRight className="h-3 w-3 opacity-0 group-hover:opacity-100 text-primary transition-opacity" />
+                            </td>
                             <td className="p-4 text-center">
                               <Badge className="bg-slate-100 text-slate-600 font-bold border-none">{row.count}</Badge>
                             </td>
@@ -566,6 +585,94 @@ export default function VpDashboard() {
             </TabsContent>
           </Tabs>
         </main>
+
+        <Dialog open={!!drilldownConcept} onOpenChange={(open) => !open && setDrilldownConcept(null)}>
+          <DialogContent className="max-w-5xl max-h-[85vh] flex flex-col p-0 overflow-hidden bg-white">
+            <DialogHeader className="p-6 bg-slate-50 border-b">
+              <div className="flex items-center gap-3 mb-1">
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <BrainCircuit className="h-6 w-6 text-primary" />
+                </div>
+                <div>
+                  <DialogTitle className="text-xl font-headline font-bold text-slate-800">
+                    Detalle de Recurrencia: {drilldownConcept}
+                  </DialogTitle>
+                  <DialogDescription className="text-sm">
+                    Análisis de las {drilldownOrders.length} frecuencias detectadas para este concepto.
+                  </DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+            
+            <div className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full">
+                <div className="p-6">
+                  <Table>
+                    <TableHeader className="bg-slate-50/50">
+                      <TableRow>
+                        <TableHead className="w-[180px]">PID / Proyecto</TableHead>
+                        <TableHead>Coordinador</TableHead>
+                        <TableHead>Causa Raíz Real</TableHead>
+                        <TableHead>Descripción / Riesgo</TableHead>
+                        <TableHead className="text-right">Impacto Neto</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {drilldownOrders.map((order) => (
+                        <TableRow key={order.id} className="hover:bg-slate-50 transition-colors">
+                          <TableCell className="font-medium">
+                            <div className="flex flex-col">
+                              <span className="text-primary font-bold">{order.projectId || "S/P"}</span>
+                              <span className="text-[10px] text-muted-foreground uppercase truncate max-w-[150px]">
+                                {order.projectName || "Sin Nombre"}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs font-medium text-slate-600">
+                            {order.coordinador || "No asignado"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-100 text-[9px] uppercase font-bold">
+                              {order.semanticAnalysis?.causaRaizReal || order.causaRaiz || "N/D"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="max-w-[250px] space-y-1">
+                              <p className="text-[10px] leading-tight text-slate-600 line-clamp-2 italic">
+                                {order.standardizedDescription || order.descripcion}
+                              </p>
+                              {order.semanticAnalysis?.especialidadImpactada && (
+                                <Badge variant="outline" className="text-[8px] h-4 py-0 uppercase border-slate-200">
+                                  {order.semanticAnalysis.especialidadImpactada}
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right font-bold text-slate-900">
+                            {formatCurrency(order.impactoNeto || order.financialImpact?.netImpact || 0)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </ScrollArea>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t flex items-center justify-between">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Auditoría Semántica Consolidada</p>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-[9px] font-bold text-slate-400 uppercase">Impacto Total Concepto</p>
+                  <p className="text-sm font-black text-primary">
+                    {formatCurrency(drilldownOrders.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0))}
+                  </p>
+                </div>
+                <Button size="sm" onClick={() => setDrilldownConcept(null)}>Cerrar</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </SidebarInset>
     </div>
   );
