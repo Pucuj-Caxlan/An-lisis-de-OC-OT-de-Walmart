@@ -90,6 +90,28 @@
           }
         }
       }
+    },
+    "ChatSession": {
+      "title": "Chat Session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": { "type": "string", "enum": ["user", "model"] },
+              "content": { "type": "string" },
+              "timestamp": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
     }
   },
   "auth": {
@@ -98,6 +120,7 @@
   "firestore": {
     "/orders/{orderId}": { "schema": "Order", "description": "Normalized records with semantic AI enrichment" },
     "/audits/{auditId}": { "schema": "AuditReport", "description": "Historical forensic audit reports" },
-    "/importBatches/{batchId}": { "schema": "ImportBatch", "description": "Tracking for bulk excel uploads" }
+    "/importBatches/{batchId}": { "schema": "ImportBatch", "description": "Tracking for bulk excel uploads" },
+    "/chatSessions/{sessionId}": { "schema": "ChatSession", "description": "Persistent chat history for IA Asistente" }
   }
 }

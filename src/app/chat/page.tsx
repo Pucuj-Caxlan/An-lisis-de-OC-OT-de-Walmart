@@ -17,53 +17,114 @@ import {
   Sparkles,
   Search,
   MessageSquare,
-  BarChart3,
-  ShieldAlert
+  Plus,
+  Trash2,
+  Clock,
+  History
 } from 'lucide-react';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, limit } from 'firebase/firestore';
-import { chatWithAi, ChatMessageSchema } from '@/ai/flows/chat-assistant-flow';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { collection, query, limit, orderBy, doc, where, serverTimestamp } from 'firebase/firestore';
+import { chatWithAi } from '@/ai/flows/chat-assistant-flow';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
+import { setDocumentNonBlocking, updateDocumentNonBlocking, deleteDocumentNonBlocking } from '@/firebase/non-blocking-updates';
+import { Separator } from '@/components/ui/separator';
 
 type Message = {
   role: 'user' | 'model';
   content: string;
-  timestamp: Date;
+  timestamp: any;
 };
 
 export default function ChatPage() {
   const { toast } = useToast();
   const db = useFirestore();
+  const { user } = useUser();
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Consulta de órdenes para el contexto
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
     return query(collection(db, 'orders'), limit(200));
   }, [db]);
-
   const { data: orders } = useCollection(ordersQuery);
+
+  // Consulta de sesiones de chat del usuario
+  const chatSessionsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return query(
+      collection(db, 'chatSessions'),
+      where('userId', '==', user.uid),
+      orderBy('updatedAt', 'desc'),
+      limit(50)
+    );
+  }, [db, user]);
+  const { data: sessions, isLoading: isLoadingSessions } = useCollection(chatSessionsQuery);
+
+  // Sesión actual
+  const currentSession = sessions?.find(s => s.id === currentSessionId);
+  const messages: Message[] = currentSession?.messages || [];
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isLoading]);
+
+  const handleCreateNewChat = () => {
+    setCurrentSessionId(null);
+    setInput('');
+    toast({ title: "Nuevo chat iniciado", description: "¿En qué puedo ayudarte hoy?" });
+  };
+
+  const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!db) return;
+    deleteDocumentNonBlocking(doc(db, 'chatSessions', sessionId));
+    if (currentSessionId === sessionId) {
+      setCurrentSessionId(null);
+    }
+    toast({ title: "Conversación eliminada" });
+  };
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !db || !user) return;
 
     const userMessage: Message = {
       role: 'user',
       content: input,
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    let sessionId = currentSessionId;
+    let updatedMessages = [...messages, userMessage];
+
+    // Si es un nuevo chat, crear la sesión en Firestore
+    if (!sessionId) {
+      sessionId = `chat_${Date.now()}`;
+      const firstTitle = input.length > 30 ? input.substring(0, 30) + '...' : input;
+      
+      setDocumentNonBlocking(doc(db, 'chatSessions', sessionId), {
+        id: sessionId,
+        userId: user.uid,
+        title: firstTitle,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: updatedMessages
+      }, { merge: true });
+      
+      setCurrentSessionId(sessionId);
+    } else {
+      updateDocumentNonBlocking(doc(db, 'chatSessions', sessionId), {
+        messages: updatedMessages,
+        updatedAt: new Date().toISOString()
+      });
+    }
+
     setInput('');
     setIsLoading(true);
 
@@ -77,10 +138,16 @@ export default function ChatPage() {
       const aiMessage: Message = {
         role: 'model',
         content: response.response,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       };
 
-      setMessages(prev => [...prev, aiMessage]);
+      const finalMessages = [...updatedMessages, aiMessage];
+      
+      updateDocumentNonBlocking(doc(db, 'chatSessions', sessionId), {
+        messages: finalMessages,
+        updatedAt: new Date().toISOString()
+      });
+
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -92,10 +159,6 @@ export default function ChatPage() {
     }
   };
 
-  const handleQuickQuestion = (q: string) => {
-    setInput(q);
-  };
-
   return (
     <div className="flex min-h-screen w-full bg-slate-50/30">
       <AppSidebar />
@@ -105,7 +168,7 @@ export default function ChatPage() {
             <SidebarTrigger />
             <div className="flex items-center gap-2">
               <BrainCircuit className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">IA Asistente - WAI</h1>
+              <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">WAI - IA Asistente</h1>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -115,34 +178,81 @@ export default function ChatPage() {
           </div>
         </header>
 
-        <main className="flex flex-col h-[calc(100vh-4rem)] p-4 md:p-6">
-          <div className="flex-1 flex flex-col max-w-5xl mx-auto w-full gap-4">
-            <ScrollArea className="flex-1 pr-4" ref={scrollRef}>
-              <div className="space-y-6 py-4">
-                {messages.length === 0 && (
-                  <div className="flex flex-col items-center justify-center h-full text-center space-y-6 mt-12">
-                    <div className="bg-primary/10 p-6 rounded-full">
-                      <Bot className="h-16 w-16 text-primary" />
+        <main className="flex h-[calc(100vh-4rem)]">
+          {/* Historial Lateral */}
+          <div className="w-80 border-r bg-white flex flex-col hidden lg:flex">
+            <div className="p-4">
+              <Button onClick={handleCreateNewChat} className="w-full gap-2 bg-primary hover:bg-primary/90 shadow-md">
+                <Plus className="h-4 w-4" /> Nuevo Análisis
+              </Button>
+            </div>
+            <Separator />
+            <ScrollArea className="flex-1">
+              <div className="p-3 space-y-2">
+                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2 mb-2">Historial Reciente</h3>
+                {isLoadingSessions ? (
+                  <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-slate-200" /></div>
+                ) : sessions?.length === 0 ? (
+                  <p className="text-center text-xs text-slate-400 py-8 italic">No hay conversaciones previas.</p>
+                ) : sessions?.map((session) => (
+                  <div 
+                    key={session.id} 
+                    onClick={() => setCurrentSessionId(session.id)}
+                    className={`group relative p-3 rounded-xl cursor-pointer transition-all border ${currentSessionId === session.id ? 'bg-primary/5 border-primary/20' : 'border-transparent hover:bg-slate-50'}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <MessageSquare className={`h-4 w-4 mt-1 ${currentSessionId === session.id ? 'text-primary' : 'text-slate-400'}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-xs font-bold truncate ${currentSessionId === session.id ? 'text-primary' : 'text-slate-700'}`}>
+                          {session.title || 'Conversación sin título'}
+                        </p>
+                        <p className="text-[9px] text-slate-400 flex items-center gap-1 mt-1">
+                          <Clock className="h-2 w-2" /> {new Date(session.updatedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-rose-500"
+                        onClick={(e) => handleDeleteSession(session.id, e)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+
+          {/* Área de Chat */}
+          <div className="flex-1 flex flex-col bg-slate-50/50 relative">
+            <ScrollArea className="flex-1 px-6" ref={scrollRef}>
+              <div className="max-w-4xl mx-auto py-8 space-y-6">
+                {messages.length === 0 && !isLoading && (
+                  <div className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-6">
+                    <div className="bg-primary/10 p-8 rounded-full">
+                      <Bot className="h-20 w-20 text-primary" />
                     </div>
                     <div className="space-y-2">
-                      <h2 className="text-2xl font-headline font-bold text-slate-800">¿Cómo puedo ayudarte con la auditoría hoy?</h2>
-                      <p className="text-slate-500 max-w-md mx-auto">Tengo acceso a todos los registros de OC/OT cargados. Puedo analizar montos, buscar anomalías o sugerir soluciones.</p>
+                      <h2 className="text-2xl font-headline font-bold text-slate-800 tracking-tight">Expertise Digital en Control de Cambios</h2>
+                      <p className="text-slate-500 max-w-md mx-auto text-sm">Auditoría inteligente sobre {orders?.length || 0} registros activos. Pregunta sobre montos, causas raíz o riesgos de cumplimiento.</p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
                       {[
                         "¿Cuál es el impacto neto total de este año?",
-                        "Muéstrame órdenes con riesgo de firmas.",
+                        "Analiza el riesgo de firmas en montos altos.",
                         "¿Qué especialidad tiene más desviaciones?",
-                        "Analiza las causas raíz de Bodega Aurrera."
+                        "Dame un resumen de anomalías financieras."
                       ].map((q, i) => (
                         <Button 
                           key={i} 
                           variant="outline" 
-                          className="justify-start gap-2 h-auto py-3 px-4 text-left border-slate-200 hover:border-primary hover:bg-primary/5 transition-all"
-                          onClick={() => handleQuickQuestion(q)}
+                          className="justify-start gap-3 h-auto py-4 px-5 text-left bg-white border-slate-200 hover:border-primary hover:bg-primary/5 transition-all shadow-sm group"
+                          onClick={() => setInput(q)}
                         >
-                          <Sparkles className="h-4 w-4 text-accent shrink-0" />
-                          <span className="text-xs font-medium text-slate-600">{q}</span>
+                          <Sparkles className="h-4 w-4 text-accent group-hover:scale-110 transition-transform" />
+                          <span className="text-xs font-bold text-slate-600">{q}</span>
                         </Button>
                       ))}
                     </div>
@@ -151,12 +261,15 @@ export default function ChatPage() {
 
                 {messages.map((m, i) => (
                   <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`flex gap-3 max-w-[85%] ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                      <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${m.role === 'user' ? 'bg-slate-800 text-white' : 'bg-primary text-white'}`}>
-                        {m.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                    <div className={`flex gap-4 max-w-[85%] ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                      <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${m.role === 'user' ? 'bg-slate-800 text-white' : 'bg-primary text-white'}`}>
+                        {m.role === 'user' ? <User className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
                       </div>
-                      <div className={`p-4 rounded-2xl shadow-sm text-sm leading-relaxed ${m.role === 'user' ? 'bg-slate-800 text-white rounded-tr-none' : 'bg-white border text-slate-700 rounded-tl-none'}`}>
+                      <div className={`p-5 rounded-2xl shadow-sm text-sm leading-relaxed prose prose-slate ${m.role === 'user' ? 'bg-slate-800 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}`}>
                         <div className="whitespace-pre-wrap">{m.content}</div>
+                        <p className={`text-[8px] mt-2 opacity-50 uppercase font-black ${m.role === 'user' ? 'text-right' : ''}`}>
+                          {new Date(m.timestamp).toLocaleTimeString()}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -164,13 +277,13 @@ export default function ChatPage() {
 
                 {isLoading && (
                   <div className="flex justify-start">
-                    <div className="flex gap-3 max-w-[85%]">
-                      <div className="h-8 w-8 rounded-full bg-primary text-white flex items-center justify-center shrink-0">
-                        <Bot className="h-4 w-4" />
+                    <div className="flex gap-4 max-w-[85%]">
+                      <div className="h-10 w-10 rounded-xl bg-primary text-white flex items-center justify-center shrink-0 shadow-sm">
+                        <Bot className="h-5 w-5" />
                       </div>
-                      <div className="p-4 rounded-2xl bg-white border shadow-sm flex items-center gap-2">
+                      <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center gap-3">
                         <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                        <span className="text-xs text-slate-400 font-medium italic">WAI está analizando los registros...</span>
+                        <span className="text-xs text-slate-400 font-black uppercase tracking-widest italic">WAI Procesando...</span>
                       </div>
                     </div>
                   </div>
@@ -178,26 +291,36 @@ export default function ChatPage() {
               </div>
             </ScrollArea>
 
-            <div className="bg-white border rounded-2xl p-2 shadow-lg flex items-center gap-2 mb-2">
-              <Input 
-                placeholder="Pregúntame sobre montos, proyectos o auditorías..." 
-                className="border-none focus-visible:ring-0 text-sm h-12"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              />
-              <Button 
-                size="icon" 
-                className="h-10 w-10 shrink-0 bg-primary hover:bg-primary/90"
-                onClick={handleSend}
-                disabled={!input.trim() || isLoading}
-              >
-                <Send className="h-4 w-4" />
-              </Button>
+            <div className="p-6 bg-gradient-to-t from-slate-50 to-transparent">
+              <div className="max-w-4xl mx-auto">
+                <div className="bg-white border rounded-2xl p-2 shadow-xl flex items-center gap-2">
+                  <Input 
+                    placeholder="Escribe tu consulta de auditoría..." 
+                    className="border-none focus-visible:ring-0 text-sm h-12 bg-transparent"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                    disabled={isLoading}
+                  />
+                  <Button 
+                    size="icon" 
+                    className="h-10 w-10 shrink-0 bg-primary hover:bg-primary/90 shadow-md transition-all active:scale-95"
+                    onClick={handleSend}
+                    disabled={!input.trim() || isLoading}
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex justify-between items-center mt-3 px-2">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                    Persistencia activada en colección /chatSessions
+                  </p>
+                  <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight text-slate-400 border-slate-200">
+                    Gemini 2.5 Flash Engine
+                  </Badge>
+                </div>
+              </div>
             </div>
-            <p className="text-[10px] text-center text-slate-400 font-medium pb-2 uppercase tracking-widest">
-              WAI utiliza Gemini 2.5 para analizar datos de auditoría en tiempo real.
-            </p>
           </div>
         </main>
       </SidebarInset>

@@ -5,6 +5,9 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
     function matchesPathId(idFromPath) {
       return request.resource.data.id == idFromPath;
     }
@@ -27,6 +30,13 @@ service cloud.firestore {
       allow create: if isSignedIn() && matchesPathId(batchId);
       allow update: if isSignedIn();
       allow delete: if isSignedIn();
+    }
+
+    match /chatSessions/{sessionId} {
+      allow get, list: if isSignedIn() && isOwner(resource.data.userId);
+      allow create: if isSignedIn() && isOwner(request.resource.data.userId);
+      allow update: if isSignedIn() && isOwner(resource.data.userId);
+      allow delete: if isSignedIn() && isOwner(resource.data.userId);
     }
   }
 }
