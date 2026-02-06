@@ -84,7 +84,6 @@ export default function VpDashboard() {
     const totalImpact = filteredData.reduce((acc, curr) => acc + (curr.impactoNeto || 0), 0);
     const count = filteredData.length;
     
-    // Impact by Generator
     const byGenerator = filteredData.reduce((acc: any, curr) => {
       const gen = curr.generadorDesviacion || 'Sin asignar';
       acc[gen] = (acc[gen] || 0) + (curr.impactoNeto || 0);
@@ -92,7 +91,6 @@ export default function VpDashboard() {
     }, {});
     const generatorData = Object.entries(byGenerator).map(([name, value]) => ({ name, value }));
 
-    // Impact by Format
     const byFormat = filteredData.reduce((acc: any, curr) => {
       const fmt = curr.format || 'Otros';
       acc[fmt] = (acc[fmt] || 0) + (curr.impactoNeto || 0);
@@ -100,7 +98,6 @@ export default function VpDashboard() {
     }, {});
     const formatData = Object.entries(byFormat).map(([name, value]) => ({ name, value }));
 
-    // Table Data
     const byCause = filteredData.reduce((acc: any, curr) => {
       const cause = curr.causaRaiz || 'N/A';
       if (!acc[cause]) acc[cause] = { name: cause, count: 0, impact: 0 };
@@ -113,9 +110,8 @@ export default function VpDashboard() {
     return { totalImpact, count, generatorData, formatData, causeTable };
   }, [filteredData]);
 
-  // Dynamic Historical Data Calculation
   const historicalMetrics = useMemo(() => {
-    if (!rawOrders) return [];
+    if (!rawOrders) return { rows: [], totals: [] };
     
     const stats: Record<string, Record<number, { projects: Set<string>, orders: number }>> = {};
     
@@ -127,9 +123,10 @@ export default function VpDashboard() {
     });
 
     rawOrders.forEach(o => {
-      const year = o.fechaSolicitud ? new Date(o.fechaSolicitud).getFullYear() : null;
+      if (!o.fechaSolicitud || !o.format) return;
+      const year = new Date(o.fechaSolicitud).getFullYear();
       const fmt = o.format;
-      if (year && stats[fmt] && stats[fmt][year]) {
+      if (stats[fmt] && stats[fmt][year]) {
         stats[fmt][year].projects.add(o.projectId);
         stats[fmt][year].orders += 1;
       }
@@ -147,7 +144,6 @@ export default function VpDashboard() {
       }))
     }));
 
-    // Calculate totals for the footer
     const totals = HISTORICAL_YEARS.map(y => {
       let totalProjectsInYear = new Set();
       let totalOrdersInYear = 0;
@@ -402,7 +398,7 @@ export default function VpDashboard() {
 
           <Card className="border-none shadow-sm overflow-hidden">
             <CardHeader className="py-3 px-4 border-b">
-              <CardTitle className="text-[11px] font-bold uppercase text-slate-500">Histórico de Proyectos vs OC (Datos Reales)</CardTitle>
+              <CardTitle className="text-[11px] font-bold uppercase text-slate-500">Histórico de Proyectos vs OC</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
