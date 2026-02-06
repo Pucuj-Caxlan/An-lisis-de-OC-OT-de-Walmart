@@ -130,9 +130,16 @@ export function AppSidebar() {
       <SidebarFooter className="p-4">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Configuración">
-              <Settings className="h-5 w-5" />
-              <span>Configuración</span>
+            <SidebarMenuButton 
+              asChild 
+              isActive={pathname === '/settings'}
+              tooltip="Configuración"
+              className={`hover:bg-primary/10 transition-colors duration-200 ${pathname === '/settings' ? 'text-primary bg-primary/5' : ''}`}
+            >
+              <Link href="/settings">
+                <Settings className={`h-5 w-5 ${pathname === '/settings' ? 'text-primary' : ''}`} />
+                <span>Configuración</span>
+              </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

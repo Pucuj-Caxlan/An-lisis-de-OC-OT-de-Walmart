@@ -74,21 +74,39 @@
       },
       "required": ["id", "timestamp", "globalHealthScore"]
     },
-    "ImportBatch": {
-      "title": "Import Batch",
+    "UserProfile": {
+      "title": "User Profile",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "fileName": { "type": "string" },
-        "importDate": { "type": "string", "format": "date-time" },
-        "status": { "type": "string", "enum": ["PROCESSING", "COMPLETED", "FAILED"] },
-        "stats": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string" },
+        "email": { "type": "string" },
+        "preferences": {
           "type": "object",
           "properties": {
-            "totalRows": { "type": "number" },
-            "processedRows": { "type": "number" },
-            "errorCount": { "type": "number" },
-            "totalImpact": { "type": "number" }
+            "theme": { "type": "string", "enum": ["light", "dark", "system"] },
+            "language": { "type": "string" },
+            "notifications": {
+              "type": "object",
+              "properties": {
+                "forensicAlerts": { "type": "boolean" },
+                "weeklyDigest": { "type": "boolean" },
+                "criticalImpact": { "type": "boolean" }
+              }
+            },
+            "iaSensitivity": { "type": "number" }
+          }
+        },
+        "apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "key": { "type": "string" },
+              "createdAt": { "type": "string" }
+            }
           }
         }
       }
@@ -100,6 +118,6 @@
   "firestore": {
     "/orders/{orderId}": { "schema": "Order", "description": "Normalized records with semantic AI enrichment" },
     "/audits/{auditId}": { "schema": "AuditReport", "description": "Historical forensic audit reports" },
-    "/importBatches/{batchId}": { "schema": "ImportBatch", "description": "Tracking for bulk excel uploads" }
+    "/users/{userId}": { "schema": "UserProfile", "description": "Private user settings and preferences" }
   }
 }
