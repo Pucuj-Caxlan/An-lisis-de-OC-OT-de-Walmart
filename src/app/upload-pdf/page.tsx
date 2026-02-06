@@ -59,6 +59,11 @@ export default function UploadPdfPage() {
       });
 
       const extracted = await extractPdfData({ pdfDataUri: dataUri });
+      
+      if (!extracted || !extracted.extractedData) {
+        throw new Error("La IA no devolvió datos válidos.");
+      }
+
       setResults(extracted);
 
       // --- LOGICA DE MATCH ---
@@ -95,9 +100,13 @@ export default function UploadPdfPage() {
         toast({ title: "Nuevo Registro Creado", description: "No se encontró coincidencia en Excel, se generó un nuevo registro." });
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast({ variant: "destructive", title: "Error", description: "No se pudo procesar el PDF." });
+      toast({ 
+        variant: "destructive", 
+        title: "Error de Procesamiento", 
+        description: error.message || "No se pudo procesar el PDF." 
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -149,7 +158,7 @@ export default function UploadPdfPage() {
             </Card>
 
             <div className="md:col-span-3 space-y-6">
-              {results ? (
+              {results && results.extractedData ? (
                 <>
                   <Card className="border-none shadow-sm overflow-hidden">
                     <CardHeader className="flex flex-row items-center justify-between bg-slate-50/50 border-b pb-4">

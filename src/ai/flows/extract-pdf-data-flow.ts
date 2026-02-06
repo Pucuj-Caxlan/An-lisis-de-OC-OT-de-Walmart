@@ -77,9 +77,13 @@ const extractPdfPrompt = ai.definePrompt({
   Documento PDF: {{media url=pdfDataUri}}`,
 });
 
+/**
+ * Llama al flujo de extracción de datos del PDF.
+ * @param input - Objeto con el data URI del PDF.
+ * @returns El resultado de la extracción.
+ */
 export async function extractPdfData(input: ExtractPdfDataInput): Promise<ExtractPdfDataOutput> {
-  const {output} = await extractPdfDataFlow(input);
-  return output!;
+  return extractPdfDataFlow(input);
 }
 
 const extractPdfDataFlow = ai.defineFlow(
@@ -90,6 +94,7 @@ const extractPdfDataFlow = ai.defineFlow(
   },
   async input => {
     const {output} = await extractPdfPrompt(input);
-    return output!;
+    if (!output) throw new Error("No se pudo extraer información del PDF.");
+    return output;
   }
 );
