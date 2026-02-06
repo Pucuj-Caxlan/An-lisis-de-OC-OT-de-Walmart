@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
@@ -8,21 +7,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { 
   TrendingUp, 
-  TrendingDown, 
   BarChart3, 
   BrainCircuit, 
-  Calendar,
-  ArrowUpRight,
   Target,
   AlertCircle,
-  Lightbulb,
   Loader2,
   FileDown,
-  CheckCircle2,
   Zap,
   LayoutList,
   History,
-  Layers
+  Layers,
+  ArrowRight,
+  ShieldCheck,
+  Building2,
+  CalendarDays
 } from 'lucide-react';
 import {
   AreaChart,
@@ -41,7 +39,6 @@ import { collection, query } from 'firebase/firestore';
 import { analyzeStrategicTrends, TrendAnalysisOutput } from '@/ai/flows/trend-analysis-flow';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -209,18 +206,22 @@ export default function TrendsPage() {
     if (trendData.length === 0 || selectedYears.length === 0) return;
     setIsAnalyzing(true);
     try {
-      const primaryYear = selectedYears[0];
-      const primaryMonthlyData = trendData.map(d => ({
-        month: d.month,
-        impact: d[`impact_${primaryYear}`],
-        count: d[`count_${primaryYear}`]
-      }));
-      const totalImpact = primaryMonthlyData.reduce((acc, curr) => acc + curr.impact, 0);
+      const aggregatedMonthlyData = MONTH_NAMES.map((name, idx) => {
+        let impactSum = 0;
+        let countSum = 0;
+        selectedYears.forEach(yr => {
+          impactSum += trendData[idx][`impact_${yr}`] || 0;
+          countSum += trendData[idx][`count_${yr}`] || 0;
+        });
+        return { month: name, impact: impactSum, count: countSum };
+      });
+
+      const totalImpact = aggregatedMonthlyData.reduce((acc, curr) => acc + curr.impact, 0);
       
       const causesMap = new Map<string, { impact: number, count: number }>();
       orders?.forEach(o => {
         const yr = getOrderYear(o);
-        if (yr === primaryYear) {
+        if (yr && selectedYears.includes(yr)) {
             const cause = o.semanticAnalysis?.causaRaizReal || o.causaRaiz || 'No definida';
             const impact = o.impactoNeto || o.financialImpact?.netImpact || 0;
             const existing = causesMap.get(cause) || { impact: 0, count: 0 };
@@ -230,16 +231,16 @@ export default function TrendsPage() {
       const rootCauseSummary = Array.from(causesMap.entries()).map(([cause, stats]) => ({
         cause,
         ...stats
-      })).sort((a, b) => b.impact - a.impact).slice(0, 5);
+      })).sort((a, b) => b.impact - a.impact).slice(0, 10);
 
       const result = await analyzeStrategicTrends({
-        monthlyData: primaryMonthlyData,
-        year: primaryYear,
+        monthlyData: aggregatedMonthlyData,
+        years: selectedYears,
         totalImpact,
         rootCauseSummary
       });
       setAiInsight(result);
-      toast({ title: "Análisis Estratégico Completo", description: `Planes de acción generados para el periodo seleccionado.` });
+      toast({ title: "Análisis Estratégico Completo", description: "Se ha procesado la totalidad del histórico seleccionado." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Fallo en IA", description: error.message });
     } finally {
@@ -251,7 +252,12 @@ export default function TrendsPage() {
     if (!reportRef.current) return;
     setIsExporting(true);
     try {
-      const canvas = await html2canvas(reportRef.current, { scale: 2 });
+      const canvas = await html2canvas(reportRef.current, { 
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const imgProps = pdf.getImageProperties(imgData);
@@ -259,10 +265,10 @@ export default function TrendsPage() {
       const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
       
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`reporte-comparativo-oc-ot.pdf`);
-      toast({ title: "Reporte Exportado", description: "El PDF comparativo ha sido generado con éxito." });
+      pdf.save(`Walmart_Auditoria_Forense_${selectedYears.join('_')}.pdf`);
+      toast({ title: "Reporte Corporativo Generado", description: "El entregable ejecutivo ha sido descargado." });
     } catch (error) {
-      toast({ variant: "destructive", title: "Error al exportar", description: "No se pudo generar el PDF." });
+      toast({ variant: "destructive", title: "Error al exportar", description: "No se pudo generar el reporte PDF." });
     } finally {
       setIsExporting(false);
     }
@@ -282,7 +288,7 @@ export default function TrendsPage() {
     <div className="flex min-h-screen w-full bg-slate-50/30">
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10 shadow-sm">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10 shadow-sm print:hidden">
           <div className="flex items-center gap-4">
             <SidebarTrigger />
             <div className="flex items-center gap-2">
@@ -292,7 +298,7 @@ export default function TrendsPage() {
           </div>
           <div className="flex items-center gap-4">
             <div className="flex bg-slate-50 p-1.5 rounded-xl border items-center gap-3">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">Años:</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">Periodos:</span>
               <div className="flex gap-1">
                 {availableYears.map(y => (
                   <button
@@ -309,10 +315,10 @@ export default function TrendsPage() {
               variant="outline" 
               onClick={handleDownloadPdf} 
               disabled={isExporting || !aiInsight}
-              className="gap-2 border-primary/20 text-primary hover:bg-primary/5 h-10"
+              className="gap-2 border-primary/20 text-primary hover:bg-primary/5 h-10 shadow-sm"
             >
               {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
-              Exportar Informe
+              Reporte Corporativo
             </Button>
             <Button 
               onClick={runAiTrendAnalysis} 
@@ -326,239 +332,216 @@ export default function TrendsPage() {
         </header>
 
         <main className="p-6 md:p-8 space-y-6">
-          <div ref={reportRef} className="space-y-6 bg-slate-50/50 p-6 rounded-3xl border border-white">
-            <div className="flex items-center justify-between mb-2">
-               <div className="space-y-1">
-                  <h2 className="text-2xl font-headline font-bold text-slate-800">Análisis Comparativo Multi-anual</h2>
-                  <p className="text-sm text-slate-500">Superposición de tendencias para la detección de picos recurrentes y variaciones de desempeño.</p>
+          <div ref={reportRef} className="space-y-8 bg-white p-10 rounded-3xl border shadow-xl max-w-[1200px] mx-auto overflow-hidden">
+            {/* Encabezado Corporativo (Solo PDF/Reporte) */}
+            <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6 mb-2">
+               <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-slate-900 p-2 rounded-lg">
+                      <Building2 className="text-white h-6 w-6" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Walmart International</h2>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Real Estate & Construction Development • Forensic Audit</p>
+                    </div>
+                  </div>
+                  <h3 className="text-4xl font-headline font-bold text-slate-800 pt-4">Informe Estratégico de Control de Cambios</h3>
+                  <div className="flex items-center gap-6 pt-2">
+                    <div className="flex items-center gap-2 text-slate-500">
+                      <CalendarDays className="h-4 w-4" />
+                      <span className="text-xs font-bold uppercase">Periodo: {selectedYears.sort().join(' - ')}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-500">
+                      <ShieldCheck className="h-4 w-4" />
+                      <span className="text-xs font-bold uppercase">Estado: Auditado por WAI (Gemini 2.5)</span>
+                    </div>
+                  </div>
                </div>
-               <div className="flex gap-4">
-                 {selectedYears.map((yr, i) => (
-                   <div key={yr} className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-full border shadow-sm">
-                     <div className="h-3 w-3 rounded-full" style={{ backgroundColor: YEAR_COLORS[i % YEAR_COLORS.length] }} />
-                     <span className="text-xs font-bold text-slate-700">{yr}</span>
-                   </div>
-                 ))}
+               <div className="text-right space-y-1">
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Confidencialidad</p>
+                 <Badge variant="destructive" className="uppercase text-[9px] font-bold tracking-tight">Privado - Uso Interno</Badge>
+                 <p className="text-[10px] text-slate-400 font-medium pt-4">Generado: {new Date().toLocaleDateString('es-MX')}</p>
                </div>
             </div>
 
             {aiInsight && (
-              <Card className="border-primary/20 bg-primary/5 shadow-md border-l-4 border-l-primary overflow-hidden">
-                <CardHeader className="pb-2 bg-white/50 border-b border-primary/10">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg flex items-center gap-2 text-primary font-headline">
-                      <Zap className="h-5 w-5 text-accent" />
-                      Hojas de Ruta de Mejora Continua
-                    </CardTitle>
-                    <Badge variant={aiInsight.sentiment === 'Crítico' ? 'destructive' : 'default'} className="uppercase font-bold tracking-tight">
-                      Sentimiento: {aiInsight.sentiment}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="grid md:grid-cols-2 gap-6 pt-6">
-                  <div className="bg-white/60 p-4 rounded-2xl border border-white space-y-4">
-                    <div>
-                      <h4 className="text-[10px] font-black flex items-center gap-2 mb-2 text-slate-400 uppercase tracking-widest">
-                        Narrativa de Tendencia
-                      </h4>
-                      <p className="text-sm text-slate-700 leading-relaxed">{aiInsight.narrative}</p>
-                    </div>
-                    <Separator />
-                    <div>
-                      <h4 className="text-[10px] font-black flex items-center gap-2 mb-2 text-slate-400 uppercase tracking-widest">
-                        Proyecciones al Cierre
-                      </h4>
-                      <p className="text-xs text-slate-600 italic">{aiInsight.projections}</p>
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    {aiInsight.actionPlan?.map((plan, i) => (
-                      <div key={i} className="p-4 bg-white/80 rounded-xl border border-white shadow-sm space-y-2">
-                        <h5 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                          <Target className="h-4 w-4 text-primary" /> {plan.title}
-                        </h5>
-                        <ul className="pl-6 space-y-1">
-                          {plan.steps.map((step, si) => (
-                            <li key={si} className="text-[11px] text-slate-600 flex gap-2">
-                              <span className="text-primary font-bold">•</span> {step}
-                            </li>
-                          ))}
-                        </ul>
-                        <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
-                          <span className="text-[9px] font-black text-slate-400 uppercase">Impacto Esperado:</span>
-                          <span className="text-[10px] font-bold text-emerald-600 uppercase">{plan.expectedImpact}</span>
+              <div className="space-y-8 animate-in fade-in slide-in-from-top-4 duration-700">
+                {/* Executive Summary */}
+                <section className="grid lg:grid-cols-3 gap-8">
+                  <Card className="lg:col-span-2 border-none bg-slate-50/50 shadow-none">
+                    <CardHeader className="pb-2">
+                      <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">01. Resumen Ejecutivo Transversal</h4>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <p className="text-lg font-medium text-slate-800 leading-relaxed border-l-4 border-primary pl-6 py-2 italic">
+                        "{aiInsight.narrative}"
+                      </p>
+                      <div className="grid md:grid-cols-2 gap-4 mt-6">
+                        <div className="space-y-2">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                            <Target className="h-3 w-3 text-primary" /> Drivers de Costo Identificados
+                          </p>
+                          <ul className="space-y-1">
+                            {aiInsight.keyDrivers.map((d, i) => (
+                              <li key={i} className="text-xs text-slate-600 flex gap-2 font-medium">
+                                <span className="text-primary">•</span> {d}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                            <TrendingUp className="h-3 w-3 text-emerald-500" /> Proyecciones Estratégicas
+                          </p>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">{aiInsight.projections}</p>
                         </div>
                       </div>
-                    ))}
+                    </CardContent>
+                  </Card>
+
+                  <div className="space-y-6">
+                    <Card className="bg-slate-900 text-white border-none shadow-xl">
+                      <CardContent className="pt-6">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Sentiment de Gestión</p>
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-4xl font-headline font-bold">{aiInsight.sentiment}</h3>
+                          <Zap className={`h-10 w-10 ${aiInsight.sentiment === 'Optimista' ? 'text-emerald-400' : aiInsight.sentiment === 'Estable' ? 'text-amber-400' : 'text-rose-400'}`} />
+                        </div>
+                        <Separator className="bg-white/10 my-4" />
+                        <div className="space-y-2">
+                          {aiInsight.recommendations.slice(0, 3).map((r, i) => (
+                            <div key={i} className="flex gap-2 text-[10px] opacity-80 italic">
+                              <ArrowRight className="h-3 w-3 shrink-0" /> {r}
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
-                </CardContent>
-              </Card>
+                </section>
+
+                {/* Intelligent Action Plan */}
+                <section className="space-y-4">
+                   <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-4">02. Hoja de Ruta para Mejora Continua</h4>
+                   <div className="grid md:grid-cols-3 gap-4">
+                      {aiInsight.actionPlan.map((plan, i) => (
+                        <div key={i} className="bg-white border-2 border-slate-100 p-6 rounded-2xl shadow-sm hover:border-primary/20 transition-all group">
+                          <div className="flex items-start justify-between mb-4">
+                            <h5 className="text-sm font-black text-slate-900 uppercase leading-tight group-hover:text-primary transition-colors">{plan.title}</h5>
+                            <Target className="h-5 w-5 text-primary opacity-20" />
+                          </div>
+                          <ul className="space-y-3 mb-6">
+                            {plan.steps.map((step, si) => (
+                              <li key={si} className="text-[11px] text-slate-600 flex gap-3 leading-relaxed">
+                                <span className="h-4 w-4 bg-slate-100 text-slate-900 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0">{si + 1}</span>
+                                {step}
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="pt-4 border-t border-dashed border-slate-100 flex items-center justify-between">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Impacto Estimado</span>
+                            <Badge variant="outline" className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border-emerald-100">
+                              {plan.expectedImpact}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                   </div>
+                </section>
+              </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <Card className="lg:col-span-2 border-none shadow-sm overflow-hidden bg-white">
-                <CardHeader className="bg-slate-50/50 border-b py-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
-                        <Layers className="h-4 w-4 text-primary" /> Comparativa de Impacto Mensual
-                      </CardTitle>
-                      <CardDescription className="text-xs">Superposición de costos por año seleccionado</CardDescription>
-                    </div>
+            {/* Charts Section */}
+            <section className="space-y-6 pt-6">
+              <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">03. Visualización Analítica de Datos</h4>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <Card className="lg:col-span-2 border-none shadow-none bg-white">
+                  <CardHeader className="px-0">
+                    <CardTitle className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-primary" /> Impacto Mensual Comparativo (Agregado)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="h-[350px] px-0 pt-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={trendData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis 
+                          dataKey="month" 
+                          axisLine={false} 
+                          tickLine={false} 
+                          tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }} 
+                        />
+                        <YAxis 
+                          axisLine={false} 
+                          tickLine={false} 
+                          tick={{ fontSize: 10, fill: '#64748b' }} 
+                          tickFormatter={(v) => `$${Math.round(v/1000)}k`}
+                        />
+                        <Tooltip 
+                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
+                          formatter={(value) => formatCurrency(value as number)}
+                        />
+                        <Legend verticalAlign="top" align="right" height={36} iconType="circle" />
+                        {selectedYears.map((yr, i) => (
+                          <Area 
+                            key={yr}
+                            type="monotone" 
+                            dataKey={`impact_${yr}`} 
+                            name={`${yr}`}
+                            stroke={YEAR_COLORS[i % YEAR_COLORS.length]} 
+                            fill={YEAR_COLORS[i % YEAR_COLORS.length]}
+                            fillOpacity={0.05}
+                            strokeWidth={3}
+                            activeDot={{ r: 6 }}
+                          />
+                        ))}
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                <div className="grid grid-cols-1 gap-4 h-fit">
+                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Total Auditado</p>
+                      <h3 className="text-2xl font-headline font-bold text-slate-900">{formatCurrency(trendData.reduce((acc, curr) => {
+                        let sum = 0;
+                        selectedYears.forEach(y => sum += curr[`impact_${y}`] || 0);
+                        return acc + sum;
+                      }, 0))}</h3>
+                      <div className="flex items-center gap-2 mt-2">
+                        <TrendingUp className="h-3 w-3 text-emerald-500" />
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">Tendencia {kpis.acceleration}%</span>
+                      </div>
+                   </div>
+                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Promedio de Órdenes / Mes</p>
+                      <h3 className="text-2xl font-headline font-bold text-slate-900">{kpis.averageOrders} OC</h3>
+                      <div className="flex items-center gap-2 mt-2">
+                        <LayoutList className="h-3 w-3 text-primary" />
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">Muestra Multi-anual</span>
+                      </div>
+                   </div>
+                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Pico de Gasto Detectado</p>
+                      <h3 className="text-2xl font-headline font-bold text-rose-600 uppercase">{kpis.peakMonth}</h3>
+                      <div className="flex items-center gap-2 mt-2">
+                        <AlertCircle className="h-3 w-3 text-rose-500" />
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">Riesgo Estacional</span>
+                      </div>
+                   </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Footer Corporativo */}
+            <div className="pt-12 mt-12 border-t border-slate-100 flex items-center justify-between opacity-50">
+               <div className="flex items-center gap-3">
+                  <div className="h-6 w-6 bg-slate-900 rounded flex items-center justify-center">
+                    <BarChart3 className="text-white h-3 w-3" />
                   </div>
-                </CardHeader>
-                <CardContent className="h-[400px] pt-8">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={trendData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis 
-                        dataKey="month" 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }} 
-                      />
-                      <YAxis 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 10, fill: '#64748b' }} 
-                        tickFormatter={(v) => `$${Math.round(v/1000)}k`}
-                      />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
-                        formatter={(value) => formatCurrency(value as number)}
-                      />
-                      <Legend verticalAlign="top" align="right" height={36} iconType="circle" />
-                      {selectedYears.map((yr, i) => (
-                        <Area 
-                          key={yr}
-                          type="monotone" 
-                          dataKey={`impact_${yr}`} 
-                          name={`${yr}`}
-                          stroke={YEAR_COLORS[i % YEAR_COLORS.length]} 
-                          fill={YEAR_COLORS[i % YEAR_COLORS.length]}
-                          fillOpacity={0.1}
-                          strokeWidth={3}
-                          activeDot={{ r: 6 }}
-                        />
-                      ))}
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              <Card className="border-none shadow-sm bg-slate-800 text-white overflow-hidden">
-                <CardHeader className="border-b border-slate-700 bg-slate-900/50">
-                  <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-400">Curva de Acumulación</CardTitle>
-                  <CardDescription className="text-[10px] text-slate-500 uppercase">Progresión del sobrecosto interanual</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px] p-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={trendData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
-                      <XAxis 
-                        dataKey="month" 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 9, fill: '#94a3b8' }} 
-                      />
-                      <YAxis 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 9, fill: '#94a3b8' }}
-                        tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`}
-                      />
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#fff' }}
-                        formatter={(value) => formatCurrency(value as number)}
-                      />
-                      <Legend verticalAlign="top" align="right" height={36} />
-                      {selectedYears.map((yr, i) => (
-                        <Line 
-                          key={yr}
-                          type="stepAfter" 
-                          dataKey={`cumulative_${yr}`} 
-                          name={`${yr}`}
-                          stroke={YEAR_COLORS[i % YEAR_COLORS.length]} 
-                          strokeWidth={3} 
-                          dot={false}
-                          activeDot={{ r: 4 }}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-               <Card className="border-none shadow-md bg-white border-l-4 border-l-emerald-500">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-4">
-                      <div className="bg-emerald-100 p-3 rounded-xl">
-                        <TrendingUp className="h-6 w-6 text-emerald-600" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                          {selectedYears.length > 1 ? 'Aceleración Promedio' : 'Tasa Aceleración'}
-                        </p>
-                        <h3 className="text-xl font-headline font-bold text-slate-800">
-                          {Number(kpis.acceleration) > 0 ? '+' : ''}{kpis.acceleration}%
-                        </h3>
-                      </div>
-                    </div>
-                  </CardContent>
-               </Card>
-               <Card className="border-none shadow-md bg-white border-l-4 border-l-amber-500">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-4">
-                      <div className="bg-amber-100 p-3 rounded-xl">
-                        <LayoutList className="h-6 w-6 text-amber-600" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                          {selectedYears.length > 1 ? 'Promedio OC/Mes (Multi)' : 'Promedio OC/Mes'}
-                        </p>
-                        <h3 className="text-xl font-headline font-bold text-slate-800">
-                          {kpis.averageOrders}
-                        </h3>
-                      </div>
-                    </div>
-                  </CardContent>
-               </Card>
-               <Card className="border-none shadow-md bg-white border-l-4 border-l-primary">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-4">
-                      <div className="bg-primary/10 p-3 rounded-xl">
-                        <Target className="h-6 w-6 text-primary" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                          {selectedYears.length > 1 ? 'Pico Consolidado' : 'Pico de Gasto'}
-                        </p>
-                        <h3 className="text-xl font-headline font-bold text-slate-800 uppercase">
-                          {kpis.peakMonth}
-                        </h3>
-                      </div>
-                    </div>
-                  </CardContent>
-               </Card>
-               <Card className="border-none shadow-md bg-white border-l-4 border-l-rose-500">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-4">
-                      <div className="bg-rose-100 p-3 rounded-xl">
-                        <AlertCircle className="h-6 w-6 text-rose-600" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                          {selectedYears.length > 1 ? 'Desviación Promedio' : 'Desviación Ppto'}
-                        </p>
-                        <h3 className="text-xl font-headline font-bold text-slate-800">
-                          {Number(kpis.deviation) > 0 ? '+' : ''}{kpis.deviation}%
-                        </h3>
-                      </div>
-                    </div>
-                  </CardContent>
-               </Card>
+                  <span className="text-[8px] font-black text-slate-900 uppercase tracking-widest">WAI Forensic Intelligence Platform</span>
+               </div>
+               <p className="text-[8px] text-slate-400 font-bold uppercase">Página 01 / 01 • Folio Interno: {selectedYears.join('-')}-{Date.now().toString().slice(-6)}</p>
             </div>
           </div>
         </main>
