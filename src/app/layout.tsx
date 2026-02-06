@@ -1,8 +1,10 @@
+
 import type {Metadata} from 'next';
 import './globals.css';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { Toaster } from '@/components/ui/toaster';
 import { FirebaseClientProvider } from '@/firebase';
+import { AuthCheck } from '@/components/AuthCheck';
 
 export const metadata: Metadata = {
   title: 'Análisis de OC/OT de Walmart',
@@ -23,9 +25,11 @@ export default function RootLayout({
       </head>
       <body className="font-body antialiased">
         <FirebaseClientProvider>
-          <SidebarProvider>
-            {children}
-          </SidebarProvider>
+          <AuthCheck>
+            <SidebarProvider>
+              {children}
+            </SidebarProvider>
+          </AuthCheck>
           <Toaster />
         </FirebaseClientProvider>
       </body>
