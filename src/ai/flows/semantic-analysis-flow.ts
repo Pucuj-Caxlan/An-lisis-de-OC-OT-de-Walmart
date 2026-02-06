@@ -40,7 +40,7 @@ const semanticPrompt = ai.definePrompt({
   DATOS DE ENTRADA:
   Descripción: {{{descripcion}}}
   Causa Declarada: {{{causaDeclarada}}}
-  Line Items: {{#each lineItems}} - {{{this.descripcion}}} (${{{this.importe}}}) {{/each}}
+  Line Items: {{#each lineItems}} - {{{this.descripcion}}} (\${{{this.importe}}}) {{/each}}
   
   TAREAS:
   1. Identifica el "Concepto Normalizado" (ej. si dice 'movimiento de muros y pintura' -> 'Remodelación Layout').
