@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useEffect } from 'react';
@@ -18,7 +19,8 @@ import {
   Eraser,
   Play,
   Filter,
-  FileText
+  FileText,
+  FileSpreadsheet
 } from 'lucide-react';
 import {
   Table,
@@ -59,6 +61,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -94,8 +97,9 @@ export default function AnalysisPage() {
       const result = await analyzeOrderSemantically({
         descripcion: order.descripcion || order.descripcionOriginal || order.standardizedDescription || "",
         causaDeclarada: order.causaRaiz,
-        lineItems: order.lineItems || [],
-        montoTotal: order.impactoNeto || order.impactAmount
+        montoTotal: order.impactoNeto || order.impactAmount,
+        contextoExtendido: order,
+        isSigned: order.isSigned
       });
 
       if (db) {
@@ -138,7 +142,7 @@ export default function AnalysisPage() {
         const result = await analyzeOrderSemantically({
           descripcion: order.descripcion || order.descripcionOriginal || "",
           causaDeclarada: order.causaRaiz,
-          lineItems: order.lineItems || []
+          montoTotal: order.impactoNeto || 0
         });
         if (db) {
           await updateDoc(doc(db, 'orders', order.id), {
@@ -313,9 +317,25 @@ export default function AnalysisPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-bold text-primary">{order.projectId}</span>
-                          <span className="text-[10px] text-muted-foreground uppercase truncate max-w-[200px]">{order.projectName || "Sin Nombre"}</span>
+                        <div className="flex items-center gap-3">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                {order.createdFromPdf ? (
+                                  <FileText className="h-5 w-5 text-primary shrink-0" />
+                                ) : (
+                                  <FileSpreadsheet className="h-5 w-5 text-emerald-600 shrink-0" />
+                                )}
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="text-[10px] font-bold uppercase">{order.createdFromPdf ? 'Fuente: PDF Oficial' : 'Fuente: Reporte Excel'}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <div className="flex flex-col">
+                            <span className="font-bold text-primary">{order.projectId}</span>
+                            <span className="text-[10px] text-muted-foreground uppercase truncate max-w-[200px]">{order.projectName || "Sin Nombre"}</span>
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -467,3 +487,4 @@ export default function AnalysisPage() {
     </div>
   );
 }
+import { TooltipProvider } from '@/components/ui/tooltip';
