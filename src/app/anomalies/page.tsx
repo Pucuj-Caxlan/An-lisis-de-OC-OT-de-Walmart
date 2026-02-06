@@ -1,7 +1,7 @@
 
 "use client"
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -17,10 +17,12 @@ import {
   Info,
   BadgeAlert,
   Database,
-  Search
+  Search,
+  History,
+  Trash2
 } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, limit } from 'firebase/firestore';
+import { collection, query, limit, doc, setDoc, deleteDoc, orderBy } from 'firebase/firestore';
 import { detectAnomalies, AnomalyDetectionOutput } from '@/ai/flows/anomaly-detection-flow';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -40,10 +42,17 @@ export default function AnomaliesPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), limit(150));
+    return query(collection(db, 'orders'), limit(100));
   }, [db]);
 
-  const { data: orders, isLoading } = useCollection(ordersQuery);
+  const { data: orders } = useCollection(ordersQuery);
+
+  const auditHistoryQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'audits'), orderBy('timestamp', 'desc'), limit(10));
+  }, [db]);
+
+  const { data: auditsHistory, isLoading: isLoadingAudits } = useCollection(auditHistoryQuery);
 
   const runDeepScan = async () => {
     if (!orders || orders.length === 0) {
@@ -53,7 +62,6 @@ export default function AnomaliesPage() {
     
     setIsScanning(true);
     try {
-      // Normalizamos los datos antes de enviarlos a la IA para asegurar consistencia entre PDF y Excel
       const normalizedOrders = orders.map(o => ({
         id: o.id,
         projectId: o.projectId || o.projectInfo?.projectId || "N/A",
@@ -67,11 +75,36 @@ export default function AnomaliesPage() {
 
       const result = await detectAnomalies({ orders: normalizedOrders });
       setAuditResult(result);
+
+      // Guardar histórico
+      if (db) {
+        const auditId = `audit_${Date.now()}`;
+        await setDoc(doc(db, 'audits', auditId), {
+          id: auditId,
+          timestamp: new Date().toISOString(),
+          globalHealthScore: result.globalHealthScore,
+          summary: result.summary,
+          anomaliesCount: result.anomalies.length,
+          sampleSize: orders.length,
+          anomalies: result.anomalies
+        });
+      }
+
       toast({ title: "Auditoría Finalizada", description: `Se detectaron ${result.anomalies.length} anomalías.` });
-    } catch (error) {
-      toast({ variant: "destructive", title: "Error en Escaneo", description: "No se pudo completar la auditoría IA." });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error en Escaneo", description: error.message || "No se pudo completar la auditoría IA." });
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  const deleteAudit = async (id: string) => {
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db, 'audits', id));
+      toast({ title: "Reporte eliminado" });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Error" });
     }
   };
 
@@ -112,7 +145,6 @@ export default function AnomaliesPage() {
         </header>
 
         <main className="p-6 md:p-8 space-y-8">
-          {/* Hero Section: Data Health */}
           <div className="grid md:grid-cols-3 gap-6">
             <Card className="md:col-span-2 border-none shadow-sm bg-white overflow-hidden">
               <CardHeader className="pb-2">
@@ -135,44 +167,38 @@ export default function AnomaliesPage() {
                 </div>
                 <div className="space-y-2">
                    <Progress value={auditResult?.globalHealthScore || 0} className="h-2.5 bg-slate-100" />
-                   <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase">
-                     <span>Riesgo Crítico</span>
-                     <span>Salud Óptima</span>
-                   </div>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-xl border border-dashed border-slate-200">
                   <p className="text-sm text-slate-600 italic leading-relaxed">
-                    {auditResult ? auditResult.summary : "Ejecute el escaneo para que el motor forense de Gemini analice inconsistencias semánticas, financieras y de cumplimiento en los registros cargados."}
+                    {auditResult ? auditResult.summary : "Ejecute el escaneo para que el motor forense de Gemini analice inconsistencias semánticas, financieras y de cumplimiento."}
                   </p>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="border-none shadow-sm bg-slate-800 text-white overflow-hidden">
-              <CardHeader className="bg-slate-900/50 border-b border-white/5">
-                <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Distribución de Hallazgos</CardTitle>
+            <Card className="border-none shadow-sm bg-white overflow-hidden">
+              <CardHeader className="border-b bg-slate-50">
+                <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                  <History className="h-4 w-4" /> Últimas Auditorías
+                </CardTitle>
               </CardHeader>
-              <CardContent className="pt-6 space-y-4">
-                <div className="flex justify-between items-center p-3 rounded-lg bg-rose-500/10 border border-rose-500/20">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                    <span className="text-xs font-bold uppercase">Riesgos Críticos</span>
-                  </div>
-                  <Badge className="bg-rose-500 text-white">{auditResult?.anomalies.filter(a => a.severity === 'Alta').length || 0}</Badge>
-                </div>
-                <div className="flex justify-between items-center p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-amber-500" />
-                    <span className="text-xs font-bold uppercase">Alertas Medias</span>
-                  </div>
-                  <Badge className="bg-amber-500 text-white">{auditResult?.anomalies.filter(a => a.severity === 'Media').length || 0}</Badge>
-                </div>
-                <div className="flex justify-between items-center p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-blue-500" />
-                    <span className="text-xs font-bold uppercase">Inconsistencias Leves</span>
-                  </div>
-                  <Badge className="bg-blue-500 text-white">{auditResult?.anomalies.filter(a => a.severity === 'Baja').length || 0}</Badge>
+              <CardContent className="p-0">
+                <div className="divide-y max-h-[250px] overflow-y-auto">
+                  {isLoadingAudits ? (
+                    <div className="p-4 text-center text-xs text-slate-400 animate-pulse">Cargando historial...</div>
+                  ) : auditsHistory?.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-slate-400">Sin historial aún.</div>
+                  ) : auditsHistory?.map((audit) => (
+                    <div key={audit.id} className="p-3 hover:bg-slate-50 flex items-center justify-between group cursor-pointer" onClick={() => setAuditResult(audit as any)}>
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] font-bold text-slate-800">{new Date(audit.timestamp).toLocaleString()}</p>
+                        <p className="text-[9px] text-slate-400 uppercase">{audit.anomaliesCount} hallazgos | Score: {audit.globalHealthScore}</p>
+                      </div>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 text-rose-300" onClick={(e) => { e.stopPropagation(); deleteAudit(audit.id); }}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -180,68 +206,44 @@ export default function AnomaliesPage() {
 
           <Separator />
 
-          {/* Anomaly Feed */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-headline font-bold text-slate-800 flex items-center gap-2">
-                <BadgeAlert className="h-6 w-6 text-rose-500" /> 
-                Feed de Hallazgos Forenses
-              </h2>
-              {auditResult && (
-                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                   {auditResult.anomalies.length} hallazgos detectados
-                 </span>
-              )}
-            </div>
+            <h2 className="text-xl font-headline font-bold text-slate-800 flex items-center gap-2">
+              <BadgeAlert className="h-6 w-6 text-rose-500" /> 
+              Feed de Hallazgos Forenses
+            </h2>
             
             {!auditResult ? (
-              <div className="h-80 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-slate-300 bg-white/50 border-slate-200">
-                <div className="bg-slate-100 p-6 rounded-full mb-4">
-                  <BrainCircuit className="h-12 w-12 opacity-20 text-primary" />
-                </div>
-                <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Sin Escaneo Activo</p>
-                <p className="text-xs text-slate-400 mt-1">Haga clic en el botón superior para iniciar el análisis IA</p>
+              <div className="h-60 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-slate-300 bg-white/50 border-slate-200">
+                <BrainCircuit className="h-10 w-10 opacity-20 text-primary mb-2" />
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Seleccione un reporte o inicie escaneo</p>
               </div>
             ) : (
-              <div className="grid gap-6">
+              <div className="grid gap-4">
                 {auditResult.anomalies.map((anomaly, i) => (
-                  <Card key={i} className="border-none shadow-sm hover:shadow-md transition-all duration-300 bg-white overflow-hidden group">
-                    <div className="flex h-full">
+                  <Card key={i} className="border-none shadow-sm bg-white overflow-hidden">
+                    <div className="flex">
                       <div className={`w-1.5 ${getSeverityColor(anomaly.severity)}`} />
-                      <div className="flex-1 p-6">
-                        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-5">
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-3">
-                              <Badge variant="outline" className="text-[10px] font-black uppercase border-slate-200 bg-slate-50 text-slate-600 py-1">
-                                {anomaly.type}
-                              </Badge>
-                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
-                                <Search className="h-3 w-3" /> PID: {anomaly.projectId}
-                              </div>
+                      <div className="flex-1 p-5">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-[10px] uppercase">{anomaly.type}</Badge>
+                              <span className="text-[10px] font-bold text-slate-400">PID: {anomaly.projectId}</span>
                             </div>
-                            <h3 className="text-xl font-bold text-slate-800 tracking-tight leading-tight">{anomaly.finding}</h3>
+                            <h3 className="text-lg font-bold text-slate-800 leading-tight">{anomaly.finding}</h3>
                           </div>
-                          <Badge className={`${getSeverityColor(anomaly.severity)} uppercase text-[10px] font-black h-7 px-4 shadow-sm text-white`}>
-                            Severidad {anomaly.severity}
+                          <Badge className={`${getSeverityColor(anomaly.severity)} uppercase text-[9px] text-white`}>
+                            {anomaly.severity}
                           </Badge>
                         </div>
-                        
-                        <div className="grid md:grid-cols-2 gap-6 bg-slate-50/50 p-5 rounded-2xl border border-slate-100">
-                          <div className="space-y-3">
-                            <h4 className="text-[10px] font-black text-primary uppercase flex items-center gap-2 tracking-widest">
-                              <Info className="h-3 w-3" /> Razonamiento de Auditoría
-                            </h4>
-                            <p className="text-sm text-slate-600 leading-relaxed italic border-l-2 border-primary/20 pl-4 py-1">
-                              {anomaly.reasoning}
-                            </p>
+                        <div className="grid md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                          <div className="space-y-2">
+                            <h4 className="text-[9px] font-black text-primary uppercase">Razonamiento</h4>
+                            <p className="text-xs text-slate-600 italic">{anomaly.reasoning}</p>
                           </div>
-                          <div className="space-y-3">
-                            <h4 className="text-[10px] font-black text-rose-500 uppercase flex items-center gap-2 tracking-widest">
-                              <ShieldCheck className="h-3 w-3" /> Acción Preventiva Sugerida
-                            </h4>
-                            <p className="text-sm text-slate-800 font-bold bg-white p-3 rounded-lg border shadow-sm">
-                              {anomaly.recommendation}
-                            </p>
+                          <div className="space-y-2">
+                            <h4 className="text-[9px] font-black text-rose-500 uppercase">Acción Sugerida</h4>
+                            <p className="text-xs text-slate-800 font-bold">{anomaly.recommendation}</p>
                           </div>
                         </div>
                       </div>

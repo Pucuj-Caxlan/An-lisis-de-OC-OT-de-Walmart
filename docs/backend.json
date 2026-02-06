@@ -42,26 +42,34 @@
             "summary": { "type": "array", "items": { "type": "string" } },
             "preventiveChecks": { "type": "array", "items": { "type": "string" } }
           }
-        },
-        "feedback": {
-          "type": "object",
-          "properties": {
-            "isConfirmed": { "type": "boolean" },
-            "correctedConcept": { "type": "string" },
-            "correctedCause": { "type": "string" }
-          }
         }
       }
     },
-    "Taxonomy": {
-      "title": "Taxonomy",
+    "AuditReport": {
+      "title": "Audit Report",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "type": { "type": "string", "enum": ["CAUSE", "CONCEPT", "SPECIALTY"] },
-        "name": { "type": "string" },
-        "synonyms": { "type": "array", "items": { "type": "string" } },
-        "rules": { "type": "string" }
+        "timestamp": { "type": "string", "format": "date-time" },
+        "globalHealthScore": { "type": "number" },
+        "summary": { "type": "string" },
+        "anomaliesCount": { "type": "number" },
+        "sampleSize": { "type": "number" },
+        "anomalies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "orderId": { "type": "string" },
+              "projectId": { "type": "string" },
+              "type": { "type": "string" },
+              "severity": { "type": "string" },
+              "finding": { "type": "string" },
+              "reasoning": { "type": "string" },
+              "recommendation": { "type": "string" }
+            }
+          }
+        }
       }
     }
   },
@@ -70,6 +78,6 @@
   },
   "firestore": {
     "/orders/{orderId}": { "schema": "Order", "description": "Normalized records with semantic AI enrichment" },
-    "/taxonomies/{taxonomyId}": { "schema": "Taxonomy", "description": "Master catalogs for AI normalization" }
+    "/audits/{auditId}": { "schema": "AuditReport", "description": "Historical forensic audit reports" }
   }
 }

@@ -50,20 +50,20 @@ const anomalyPrompt = ai.definePrompt({
 
   DATOS PARA ANALIZAR (NORMALIZADOS):
   {{#each orders}}
-  - ID: {{{id}}} | PID: {{{projectId}}} | Monto: \${{{impactoNeto}}} | Causa Declarada: {{{causaRaiz}}} | Firmado: {{#if isSigned}} SÍ {{else}} NO {{/if}} | Apéndice F: {{#if appendixF}} SÍ {{else}} NO {{/if}}
+  - ID: {{{id}}} | PID: {{{projectId}}} | Monto: MXN {{{impactoNeto}}} | Causa Declarada: {{{causaRaiz}}} | Firmado: {{#if isSigned}} SÍ {{else}} NO {{/if}} | Apéndice F: {{#if appendixF}} SÍ {{else}} NO {{/if}}
     Descripción: {{{descripcion}}}
     IA Concepto Previo: {{{semanticAnalysis.conceptoNormalizado}}} | IA Causa Real Previa: {{{semanticAnalysis.causaRaizReal}}}
   {{/each}}
 
   CRITERIOS DE AUDITORÍA FORENSE:
-  1. DISCREPANCIA SEMÁNTICA CRÍTICA: La descripción revela un error de diseño o coordinación (ej. "ajuste por omisión de planos") pero se declara como "Regulatorio" o "Autoridad" para evitar penalizaciones.
-  2. RIESGO DE COMPLIANCE FINANCIERO: Órdenes con montos > $1M (MXN) que NO están firmadas o carecen de Apéndice F cuando la descripción menciona trámites o autoridades.
-  3. FRAGMENTACIÓN DE COSTOS (SPLITTING): Identifica si un mismo PID tiene múltiples órdenes en fechas cercanas que sumadas exceden límites de autorización.
-  4. ANOMALÍA OPERACIONAL: Montos desproporcionados para la descripción técnica provista (ej. $500k por "limpieza de terreno" en una unidad pequeña).
+  1. DISCREPANCIA SEMÁNTICA CRÍTICA: La descripción revela un error de diseño o coordinación pero se declara como "Regulatorio" o "Autoridad".
+  2. RIESGO DE COMPLIANCE FINANCIERO: Órdenes con montos altos que NO están firmadas o carecen de Apéndice F.
+  3. FRAGMENTACIÓN DE COSTOS (SPLITTING): Identifica si un mismo PID tiene múltiples órdenes cercanas.
+  4. ANOMALÍA OPERACIONAL: Montos desproporcionados para la descripción técnica provista.
 
   INSTRUCCIONES DE SALIDA:
-  - Sé específico en el hallazgo (no genérico).
-  - El Health Score debe bajar drásticamente si hay discrepancias semánticas o falta de firmas en montos altos.
+  - Sé específico en el hallazgo.
+  - El Health Score debe bajar si hay falta de firmas en montos altos.
   - El resumen debe ser de nivel ejecutivo (VP).`,
 });
 

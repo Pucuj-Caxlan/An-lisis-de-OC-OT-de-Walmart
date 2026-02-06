@@ -1,9 +1,7 @@
+
 'use server';
 /**
  * @fileOverview Motor de Inteligencia Semántica para la normalización y auditoría de OC/OT.
- * 
- * Transforma datos crudos de PDF/Excel en inteligencia de negocio,
- * detectando discrepancias entre la causa declarada y la realidad técnica.
  */
 
 import {ai} from '@/ai/genkit';
@@ -19,18 +17,18 @@ const SemanticAnalysisInputSchema = z.object({
 export type SemanticAnalysisInput = z.infer<typeof SemanticAnalysisInputSchema>;
 
 const SemanticAnalysisOutputSchema = z.object({
-  conceptoNormalizado: z.string().describe("Etiqueta canónica (ej. Acometida Eléctrica, Obra Civil, Permisos)."),
+  conceptoNormalizado: z.string().describe("Etiqueta canónica."),
   especialidadImpactada: z.enum(['Eléctrico', 'Civil', 'Estructuras', 'Ambiental', 'Permisos', 'GNFR', 'Arquitectura', 'Instalaciones', 'Otros']),
-  causaRaizReal: z.string().describe("Inferencia técnica (ej. Error de Cálculo en Diseño, Omisión de Trámite, Ajuste Operativo)."),
+  causaRaizReal: z.string().describe("Inferencia técnica."),
   confidence: z.number(),
-  summary: z.array(z.string()).describe("Hallazgos clave detectados por la IA."),
-  preventiveChecks: z.array(z.string()).describe("Recomendaciones para evitar recurrencia."),
+  summary: z.array(z.string()).describe("Hallazgos clave."),
+  preventiveChecks: z.array(z.string()).describe("Recomendaciones."),
   standardizedDescription: z.string().describe("Formato: [QUÉ]: ... / [POR QUÉ]: ... / [RIESGO]: ..."),
   auditAlerts: z.array(z.object({
     type: z.string(),
     message: z.string(),
     severity: z.enum(['High', 'Med', 'Low'])
-  })).describe("Alertas de cumplimiento o inconsistencias de datos.")
+  }))
 });
 export type SemanticAnalysisOutput = z.infer<typeof SemanticAnalysisOutputSchema>;
 
@@ -43,19 +41,13 @@ const semanticPrompt = ai.definePrompt({
 ENTRADA:
 - Descripción: {{{descripcion}}}
 - Causa Declarada: {{{causaDeclarada}}}
-- Monto: \${{{montoTotal}}}
+- Monto: MXN {{{montoTotal}}}
 - Firmado: {{#if isSigned}} SÍ {{else}} NO {{/if}}
-- Contexto PDF: {{{contextoExtendido}}}
 
 OBJETIVOS:
-1. VERDAD TÉCNICA: A menudo se declara 'Cumplimiento / Autoridad' para evitar penalizaciones internas, pero la descripción revela 'ajuste por error en plano'. Identifica la 'Causa Raíz Real'.
-2. ALERTAS: Si el monto es alto y el documento NO está firmado, genera una alerta High. Si falta el Apéndice F en un cambio por 'Autoridad', genera una alerta.
-3. NORMALIZACIÓN: Estandariza la descripción para que Pedro (VP) pueda leerla rápidamente.
-
-Esquema de descripción:
-[QUÉ]: El cambio físico.
-[POR QUÉ]: El motivo técnico o administrativo.
-[RIESGO]: Qué pasa si no se autoriza.`,
+1. VERDAD TÉCNICA: Identifica la 'Causa Raíz Real'.
+2. ALERTAS: Si el monto es alto y el documento NO está firmado, genera una alerta High.
+3. NORMALIZACIÓN: Estandariza la descripción [QUÉ] / [POR QUÉ] / [RIESGO].`,
 });
 
 export async function analyzeOrderSemantically(input: SemanticAnalysisInput): Promise<SemanticAnalysisOutput> {
