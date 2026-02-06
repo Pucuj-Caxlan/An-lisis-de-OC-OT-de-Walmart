@@ -34,13 +34,6 @@ import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, query } from 'firebase/firestore';
 import { analyzeStrategicTrends, TrendAnalysisOutput } from '@/ai/flows/trend-analysis-flow';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -62,8 +55,12 @@ export default function TrendsPage() {
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
+  // Helper para extraer fecha de cualquier fuente (Excel o PDF)
+  const getOrderDate = (o: any) => {
+    return o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate;
+  };
+
   const trendData = useMemo(() => {
-    // Inicializamos con los 12 meses siempre para evitar errores de arreglos vacíos
     const monthly = Array(12).fill(0).map((_, i) => ({
       month: MONTH_NAMES[i],
       impact: 0,
@@ -75,12 +72,16 @@ export default function TrendsPage() {
 
     let cumulativeSum = 0;
     orders.forEach(o => {
-      if (!o.fechaSolicitud) return;
-      const date = new Date(o.fechaSolicitud);
+      const dateStr = getOrderDate(o);
+      if (!dateStr) return;
+      
+      const date = new Date(dateStr);
       if (date.getFullYear() === selectedYear) {
         const month = date.getMonth();
         if (monthly[month]) {
-          monthly[month].impact += (o.impactoNeto || 0);
+          // Sumamos impacto de Excel (impactoNeto) o PDF (financialImpact.netImpact)
+          const impactValue = o.impactoNeto || o.financialImpact?.netImpact || 0;
+          monthly[month].impact += impactValue;
           monthly[month].count += 1;
         }
       }
@@ -120,7 +121,6 @@ export default function TrendsPage() {
     }).format(val);
   };
 
-  // Encontrar el mes de mayor impacto de forma segura
   const peakMonth = useMemo(() => {
     if (trendData.length === 0) return { month: 'N/A' };
     return trendData.reduce((prev, curr) => (prev.impact > curr.impact) ? prev : curr, trendData[0]);
@@ -253,7 +253,7 @@ export default function TrendsPage() {
                       axisLine={false} 
                       tickLine={false} 
                       tick={{ fontSize: 10, fill: '#64748b' }} 
-                      tickFormatter={(v) => `$${v/1000}k`}
+                      tickFormatter={(v) => `$${Math.round(v/1000)}k`}
                     />
                     <Tooltip 
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
