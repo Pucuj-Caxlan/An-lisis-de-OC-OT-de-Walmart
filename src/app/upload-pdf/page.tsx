@@ -37,7 +37,6 @@ export default function UploadPdfPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<ExtractPdfDataOutput | null>(null);
   const [matchStatus, setMatchStatus] = useState<'MATCHED' | 'NEW' | 'PENDING' | 'RETRY'>('PENDING');
-  const [retryAfter, setRetryAfter] = useState<number>(0);
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('es-MX', { 
@@ -79,16 +78,17 @@ export default function UploadPdfPage() {
         isSigned: extracted.extractedData.isSigned
       });
 
+      // Homologación de campos para compatibilidad total con Excel y Dashboard
       const homogenizedData = {
         ...extracted.extractedData,
-        // Campos raíz para compatibilidad total con Excel
-        projectId: extracted.extractedData.projectInfo?.projectId,
-        projectName: extracted.extractedData.projectInfo?.projectName,
-        format: extracted.extractedData.projectInfo?.format,
+        projectId: extracted.extractedData.projectInfo?.projectId || "",
+        projectName: extracted.extractedData.projectInfo?.projectName || "",
+        format: extracted.extractedData.projectInfo?.format || "Otros",
         impactoNeto: extracted.extractedData.financialImpact?.netImpact || 0,
         causaRaiz: extracted.extractedData.projectInfo?.rootCauseDeclared || "",
         descripcion: extracted.extractedData.descriptionSection?.description || "",
-        fechaSolicitud: extracted.extractedData.header?.requestDate || null,
+        fechaSolicitud: extracted.extractedData.header?.requestDate || new Date().toISOString(),
+        isSigned: extracted.extractedData.isSigned || false,
         // Metadatos de IA
         semanticAnalysis: semantic,
         standardizedDescription: semantic.standardizedDescription,
@@ -132,14 +132,12 @@ export default function UploadPdfPage() {
 
     } catch (error: any) {
       const isQuotaError = error.message?.includes('429') || error.message?.toLowerCase().includes('quota');
-      
       if (isQuotaError) {
         setMatchStatus('RETRY');
-        setRetryAfter(10); // Sugerir 10 segundos
         toast({ 
           variant: "destructive", 
           title: "Límite de IA alcanzado", 
-          description: "La cuota gratuita de Gemini se ha agotado temporalmente. Por favor, espere unos segundos e intente de nuevo." 
+          description: "La cuota gratuita de Gemini se ha agotado. Espere unos segundos e intente de nuevo." 
         });
       } else {
         toast({ 
@@ -167,7 +165,7 @@ export default function UploadPdfPage() {
             <Card className="md:col-span-1 border-none shadow-sm h-fit">
               <CardHeader>
                 <CardTitle className="text-lg">Carga Individual</CardTitle>
-                <CardDescription>Formatos firmados o borradores</CardDescription>
+                <CardDescription>Formatos firmados (OC/OT)</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div 
@@ -195,35 +193,27 @@ export default function UploadPdfPage() {
                     <Progress value={75} className="h-1.5" />
                   </div>
                 )}
-
-                {matchStatus === 'RETRY' && (
-                  <div className="p-4 bg-amber-100/50 rounded-lg border border-amber-200 text-center">
-                    <p className="text-[10px] font-bold text-amber-700 uppercase leading-tight">
-                      Límite de API de Google alcanzado. Por favor intente en unos 10-15 segundos.
-                    </p>
-                  </div>
-                )}
               </CardContent>
             </Card>
 
             <div className="md:col-span-3 space-y-6">
               {results?.extractedData ? (
-                <Card className="border-none shadow-sm overflow-hidden border-t-4 border-t-primary">
+                <Card className="border-none shadow-sm overflow-hidden border-t-4 border-t-primary bg-white">
                   <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center gap-3">
-                        <CardTitle className="text-xl font-headline">{results.extractedData.header.type}</CardTitle>
+                        <CardTitle className="text-xl font-headline">{results.extractedData.header?.type || "Orden"}</CardTitle>
                         <Badge variant={results.extractedData.isSigned ? "default" : "destructive"} className="gap-1 uppercase text-[10px]">
                           <Signature className="h-3 w-3" /> {results.extractedData.isSigned ? "Firmado" : "Sin Firma"}
                         </Badge>
                       </div>
                       <CardDescription>
-                        PID: <span className="font-bold text-slate-900">{results.extractedData.projectInfo.projectId}</span> | 
-                        Orden: <span className="font-bold text-slate-900">{results.extractedData.header.orderNumber}</span>
+                        PID: <span className="font-bold text-slate-900">{results.extractedData.projectId}</span> | 
+                        Orden: <span className="font-bold text-slate-900">{results.extractedData.header?.orderNumber}</span>
                       </CardDescription>
                     </div>
                     <Badge variant="outline" className={`h-8 px-4 uppercase font-black text-[10px] ${matchStatus === 'MATCHED' ? 'text-emerald-600 border-emerald-200 bg-emerald-50' : 'text-primary border-primary/30'}`}>
-                      {matchStatus === 'MATCHED' ? 'Sincronizado con Excel' : 'Nuevo Registro'}
+                      {matchStatus === 'MATCHED' ? 'Sincronizado' : 'Nuevo Registro'}
                     </Badge>
                   </CardHeader>
                   
@@ -231,17 +221,17 @@ export default function UploadPdfPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
                         <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impacto Homologado</p>
-                        <p className="text-lg font-bold text-primary">{formatCurrency(results.extractedData.financialImpact.netImpact)}</p>
+                        <p className="text-lg font-bold text-primary">{formatCurrency(results.extractedData.impactoNeto)}</p>
                       </div>
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
                         <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Monto Acumulado</p>
-                        <p className="text-lg font-bold text-slate-800">{formatCurrency(results.extractedData.financialImpact.accumulatedAmount)}</p>
+                        <p className="text-lg font-bold text-slate-800">{formatCurrency(results.extractedData.financialImpact?.accumulatedAmount || 0)}</p>
                       </div>
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
-                        <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Status Anticorrupción</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Anticorrupción</p>
                         <div className="flex items-center gap-2">
-                          {results.extractedData.antiCorruption.appendixF ? <ShieldCheck className="h-5 w-5 text-emerald-500" /> : <ShieldAlert className="h-5 w-5 text-rose-500" />}
-                          <span className="text-xs font-bold uppercase">{results.extractedData.antiCorruption.appendixF ? 'Apéndice F OK' : 'Falta Apéndice F'}</span>
+                          {results.extractedData.antiCorruption?.appendixF ? <ShieldCheck className="h-5 w-5 text-emerald-500" /> : <ShieldAlert className="h-5 w-5 text-rose-500" />}
+                          <span className="text-xs font-bold uppercase">{results.extractedData.antiCorruption?.appendixF ? 'Apéndice F OK' : 'Pendiente'}</span>
                         </div>
                       </div>
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
@@ -255,16 +245,16 @@ export default function UploadPdfPage() {
 
                     <div className="bg-primary/5 p-6 rounded-2xl border border-primary/10">
                       <h4 className="text-xs font-black uppercase text-primary mb-4 flex items-center gap-2 tracking-widest">
-                        <BrainCircuit className="h-5 w-5" /> Inteligencia Semántica Aplicada
+                        <BrainCircuit className="h-5 w-5" /> Análisis Semántico Forense
                       </h4>
                       <div className="grid md:grid-cols-3 gap-6">
                         <div className="md:col-span-2 space-y-4">
                           <p className="text-sm text-slate-700 leading-relaxed italic border-l-4 border-primary/30 pl-4">
-                            "{results.extractedData.standardizedDescription}"
+                            "{results.extractedData.standardizedDescription || "Descripción no disponible"}"
                           </p>
                           <div className="flex flex-wrap gap-2">
                             <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-[10px] uppercase font-bold">
-                              Inferencia: {results.extractedData.semanticAnalysis?.causaRaizReal}
+                              Causa Raíz Real: {results.extractedData.semanticAnalysis?.causaRaizReal}
                             </Badge>
                             <Badge variant="secondary" className="bg-primary/10 text-primary text-[10px] uppercase font-bold">
                               Especialidad: {results.extractedData.semanticAnalysis?.especialidadImpactada}
@@ -284,63 +274,16 @@ export default function UploadPdfPage() {
                         </div>
                       </div>
                     </div>
-
-                    <div className="grid md:grid-cols-2 gap-8">
-                      <div className="space-y-4">
-                        <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
-                          <Info className="h-4 w-4" /> Resumen de Auditoría
-                        </h4>
-                        <div className="border rounded-xl overflow-hidden">
-                          <Table className="text-[11px]">
-                            <TableBody>
-                              <TableRow className="bg-slate-50/50"><TableCell className="font-bold">Proyecto</TableCell><TableCell>{results.extractedData.projectInfo.projectName}</TableCell></TableRow>
-                              <TableRow><TableCell className="font-bold">PID / DET</TableCell><TableCell>{results.extractedData.projectInfo.projectId} / {results.extractedData.projectInfo.det}</TableCell></TableRow>
-                              <TableRow className="bg-slate-50/50"><TableCell className="font-bold">Formato / Proto</TableCell><TableCell>{results.extractedData.projectInfo.format} / {results.extractedData.projectInfo.proto}</TableCell></TableRow>
-                              <TableRow><TableCell className="font-bold">Causa Declarada</TableCell><TableCell>{results.extractedData.projectInfo.rootCauseDeclared}</TableCell></TableRow>
-                              <TableRow className="bg-slate-50/50"><TableCell className="font-bold">Planos Modificados</TableCell><TableCell>{results.extractedData.descriptionSection.modifications || "Ninguno reportado"}</TableCell></TableRow>
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
-                          <Users className="h-4 w-4" /> Firmas Detectadas
-                        </h4>
-                        <div className="border rounded-xl overflow-hidden bg-white shadow-sm">
-                          <Table className="text-[10px]">
-                            <TableHeader className="bg-slate-50">
-                              <TableRow>
-                                <TableHead>Área</TableHead>
-                                <TableHead>Nombre</TableHead>
-                                <TableHead className="text-center">Detección</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {results.extractedData.associates.slice(0, 4).map((associate: any, i: number) => (
-                                <TableRow key={i} className="hover:bg-slate-50/50">
-                                  <TableCell className="font-bold">{associate.area}</TableCell>
-                                  <TableCell>{associate.name}</TableCell>
-                                  <TableCell className="text-center">
-                                    {associate.hasSignature ? <Badge className="bg-emerald-500 text-[8px] h-4">FIRMA OK</Badge> : <Badge variant="outline" className="text-[8px] h-4 text-slate-300">VACÍO</Badge>}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </div>
-                    </div>
                   </CardContent>
                 </Card>
               ) : (
-                <div className="h-[600px] border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-muted-foreground bg-white/50 space-y-4">
+                <div className="h-[500px] border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-muted-foreground bg-white/50 space-y-4">
                   <div className="bg-slate-100 p-6 rounded-full">
-                    <FileText className="h-20 w-20 opacity-20" />
+                    <FileText className="h-16 w-16 opacity-20" />
                   </div>
                   <div className="text-center max-w-sm px-6">
-                    <p className="text-lg font-bold text-slate-400">Normalización Inteligente</p>
-                    <p className="text-xs mt-1">Arrastra un PDF firmado para homologar sus campos con el reporte maestro y extraer la verdad técnica vía IA.</p>
+                    <p className="text-lg font-bold text-slate-400 uppercase tracking-tighter">Normalización PDF en tiempo real</p>
+                    <p className="text-xs mt-1">Sube un formato oficial (OC/OT) para homologar automáticamente sus campos financieros y de auditoría con el Dashboard VP.</p>
                   </div>
                 </div>
               )}
