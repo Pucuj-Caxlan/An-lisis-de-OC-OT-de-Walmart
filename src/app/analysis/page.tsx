@@ -1,6 +1,7 @@
+
 "use client"
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -41,6 +42,16 @@ export default function AnalysisPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isGenerating, setIsGenerating] = useState<string | null>(null);
   const [aiDescriptions, setAiDescriptions] = useState<Record<string, string>>({});
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const formatAmount = (amount: number) => {
+    if (!mounted) return amount.toFixed(2);
+    return amount.toLocaleString();
+  };
 
   const filteredData = MOCK_OC_DATA.filter(item => 
     item.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -155,7 +166,7 @@ export default function AnalysisPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-bold text-slate-700">
-                        ${item.impactAmount.toLocaleString()}
+                        ${formatAmount(item.impactAmount)}
                       </TableCell>
                       <TableCell className="text-center">
                         {aiDescriptions[item.id] ? (

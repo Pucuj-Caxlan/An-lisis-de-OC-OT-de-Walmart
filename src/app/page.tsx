@@ -1,6 +1,7 @@
+
 "use client"
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { 
   SidebarInset, 
@@ -44,12 +45,22 @@ import { Badge } from '@/components/ui/badge';
 
 export default function Dashboard() {
   const [selectedTab, setSelectedTab] = useState('summary');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // KPI Calculations
   const totalImpact = MOCK_OC_DATA.reduce((acc, curr) => acc + curr.impactAmount, 0);
   const totalOrders = MOCK_OC_DATA.length;
   const anomalyCount = MOCK_OC_DATA.filter(d => d.isAnomaly).length;
   const pendingOrders = MOCK_OC_DATA.filter(d => d.status === 'Pendiente').length;
+
+  const formatAmount = (amount: number) => {
+    if (!mounted) return amount.toFixed(2);
+    return amount.toLocaleString();
+  };
 
   const impactByFormat = [
     { name: 'Bodega Aurrera', value: MOCK_OC_DATA.filter(d => d.format === 'Bodega Aurrera').reduce((acc, curr) => acc + curr.impactAmount, 0) },
@@ -98,7 +109,7 @@ export default function Dashboard() {
                 <DollarSign className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold font-headline">${totalImpact.toLocaleString()}</div>
+                <div className="text-2xl font-bold font-headline">${formatAmount(totalImpact)}</div>
                 <p className="flex items-center mt-1 text-xs text-emerald-600 font-medium">
                   <ArrowUpRight className="h-3 w-3 mr-1" /> +12.5% vs mes anterior
                 </p>
@@ -168,7 +179,7 @@ export default function Dashboard() {
                               return (
                                 <div className="bg-white p-3 border rounded-lg shadow-xl">
                                   <p className="text-sm font-bold text-slate-800">{payload[0].payload.month}</p>
-                                  <p className="text-primary font-medium">${payload[0].value?.toLocaleString()}</p>
+                                  <p className="text-primary font-medium">${formatAmount(payload[0].value as number)}</p>
                                 </div>
                               );
                             }
@@ -207,7 +218,7 @@ export default function Dashboard() {
                               return (
                                 <div className="bg-white p-3 border rounded-lg shadow-xl">
                                   <p className="text-sm font-bold text-slate-800">{payload[0].payload.name}</p>
-                                  <p className="text-primary font-medium">${payload[0].value?.toLocaleString()}</p>
+                                  <p className="text-primary font-medium">${formatAmount(payload[0].value as number)}</p>
                                 </div>
                               );
                             }
@@ -249,7 +260,7 @@ export default function Dashboard() {
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="text-sm font-bold text-primary">${cause.impact.toLocaleString()}</p>
+                            <p className="text-sm font-bold text-primary">${formatAmount(cause.impact)}</p>
                             <Badge variant="secondary" className="text-[10px] uppercase font-bold text-primary/70">Crítico</Badge>
                           </div>
                         </div>
@@ -273,7 +284,7 @@ export default function Dashboard() {
                           </div>
                           <div className="flex items-center gap-4">
                             <div className="text-right">
-                              <p className="text-sm font-bold">${order.impactAmount.toLocaleString()}</p>
+                              <p className="text-sm font-bold">${formatAmount(order.impactAmount)}</p>
                               <Badge variant={order.status === 'Completado' ? 'default' : 'outline'} className="text-[10px]">
                                 {order.status}
                               </Badge>
