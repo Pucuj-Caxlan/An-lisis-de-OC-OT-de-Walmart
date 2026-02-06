@@ -111,8 +111,13 @@ export default function TrendsPage() {
   };
 
   const formatCurrency = (val: number) => {
-    if (!mounted) return "$0";
-    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
+    if (!mounted) return "$0.00";
+    return new Intl.NumberFormat('es-MX', { 
+      style: 'currency', 
+      currency: 'MXN', 
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2 
+    }).format(val);
   };
 
   // Encontrar el mes de mayor impacto de forma segura

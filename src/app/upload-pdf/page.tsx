@@ -31,6 +31,15 @@ export default function UploadPdfPage() {
   const [results, setResults] = useState<ExtractPdfDataOutput | null>(null);
   const [matchStatus, setMatchStatus] = useState<'MATCHED' | 'NEW' | 'PENDING'>('PENDING');
 
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat('es-MX', { 
+      style: 'currency', 
+      currency: 'MXN', 
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2 
+    }).format(val);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !db) return;
@@ -166,7 +175,7 @@ export default function UploadPdfPage() {
                         </div>
                         <div className="bg-slate-50 p-3 rounded-lg">
                           <p className="text-[10px] font-bold text-muted-foreground uppercase">Impacto Neto</p>
-                          <p className="text-sm font-bold text-primary">${results.extractedData.impactAmount.toLocaleString()}</p>
+                          <p className="text-sm font-bold text-primary">{formatCurrency(results.extractedData.impactAmount)}</p>
                         </div>
                       </div>
 

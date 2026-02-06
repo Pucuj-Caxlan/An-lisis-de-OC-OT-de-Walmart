@@ -81,7 +81,10 @@ export default function AnalysisPage() {
 
   const formatAmount = (amount: number) => {
     if (!mounted) return "0.00";
-    return amount.toLocaleString(undefined, { minimumFractionDigits: 2 });
+    return new Intl.NumberFormat('es-MX', { 
+      minimumFractionDigits: 2, 
+      maximumFractionDigits: 2 
+    }).format(amount);
   };
 
   const handleSemanticAnalysis = async (order: any) => {
