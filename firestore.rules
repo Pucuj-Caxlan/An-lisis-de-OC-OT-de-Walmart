@@ -7,33 +7,23 @@ service cloud.firestore {
     }
     
     match /orders/{orderId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn();
+      allow read, write: if isSignedIn();
     }
 
     match /audits/{auditId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow delete: if isSignedIn();
+      allow read, write: if isSignedIn();
     }
 
     match /importBatches/{batchId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn();
+      allow read, write: if isSignedIn();
     }
 
     match /chatSessions/{sessionId} {
-      // Para listar, validamos que los documentos pertenezcan al usuario autenticado
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      // Acceso individual por ID
-      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
-      // Creación validando el userId en los datos entrantes
+      // Permitimos lectura (get y list) si el documento pertenece al usuario
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      // Permitimos creación validando que el userId sea el del solicitante
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      // Actualización y borrado validando propiedad
+      // Permitimos actualización y borrado si el documento existente pertenece al usuario
       allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
   }
