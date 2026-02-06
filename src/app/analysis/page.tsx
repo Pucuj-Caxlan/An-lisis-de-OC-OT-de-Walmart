@@ -14,7 +14,10 @@ import {
   Filter, 
   RefreshCcw,
   Sparkles,
-  Info
+  Info,
+  CheckCircle2,
+  AlertTriangle,
+  Lightbulb
 } from 'lucide-react';
 import {
   Table,
@@ -25,9 +28,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from '@/components/ui/badge';
-import { MOCK_OC_DATA, OCData } from '@/lib/mock-data';
-import { generateOcOtDetailedDescription } from '@/ai/flows/generate-oc-ot-detailed-description';
 import { useToast } from '@/hooks/use-toast';
+import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { collection, query, limit, updateDoc, doc } from 'firebase/firestore';
+import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
   Dialog,
   DialogContent,
@@ -39,52 +43,62 @@ import {
 
 export default function AnalysisPage() {
   const { toast } = useToast();
+  const db = useFirestore();
   const [searchTerm, setSearchTerm] = useState('');
-  const [isGenerating, setIsGenerating] = useState<string | null>(null);
-  const [aiDescriptions, setAiDescriptions] = useState<Record<string, string>>({});
+  const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  const ordersQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'orders'), limit(50));
+  }, [db]);
+
+  const { data: orders, isLoading } = useCollection(ordersQuery);
+
   const formatAmount = (amount: number) => {
-    if (!mounted) return amount.toFixed(2);
-    return amount.toLocaleString();
+    if (!mounted) return "0.00";
+    return amount.toLocaleString(undefined, { minimumFractionDigits: 2 });
   };
 
-  const filteredData = MOCK_OC_DATA.filter(item => 
-    item.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.format.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.cause.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const handleGenAI = async (item: OCData) => {
-    setIsGenerating(item.id);
+  const handleSemanticAnalysis = async (order: any) => {
+    setIsAnalyzing(order.id);
     try {
-      const result = await generateOcOtDetailedDescription({
-        format: item.format,
-        country: item.country,
-        year: item.year,
-        plan: item.plan,
-        area: item.area,
-        details: item.details
+      const result = await analyzeOrderSemantically({
+        descripcion: order.descripcion || order.standardizedDescription,
+        causaDeclarada: order.causaRaiz,
+        lineItems: order.lineItems
       });
-      setAiDescriptions(prev => ({ ...prev, [item.id]: result.description }));
+
+      if (db) {
+        await updateDoc(doc(db, 'orders', order.id), {
+          semanticAnalysis: result
+        });
+      }
+
       toast({
-        title: "Descripción Generada",
-        description: "La IA ha procesado los puntos de datos exitosamente.",
+        title: "Análisis Semántico Completado",
+        description: "Se han extraído conceptos e insights preventivos.",
       });
     } catch (error) {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: "No se pudo generar la descripción en este momento.",
+        title: "Error de IA",
+        description: "No se pudo realizar el análisis semántico.",
       });
     } finally {
-      setIsGenerating(null);
+      setIsAnalyzing(null);
     }
   };
+
+  const filteredOrders = orders?.filter(o => 
+    o.orderNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    o.projectId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    o.format?.toLowerCase().includes(searchTerm.toLowerCase())
+  ) || [];
 
   return (
     <div className="flex min-h-screen w-full bg-background/50">
@@ -93,174 +107,132 @@ export default function AnalysisPage() {
         <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6">
           <div className="flex items-center gap-4">
             <SidebarTrigger />
-            <h1 className="text-xl font-headline font-bold text-slate-800">Análisis Causa Raíz</h1>
+            <h1 className="text-xl font-headline font-bold text-slate-800">Análisis Semántico & QC</h1>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
               <Input
-                placeholder="Buscar por OC, formato o causa..."
+                placeholder="Buscar por PID o OC..."
                 className="pl-9 w-[300px] h-9"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <Button variant="outline" size="sm" className="h-9">
-              <Filter className="h-4 w-4 mr-2" /> Filtros
-            </Button>
           </div>
         </header>
 
         <main className="p-6 md:p-8">
           <Card className="border-none shadow-sm overflow-hidden">
             <CardHeader className="bg-slate-50/50 border-b">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg font-headline">Registro Maestro de OC/OT</CardTitle>
-                  <CardDescription>Visualización de datos unificados y herramientas de IA</CardDescription>
-                </div>
-                <div className="flex gap-2 text-xs">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <div className="h-2 w-2 rounded-full bg-emerald-500"></div> Completado
-                  </div>
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <div className="h-2 w-2 rounded-full bg-amber-500"></div> Pendiente
-                  </div>
-                </div>
-              </div>
+              <CardTitle className="text-lg font-headline">Registro de Órdenes Inteligentes</CardTitle>
+              <CardDescription>Normalización automática de conceptos y especialidades via IA</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
-                <TableHeader className="bg-slate-50">
+                <TableHeader>
                   <TableRow>
-                    <TableHead className="font-bold">OC / Número</TableHead>
-                    <TableHead className="font-bold">Formato / País</TableHead>
-                    <TableHead className="font-bold">Área</TableHead>
-                    <TableHead className="font-bold">Causa Identificada</TableHead>
-                    <TableHead className="font-bold text-right">Impacto Económico</TableHead>
-                    <TableHead className="font-bold text-center">IA Asistente</TableHead>
-                    <TableHead></TableHead>
+                    <TableHead>PID / Orden</TableHead>
+                    <TableHead>Concepto IA</TableHead>
+                    <TableHead>Especialidad</TableHead>
+                    <TableHead>Causa Real (Inferencia)</TableHead>
+                    <TableHead className="text-right">Impacto</TableHead>
+                    <TableHead className="text-center">IA Insights</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredData.map((item) => (
-                    <TableRow key={item.id} className="hover:bg-primary/5 transition-colors group">
+                  {isLoading ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-10">Cargando datos...</TableCell></TableRow>
+                  ) : filteredOrders.map((order) => (
+                    <TableRow key={order.id} className="hover:bg-primary/5">
                       <TableCell>
                         <div className="flex flex-col">
-                          <span className="font-bold text-primary">{item.orderNumber}</span>
-                          <span className="text-[10px] text-muted-foreground uppercase">{item.plan}</span>
+                          <span className="font-bold text-primary">{order.projectId}</span>
+                          <span className="text-[10px] text-muted-foreground">{order.orderNumber || order.id}</span>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium">{item.format}</span>
-                          <span className="text-xs text-muted-foreground">{item.country}</span>
-                        </div>
+                        {order.semanticAnalysis?.conceptoNormalizado ? (
+                          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                            {order.semanticAnalysis.conceptoNormalizado}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs italic text-muted-foreground">Pendiente</span>
+                        )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary" className="font-normal text-[10px]">{item.area}</Badge>
+                        <span className="text-sm">{order.semanticAnalysis?.especialidadImpactada || "N/A"}</span>
                       </TableCell>
                       <TableCell>
-                        <div className="max-w-[200px] truncate text-sm" title={item.cause}>
-                          {item.cause}
+                        <div className="max-w-[180px] truncate text-xs" title={order.semanticAnalysis?.causaRaizReal}>
+                          {order.semanticAnalysis?.causaRaizReal || order.causaRaiz}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right font-bold text-slate-700">
-                        ${formatAmount(item.impactAmount)}
+                      <TableCell className="text-right font-bold">
+                        ${formatAmount(order.impactoNeto || 0)}
                       </TableCell>
                       <TableCell className="text-center">
-                        {aiDescriptions[item.id] ? (
+                        {order.semanticAnalysis ? (
                           <Dialog>
                             <DialogTrigger asChild>
-                              <Button variant="ghost" size="sm" className="text-primary hover:bg-primary/10 group">
-                                <Sparkles className="h-4 w-4 mr-1 text-primary animate-pulse" />
-                                <span className="text-xs">Ver IA</span>
+                              <Button variant="ghost" size="sm" className="text-primary">
+                                <Lightbulb className="h-4 w-4 mr-1" /> Insights
                               </Button>
                             </DialogTrigger>
-                            <DialogContent className="sm:max-w-md">
+                            <DialogContent className="max-w-2xl">
                               <DialogHeader>
                                 <DialogTitle className="flex items-center gap-2">
-                                  <BrainCircuit className="h-5 w-5 text-primary" />
-                                  Descripción Estandarizada por IA
+                                  <BrainCircuit className="h-6 w-6 text-primary" />
+                                  Inteligencia Preventiva
                                 </DialogTitle>
                                 <DialogDescription>
-                                  Análisis profundo basado en los documentos cargados.
+                                  Análisis semántico del PID {order.projectId}
                                 </DialogDescription>
                               </DialogHeader>
-                              <div className="bg-slate-50 p-4 rounded-lg border border-primary/20 text-sm italic text-slate-700 leading-relaxed shadow-inner">
-                                "{aiDescriptions[item.id]}"
-                              </div>
-                              <div className="flex justify-between items-center text-[10px] text-muted-foreground mt-2">
-                                <span>Basado en PO: {item.orderNumber}</span>
-                                <span>Gemini 2.5 Flash</span>
+                              
+                              <div className="grid gap-6 py-4">
+                                <div className="space-y-2">
+                                  <h4 className="text-sm font-bold flex items-center gap-2">
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Resumen del Impacto
+                                  </h4>
+                                  <ul className="list-disc pl-5 text-sm text-slate-600 space-y-1">
+                                    {order.semanticAnalysis.summary?.map((s: string, i: number) => (
+                                      <li key={i}>{s}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+
+                                <div className="space-y-2 bg-amber-50 p-4 rounded-lg border border-amber-100">
+                                  <h4 className="text-sm font-bold flex items-center gap-2 text-amber-800">
+                                    <AlertTriangle className="h-4 w-4" /> Medidas Preventivas (Próximo Diseño)
+                                  </h4>
+                                  <ul className="list-disc pl-5 text-sm text-amber-700 space-y-1">
+                                    {order.semanticAnalysis.preventiveChecks?.map((c: string, i: number) => (
+                                      <li key={i}>{c}</li>
+                                    ))}
+                                  </ul>
+                                </div>
                               </div>
                             </DialogContent>
                           </Dialog>
                         ) : (
                           <Button 
-                            variant="ghost" 
+                            variant="outline" 
                             size="sm" 
-                            onClick={() => handleGenAI(item)}
-                            disabled={isGenerating === item.id}
-                            className="text-slate-400 hover:text-primary"
+                            onClick={() => handleSemanticAnalysis(order)}
+                            disabled={isAnalyzing === order.id}
+                            className="text-[10px] h-7"
                           >
-                            {isGenerating === item.id ? (
-                              <RefreshCcw className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <BrainCircuit className="h-4 w-4" />
-                            )}
+                            {isAnalyzing === order.id ? <RefreshCcw className="h-3 w-3 animate-spin" /> : "Ejecutar IA"}
                           </Button>
                         )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <Info className="h-4 w-4 text-slate-300" />
-                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-              {filteredData.length === 0 && (
-                <div className="py-20 text-center text-muted-foreground">
-                  <Search className="h-10 w-10 mx-auto mb-4 opacity-20" />
-                  <p>No se encontraron resultados para "{searchTerm}"</p>
-                </div>
-              )}
             </CardContent>
           </Card>
-
-          <div className="mt-8 grid gap-6 md:grid-cols-3">
-            <Card className="border-none shadow-sm bg-white">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-headline text-slate-500 uppercase tracking-wider">Recurrencia de Causa</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold font-headline text-primary">Logística <span className="text-sm font-normal text-muted-foreground">(52%)</span></div>
-                <p className="text-xs text-muted-foreground mt-1">Causa raíz más común detectada por IA</p>
-              </CardContent>
-            </Card>
-            
-            <Card className="border-none shadow-sm bg-white">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-headline text-slate-500 uppercase tracking-wider">Eficiencia de Resolución</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold font-headline text-primary">84%</div>
-                <p className="text-xs text-muted-foreground mt-1">Tiempo promedio de cierre: 4.2 días</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-none shadow-sm bg-white border-l-4 border-l-accent">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-headline text-slate-500 uppercase tracking-wider">Ahorro Proyectado</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold font-headline text-accent">$45,200</div>
-                <p className="text-xs text-muted-foreground mt-1">Por mitigación de errores recurrentes</p>
-              </CardContent>
-            </Card>
-          </div>
         </main>
       </SidebarInset>
     </div>

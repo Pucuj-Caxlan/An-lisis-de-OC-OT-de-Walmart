@@ -19,7 +19,6 @@
         "coordinador": { "type": "string" },
         "causaRaiz": { "type": "string" },
         "descripcion": { "type": "string" },
-        "conceptoNormalizado": { "type": "string" },
         "montoDeductiva": { "type": "number" },
         "montoAditiva": { "type": "number" },
         "impactoNeto": { "type": "number" },
@@ -33,45 +32,36 @@
         "createdFromPdf": { "type": "boolean" },
         "pdfUrl": { "type": "string" },
         "standardizedDescription": { "type": "string" },
-        "redFlags": {
+        "semanticAnalysis": {
           "type": "object",
           "properties": {
-            "hasRisks": { "type": "boolean" },
-            "riskScore": { "type": "number" },
-            "observations": { "type": "string" }
+            "conceptoNormalizado": { "type": "string" },
+            "especialidadImpactada": { "type": "string" },
+            "causaRaizReal": { "type": "string" },
+            "confidence": { "type": "number" },
+            "summary": { "type": "array", "items": { "type": "string" } },
+            "preventiveChecks": { "type": "array", "items": { "type": "string" } }
           }
         },
-        "lineItems": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "areaEjerce": { "type": "string" },
-              "areaGenera": { "type": "string" },
-              "descripcion": { "type": "string" },
-              "importe": { "type": "number" }
-            }
+        "feedback": {
+          "type": "object",
+          "properties": {
+            "isConfirmed": { "type": "boolean" },
+            "correctedConcept": { "type": "string" },
+            "correctedCause": { "type": "string" }
           }
         }
       }
     },
-    "ImportBatch": {
-      "title": "ImportBatch",
+    "Taxonomy": {
+      "title": "Taxonomy",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "fileName": { "type": "string" },
-        "importDate": { "type": "string", "format": "date-time" },
-        "status": { "type": "string", "enum": ["PROCESSING", "COMPLETED", "FAILED"] },
-        "stats": {
-          "type": "object",
-          "properties": {
-            "totalRows": { "type": "number" },
-            "processedRows": { "type": "number" },
-            "errorCount": { "type": "number" },
-            "totalImpact": { "type": "number" }
-          }
-        }
+        "type": { "type": "string", "enum": ["CAUSE", "CONCEPT", "SPECIALTY"] },
+        "name": { "type": "string" },
+        "synonyms": { "type": "array", "items": { "type": "string" } },
+        "rules": { "type": "string" }
       }
     }
   },
@@ -79,7 +69,7 @@
     "providers": ["password", "anonymous"]
   },
   "firestore": {
-    "/orders/{orderId}": { "schema": "Order", "description": "Normalized records of OC/OT from Excel or PDF" },
-    "/importBatches/{importBatchId}": { "schema": "ImportBatch", "description": "Tracking for batch ingestions" }
+    "/orders/{orderId}": { "schema": "Order", "description": "Normalized records with semantic AI enrichment" },
+    "/taxonomies/{taxonomyId}": { "schema": "Taxonomy", "description": "Master catalogs for AI normalization" }
   }
 }
