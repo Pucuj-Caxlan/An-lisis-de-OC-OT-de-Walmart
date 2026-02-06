@@ -42,7 +42,7 @@ const semanticPrompt = ai.definePrompt({
 ENTRADA:
 - Descripción: {{{descripcion}}}
 - Causa Declarada: {{{causaDeclarada}}}
-- Desglose: {{#each lineItems}} * {{{this.descripcion}}} (${{{this.importe}}}) {{/each}}
+- Desglose: {{#each lineItems}} * {{{this.descripcion}}} (\${{{this.importe}}}) {{/each}}
 
 OBJETIVOS SEMÁNTICOS:
 1. NORMALIZACIÓN: Convierte el texto libre en un 'Concepto Normalizado'. Si mencionan cables o tableros, es 'Sistema Eléctrico'.
