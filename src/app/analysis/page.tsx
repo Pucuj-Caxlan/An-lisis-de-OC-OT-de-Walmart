@@ -9,21 +9,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
   Search, 
-  BrainCircuit, 
   RefreshCcw,
   Sparkles,
   CheckCircle2,
   AlertTriangle,
-  Lightbulb,
-  Trash2,
-  Eraser,
-  Play,
-  Filter,
-  FileText,
-  FileSpreadsheet,
-  Pause,
   ArrowUpRight,
-  ShieldAlert
+  ShieldAlert,
+  Fingerprint,
+  Info,
+  Filter
 } from 'lucide-react';
 import {
   Table,
@@ -36,7 +30,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, limit, doc, writeBatch } from 'firebase/firestore';
+import { collection, query, limit, doc, increment, setDoc } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
   Dialog,
@@ -46,7 +40,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
+import { updateDocumentNonBlocking, setDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -58,7 +52,7 @@ export default function AnalysisPage() {
   const { toast } = useToast();
   const db = useFirestore();
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'processed'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'processed' | 'review'>('all');
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -85,33 +79,48 @@ export default function AnalysisPage() {
     setIsAnalyzing(order.id);
     try {
       const result = await analyzeOrderSemantically({
-        projectId: order.projectId || order.projectInfo?.projectId || "",
-        projectName: order.projectName || order.projectInfo?.projectName || "",
-        format: order.format || order.projectInfo?.format || "",
-        descripcion: order.descripcion || order.descriptionSection?.description || order.standardizedDescription || "",
-        causaDeclarada: order.causaRaiz || order.projectInfo?.rootCauseDeclared || "",
-        montoTotal: order.impactoNeto || order.financialImpact?.netImpact || 0,
-        contextoExtendido: order,
-        isSigned: order.isSigned
+        descripcion: order.descripcion || order.standardizedDescription || "",
+        monto: order.impactoNeto || 0,
+        contexto: {
+          disciplinasVigentes: ["Eléctrica", "Civil", "Estructura Metálica", "HVAC", "Legal/Permisos", "Prototipos"],
+          causasVigentes: ["Error Diseño", "Cambio Prototipo", "Omisión Contratista", "Requerimiento Autoridad"]
+        }
       });
 
       if (db) {
-        updateDocumentNonBlocking(doc(db, 'orders', order.id), {
-          semanticAnalysis: result,
-          standardizedDescription: result.standardizedDescription,
-          processedAt: new Date().toISOString()
-        });
+        const updateData = {
+          disciplina_normalizada: result.disciplina_normalizada,
+          causa_raiz_normalizada: result.causa_raiz_normalizada,
+          subcausa_normalizada: result.subcausa_normalizada,
+          confidence_score: result.confidence_score,
+          evidence_terms: result.evidence_terms,
+          rationale_short: result.rationale_short,
+          needs_review: result.needs_review,
+          classification_status: 'auto',
+          ai_model_version: 'gemini-2.5-flash',
+          classified_at: new Date().toISOString()
+        };
+
+        updateDocumentNonBlocking(doc(db, 'orders', order.id), updateData);
+
+        // Actualización de Agregados (Simulación de Trigger de Cloud Function)
+        const aggregateRef = doc(db, 'aggregates', 'global', 'disciplines_stats', result.disciplina_normalizada);
+        setDocumentNonBlocking(aggregateRef, {
+          count: increment(1),
+          total_impact: increment(order.impactoNeto || 0),
+          last_updated: new Date().toISOString()
+        }, { merge: true });
       }
 
       toast({
-        title: "Análisis Exitoso",
-        description: `Registro ${order.projectId || order.id} estructurado con éxito.`,
+        title: "Clasificación IA Exitosa",
+        description: `Disciplina: ${result.disciplina_normalizada} (Confianza: ${Math.round(result.confidence_score * 100)}%)`,
       });
     } catch (error: any) {
       toast({
         variant: "destructive",
-        title: "Fallo en IA",
-        description: error.message || "No se pudo completar el análisis.",
+        title: "Fallo en Clasificación",
+        description: error.message || "No se pudo completar el análisis semántico.",
       });
     } finally {
       setIsAnalyzing(null);
@@ -121,13 +130,13 @@ export default function AnalysisPage() {
   const filteredOrders = orders?.filter(o => {
     const searchStr = searchTerm.toLowerCase();
     const pid = String(o.projectId || "").toLowerCase();
-    const name = String(o.projectName || "").toLowerCase();
-    const matchesSearch = pid.includes(searchStr) || name.includes(searchStr);
+    const matchesSearch = pid.includes(searchStr);
     
     const matchesStatus = 
       statusFilter === 'all' || 
-      (statusFilter === 'pending' && !o.semanticAnalysis) ||
-      (statusFilter === 'processed' && o.semanticAnalysis);
+      (statusFilter === 'pending' && !o.disciplina_normalizada) ||
+      (statusFilter === 'processed' && o.disciplina_normalizada && !o.needs_review) ||
+      (statusFilter === 'review' && o.needs_review);
 
     return matchesSearch && matchesStatus;
   }) || [];
@@ -139,13 +148,13 @@ export default function AnalysisPage() {
         <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6">
           <div className="flex items-center gap-4">
             <SidebarTrigger />
-            <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">Control Semántico de Órdenes</h1>
+            <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">Clasificación Semántica IA</h1>
           </div>
           <div className="flex items-center gap-4">
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
               <Input
-                placeholder="PID o Nombre..."
+                placeholder="Buscar PID..."
                 className="pl-9 w-[220px] h-9 bg-slate-50"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -156,13 +165,14 @@ export default function AnalysisPage() {
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2">
                   <Filter className="h-4 w-4" />
-                  {statusFilter === 'all' ? 'Ver Todos' : 'Filtro'}
+                  Filtro: {statusFilter.toUpperCase()}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => setStatusFilter('all')}>Todos</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatusFilter('processed')}>Analizados</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatusFilter('pending')}>Sin analizar</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter('processed')}>Automatizados</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter('review')}>Requiere Revisión</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter('pending')}>Pendientes</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -176,8 +186,8 @@ export default function AnalysisPage() {
                   <TableRow>
                     <TableHead>Estado</TableHead>
                     <TableHead>PID / Proyecto</TableHead>
-                    <TableHead>Concepto IA</TableHead>
-                    <TableHead>Error / Driver</TableHead>
+                    <TableHead>Disciplina IA</TableHead>
+                    <TableHead>Confianza</TableHead>
                     <TableHead className="text-right">Impacto Neto</TableHead>
                     <TableHead className="text-center">Acciones</TableHead>
                   </TableRow>
@@ -186,9 +196,21 @@ export default function AnalysisPage() {
                   {isLoading ? (
                     <TableRow><TableCell colSpan={6} className="text-center py-20"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
                   ) : filteredOrders.map((order) => (
-                    <TableRow key={order.id} className="hover:bg-primary/5 group">
+                    <TableRow key={order.id} className={`hover:bg-primary/5 group ${order.needs_review ? 'bg-rose-50/30' : ''}`}>
                       <TableCell>
-                        {order.semanticAnalysis ? <Badge className="bg-emerald-500">Analizado</Badge> : <Badge variant="outline" className="text-slate-300">Pendiente</Badge>}
+                        {order.disciplina_normalizada ? (
+                          order.needs_review ? (
+                            <Badge variant="outline" className="text-rose-500 border-rose-200 bg-rose-50 gap-1">
+                              <AlertTriangle className="h-3 w-3" /> Revisión
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-emerald-500 gap-1">
+                              <CheckCircle2 className="h-3 w-3" /> Auto
+                            </Badge>
+                          )
+                        ) : (
+                          <Badge variant="outline" className="text-slate-300">Pendiente</Badge>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
@@ -197,18 +219,26 @@ export default function AnalysisPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="font-medium text-slate-700">{order.semanticAnalysis?.conceptoNormalizado || "Pendiente"}</span>
+                        <span className="font-medium text-slate-700">{order.disciplina_normalizada || "—"}</span>
                       </TableCell>
                       <TableCell>
-                         <Badge variant="outline" className="text-[10px] border-slate-200 text-slate-600 bg-slate-50">
-                            {order.semanticAnalysis?.tipoError || "—"}
-                         </Badge>
+                         {order.confidence_score ? (
+                           <div className="flex items-center gap-2">
+                             <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                               <div 
+                                 className={`h-full ${order.confidence_score > 0.8 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                 style={{ width: `${order.confidence_score * 100}%` }}
+                               />
+                             </div>
+                             <span className="text-[10px] font-bold text-slate-500">{Math.round(order.confidence_score * 100)}%</span>
+                           </div>
+                         ) : "—"}
                       </TableCell>
                       <TableCell className="text-right font-bold text-slate-800">
                         ${formatAmount(order.impactoNeto || 0)}
                       </TableCell>
                       <TableCell className="text-center">
-                        {order.semanticAnalysis ? (
+                        {order.disciplina_normalizada ? (
                           <Dialog>
                             <DialogTrigger asChild>
                               <Button variant="ghost" size="sm" className="text-primary gap-1">
@@ -217,8 +247,9 @@ export default function AnalysisPage() {
                             </DialogTrigger>
                             <DialogContent className="max-w-3xl">
                               <DialogHeader>
-                                <DialogTitle className="text-2xl">
-                                  {order.semanticAnalysis.conceptoNormalizado}
+                                <DialogTitle className="text-2xl flex items-center gap-3">
+                                  {order.disciplina_normalizada} 
+                                  <Badge variant="outline" className="bg-primary/5 text-primary">IA Classified</Badge>
                                 </DialogTitle>
                                 <DialogDescription className="text-lg">
                                   {order.projectName} ({order.projectId})
@@ -228,27 +259,37 @@ export default function AnalysisPage() {
                                 <div className="grid md:grid-cols-2 gap-4">
                                    <Card className="p-4 border shadow-none bg-white">
                                       <h4 className="text-[10px] font-black uppercase text-slate-400 mb-3 flex items-center gap-2">
-                                        <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Hallazgos IA
+                                        <Fingerprint className="h-4 w-4 text-emerald-500" /> Evidencia Técnica
                                       </h4>
-                                      <ul className="space-y-2">
-                                        {order.semanticAnalysis.summary?.map((s: string, i: number) => (
-                                          <li key={i} className="text-xs text-slate-600 flex gap-2">
-                                            <span className="text-primary font-bold">•</span> {s}
-                                          </li>
+                                      <div className="flex flex-wrap gap-2">
+                                        {order.evidence_terms?.map((term: string, i: number) => (
+                                          <Badge key={i} variant="secondary" className="text-[10px] bg-slate-50 text-slate-600">
+                                            {term}
+                                          </Badge>
                                         ))}
-                                      </ul>
+                                      </div>
+                                      <p className="mt-4 text-xs text-slate-500 italic">
+                                        "{order.rationale_short}"
+                                      </p>
                                    </Card>
                                    <Card className="p-4 border shadow-none bg-white">
                                       <h4 className="text-[10px] font-black uppercase text-rose-500 mb-3 flex items-center gap-2">
-                                        <ShieldAlert className="h-4 w-4" /> Recomendaciones
+                                        <ShieldAlert className="h-4 w-4" /> Diagnóstico Forense
                                       </h4>
-                                      <ul className="space-y-2">
-                                        {order.semanticAnalysis.preventiveChecks?.map((c: string, i: number) => (
-                                          <li key={i} className="text-xs text-slate-700 bg-rose-50/50 p-1.5 rounded">
-                                            {c}
-                                          </li>
-                                        ))}
-                                      </ul>
+                                      <div className="space-y-3">
+                                        <div className="flex justify-between text-xs">
+                                          <span className="text-slate-400">Causa Raíz:</span>
+                                          <span className="font-bold">{order.causa_raiz_normalizada}</span>
+                                        </div>
+                                        <div className="flex justify-between text-xs">
+                                          <span className="text-slate-400">Subcausa:</span>
+                                          <span className="font-bold">{order.subcausa_normalizada || "No detectada"}</span>
+                                        </div>
+                                        <div className="pt-2 border-t border-dashed">
+                                          <p className="text-[10px] text-slate-400 uppercase font-black mb-1">Status de Clasificación</p>
+                                          <Badge variant="outline" className="text-[9px] uppercase">{order.classification_status}</Badge>
+                                        </div>
+                                      </div>
                                    </Card>
                                 </div>
                               </div>
@@ -257,7 +298,7 @@ export default function AnalysisPage() {
                         ) : (
                           <Button variant="outline" size="sm" onClick={() => processSingleOrder(order)} disabled={isAnalyzing === order.id}>
                             {isAnalyzing === order.id ? <RefreshCcw className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                            Analizar
+                            Clasificar
                           </Button>
                         )}
                       </TableCell>

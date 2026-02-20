@@ -11,119 +11,67 @@
         "projectName": { "type": "string" },
         "type": { "type": "string", "enum": ["OT", "OCR", "OCI"] },
         "format": { "type": "string" },
-        "country": { "type": "string" },
-        "state": { "type": "string" },
-        "municipality": { "type": "string" },
-        "plan": { "type": "string" },
-        "etapaProyecto": { "type": "string" },
-        "coordinador": { "type": "string" },
         "causaRaiz": { "type": "string" },
         "descripcion": { "type": "string" },
-        "montoDeductiva": { "type": "number" },
-        "montoAditiva": { "type": "number" },
         "impactoNeto": { "type": "number" },
-        "areaSolicitante": { "type": "string" },
-        "generadorDesviacion": { "type": "string" },
-        "areaEjerceRecurso": { "type": "string" },
-        "estatus": { "type": "string" },
         "fechaSolicitud": { "type": "string", "format": "date-time" },
-        "proveedor": { "type": "string" },
-        "qcFlags": { "type": "array", "items": { "type": "string" } },
-        "createdFromPdf": { "type": "boolean" },
-        "pdfUrl": { "type": "string" },
-        "standardizedDescription": { "type": "string" },
-        "semanticAnalysis": {
-          "type": "object",
-          "properties": {
-            "conceptoNormalizado": { "type": "string" },
-            "especialidadImpactada": { "type": "string" },
-            "subCausa": { "type": "string" },
-            "tipoError": { "type": "string", "enum": ["Omisión", "Interferencia", "Especificación Incorrecta", "Cambio Normativo", "Cambio Prototipo", "Otro"] },
-            "causaRaizReal": { "type": "string" },
-            "confidence": { "type": "number" },
-            "summary": { "type": "array", "items": { "type": "string" } },
-            "preventiveChecks": { "type": "array", "items": { "type": "string" } }
-          }
-        }
+        "isSigned": { "type": "boolean" },
+        "disciplina_normalizada": { "type": "string" },
+        "causa_raiz_normalizada": { "type": "string" },
+        "subcausa_normalizada": { "type": "string" },
+        "confidence_score": { "type": "number" },
+        "evidence_terms": { "type": "array", "items": { "type": "string" } },
+        "ai_model_version": { "type": "string" },
+        "classified_at": { "type": "string", "format": "date-time" },
+        "needs_review": { "type": "boolean" },
+        "classification_status": { "type": "string", "enum": ["auto", "reviewed", "overridden"] },
+        "rationale_short": { "type": "string" }
       },
       "required": ["projectId", "impactoNeto"]
     },
-    "RootCauseInsight": {
-      "title": "Root Cause Insight",
+    "TaxonomyDiscipline": {
+      "title": "Taxonomy Discipline",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "rootCauseId": { "type": "string" },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "driversDetected": { "type": "array", "items": { "type": "string" } },
-        "recurrenceReasoning": { "type": "string" },
-        "recommendedActions": {
-          "array": {
-            "type": "object",
-            "properties": {
-              "action": { "type": "string" },
-              "owner": { "type": "string" },
-              "priority": { "type": "string", "enum": ["Alta", "Media", "Baja"] }
-            }
-          }
-        },
-        "expectedReductionPct": { "type": "number" },
-        "confidence": { "type": "number" },
-        "supportingEvidence": { "type": "array", "items": { "type": "string" } }
+        "name": { "type": "string" },
+        "synonyms": { "type": "array", "items": { "type": "string" } },
+        "keywords": { "type": "array", "items": { "type": "string" } },
+        "active": { "type": "boolean" }
       }
     },
-    "AuditReport": {
-      "title": "Audit Report",
+    "TaxonomyRootCause": {
+      "title": "Taxonomy Root Cause",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "globalHealthScore": { "type": "number" },
-        "summary": { "type": "string" },
-        "anomaliesCount": { "type": "number" },
-        "sampleSize": { "type": "number" },
-        "anomalies": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "orderId": { "type": "string" },
-              "projectId": { "type": "string" },
-              "type": { "type": "string" },
-              "severity": { "type": "string" },
-              "finding": { "type": "string" },
-              "reasoning": { "type": "string" },
-              "recommendation": { "type": "string" }
-            }
-          }
-        }
-      },
-      "required": ["id", "timestamp", "globalHealthScore"]
+        "name": { "type": "string" },
+        "discipline_default": { "type": "string" },
+        "synonyms": { "type": "array", "items": { "type": "string" } },
+        "active": { "type": "boolean" }
+      }
     },
-    "UserProfile": {
-      "title": "User Profile",
+    "ClassificationOverride": {
+      "title": "Classification Override",
       "type": "object",
       "properties": {
-        "uid": { "type": "string" },
-        "displayName": { "type": "string" },
-        "role": { "type": "string" },
-        "email": { "type": "string" },
-        "preferences": {
-          "type": "object",
-          "properties": {
-            "theme": { "type": "string", "enum": ["light", "dark", "system"] },
-            "language": { "type": "string" },
-            "notifications": {
-              "type": "object",
-              "properties": {
-                "forensicAlerts": { "type": "boolean" },
-                "weeklyDigest": { "type": "boolean" },
-                "criticalImpact": { "type": "boolean" }
-              }
-            },
-            "iaSensitivity": { "type": "number" }
-          }
-        }
+        "id": { "type": "string" },
+        "ocot_id": { "type": "string" },
+        "old_values": { "type": "object" },
+        "new_values": { "type": "object" },
+        "changed_by": { "type": "string" },
+        "changed_at": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string" }
+      }
+    },
+    "AggregateStats": {
+      "title": "Aggregate Stats",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "count": { "type": "number" },
+        "total_impact": { "type": "number" },
+        "last_updated": { "type": "string", "format": "date-time" }
       }
     }
   },
@@ -132,8 +80,9 @@
   },
   "firestore": {
     "/orders/{orderId}": { "schema": "Order", "description": "Normalized records with semantic AI enrichment" },
-    "/audits/{auditId}": { "schema": "AuditReport", "description": "Historical forensic audit reports" },
-    "/insights_rootcause/{insightId}": { "schema": "RootCauseInsight", "description": "AI-generated deep intelligence on recurrence and mitigation" },
-    "/users/{userId}": { "schema": "UserProfile", "description": "Private user settings and preferences" }
+    "/taxonomy_disciplines/{id}": { "schema": "TaxonomyDiscipline", "description": "Master list of disciplines" },
+    "/taxonomy_rootcauses/{id}": { "schema": "TaxonomyRootCause", "description": "Master list of root causes" },
+    "/classification_overrides/{id}": { "schema": "ClassificationOverride", "description": "Audit log of human overrides" },
+    "/aggregates/{scope}/disciplines_stats/{id}": { "schema": "AggregateStats", "description": "Real-time discipline analytics" }
   }
 }
