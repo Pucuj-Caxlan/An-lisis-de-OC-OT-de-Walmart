@@ -27,7 +27,9 @@ import {
   Activity,
   ChevronDown,
   LayoutGrid,
-  Info
+  Info,
+  Clock,
+  CheckCircle2
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -42,7 +44,8 @@ import {
   Line,
   Cell,
   AreaChart,
-  Area
+  Area,
+  LabelList
 } from 'recharts';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, query, limit } from 'firebase/firestore';
@@ -56,7 +59,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from '@/hooks/use-toast';
 import { analyzeStrategicTrends, TrendAnalysisOutput } from '@/ai/flows/trend-analysis-flow';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -72,11 +74,12 @@ import {
 
 const YEARS = [2022, 2023, 2024, 2025, 2026];
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const YEAR_COLORS = ['#cbd5e1', '#94a3b8', '#2962FF', '#FF8F00', '#6200EA'];
 
 export default function VpDashboard() {
   const { toast } = useToast();
   const db = useFirestore();
-  const [selectedYear, setSelectedYear] = useState<number | 'all'>(new Date().getFullYear());
+  const [selectedYear, setSelectedYear] = useState<number | 'all'>('all');
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [actionPlan, setActionPlan] = useState<TrendAnalysisOutput | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -84,7 +87,8 @@ export default function VpDashboard() {
   const [filters, setFilters] = useState({
     month: 'all',
     discipline: 'all',
-    format: 'all',
+    storeFormat: 'all',
+    docType: 'all',
     executionType: 'all',
     search: ''
   });
@@ -110,6 +114,30 @@ export default function VpDashboard() {
     } catch { return null; }
   };
 
+  // Estadísticas por Año (Conteos)
+  const yearStats = useMemo(() => {
+    const stats: Record<string, number> = { total: 0 };
+    YEARS.forEach(y => stats[y] = 0);
+    
+    rawOrders?.forEach(o => {
+      const yr = getOrderYear(o);
+      stats.total += 1;
+      if (yr && stats[yr] !== undefined) {
+        stats[yr] += 1;
+      }
+    });
+    return stats;
+  }, [rawOrders]);
+
+  // Formatos de tienda únicos
+  const uniqueFormats = useMemo(() => {
+    const formats = new Set<string>();
+    rawOrders?.forEach(o => {
+      if (o.format) formats.add(o.format);
+    });
+    return Array.from(formats).sort();
+  }, [rawOrders]);
+
   const filteredData = useMemo(() => {
     if (!rawOrders) return [];
     return rawOrders.filter(o => {
@@ -120,13 +148,14 @@ export default function VpDashboard() {
       const yearMatch = selectedYear === 'all' || yr === selectedYear;
       const monthMatch = filters.month === 'all' || monthIdx === parseInt(filters.month);
       const discMatch = filters.discipline === 'all' || (o.disciplina_normalizada || o.semanticAnalysis?.disciplina_normalizada) === filters.discipline;
-      const formatMatch = filters.format === 'all' || o.format === filters.format || o.type === filters.format;
+      const formatMatch = filters.storeFormat === 'all' || o.format === filters.storeFormat;
+      const docTypeMatch = filters.docType === 'all' || o.type === filters.docType;
       const execMatch = filters.executionType === 'all' || o.executionType === filters.executionType;
       const searchMatch = !filters.search || 
         String(o.projectId).toLowerCase().includes(filters.search.toLowerCase()) || 
         String(o.projectName).toLowerCase().includes(filters.search.toLowerCase());
 
-      return yearMatch && monthMatch && discMatch && formatMatch && execMatch && searchMatch;
+      return yearMatch && monthMatch && discMatch && formatMatch && docTypeMatch && execMatch && searchMatch;
     });
   }, [rawOrders, selectedYear, filters]);
 
@@ -172,6 +201,20 @@ export default function VpDashboard() {
 
     return { totalImpact, count, paretoData, discData, vitalFew, concentrationRatio };
   }, [filteredData]);
+
+  // Datos para Comparativa Mensual
+  const trendData = useMemo(() => {
+    const data = MONTHS.map((name, idx) => {
+      const entry: any = { month: name };
+      YEARS.forEach(y => {
+        const impact = rawOrders?.filter(o => getOrderYear(o) === y && new Date(getOrderDate(o)).getMonth() === idx)
+          .reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0;
+        entry[`impact_${y}`] = impact;
+      });
+      return entry;
+    });
+    return data;
+  }, [rawOrders]);
 
   const handleGenerateActionPlan = async () => {
     if (filteredData.length === 0) return;
@@ -221,17 +264,17 @@ export default function VpDashboard() {
             <div className="flex bg-slate-100 p-1 rounded-xl border gap-1">
               <button 
                 onClick={() => setSelectedYear('all')} 
-                className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${selectedYear === 'all' ? 'bg-primary text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}
+                className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase transition-all flex items-center gap-1.5 ${selectedYear === 'all' ? 'bg-primary text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}
               >
-                TODO
+                TODO <span className="opacity-60">({yearStats.total})</span>
               </button>
               {YEARS.map(y => (
                 <button 
                   key={y} 
                   onClick={() => setSelectedYear(y)} 
-                  className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${selectedYear === y ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}
+                  className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase transition-all flex items-center gap-1.5 ${selectedYear === y ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}
                 >
-                  {y}
+                  {y} <span className="opacity-60">({yearStats[y] || 0})</span>
                 </button>
               ))}
             </div>
@@ -241,7 +284,7 @@ export default function VpDashboard() {
               className="bg-primary hover:bg-primary/90 gap-2 h-9 px-4 rounded-xl shadow-lg shadow-primary/20 text-xs font-bold"
             >
               {isGeneratingPlan ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4 text-accent fill-accent" />}
-              {actionPlan ? "Actualizar Plan" : "Generar IA Action Plan"}
+              {actionPlan ? "Actualizar Plan" : "IA Action Plan"}
             </Button>
           </div>
         </header>
@@ -249,13 +292,13 @@ export default function VpDashboard() {
         <main className="p-6 space-y-6">
           {/* Filtros Enterprise */}
           <Card className="border-none shadow-sm bg-white p-4">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
               <div className="space-y-1.5">
                 <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Mes</label>
                 <Select value={filters.month} onValueChange={(v) => setFilters({...filters, month: v})}>
                   <SelectTrigger className="h-8 bg-slate-50 border-none text-[10px] font-bold uppercase"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Enero - Diciembre</SelectItem>
+                    <SelectItem value="all">Ene - Dic</SelectItem>
                     {MONTHS.map((m, i) => <SelectItem key={i} value={i.toString()}>{m}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -265,7 +308,7 @@ export default function VpDashboard() {
                 <Select value={filters.discipline} onValueChange={(v) => setFilters({...filters, discipline: v})}>
                   <SelectTrigger className="h-8 bg-slate-50 border-none text-[10px] font-bold uppercase"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todas las Especialidades</SelectItem>
+                    <SelectItem value="all">Especialidad</SelectItem>
                     <SelectItem value="Eléctrica">Eléctrica</SelectItem>
                     <SelectItem value="Civil">Civil</SelectItem>
                     <SelectItem value="Estructura Metálica">Estructura</SelectItem>
@@ -274,9 +317,19 @@ export default function VpDashboard() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><LayoutGrid className="h-3 w-3" /> Formato / Ejecución</label>
+                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Building2 className="h-3 w-3" /> Formato Tienda</label>
+                <Select value={filters.storeFormat} onValueChange={(v) => setFilters({...filters, storeFormat: v})}>
+                  <SelectTrigger className="h-8 bg-slate-50 border-none text-[10px] font-bold uppercase"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos los Formatos</SelectItem>
+                    {uniqueFormats.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><LayoutGrid className="h-3 w-3" /> Tipo / Doc</label>
                 <div className="flex gap-2">
-                  <Select value={filters.format} onValueChange={(v) => setFilters({...filters, format: v})}>
+                  <Select value={filters.docType} onValueChange={(v) => setFilters({...filters, docType: v})}>
                     <SelectTrigger className="h-8 bg-slate-50 border-none text-[10px] font-bold uppercase flex-1"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">OC/OT</SelectItem>
@@ -287,9 +340,9 @@ export default function VpDashboard() {
                   <Select value={filters.executionType} onValueChange={(v) => setFilters({...filters, executionType: v})}>
                     <SelectTrigger className="h-8 bg-slate-50 border-none text-[10px] font-bold uppercase flex-1"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">Tipo</SelectItem>
-                      <SelectItem value="NORMAL">Normal</SelectItem>
-                      <SelectItem value="URGENTE">Urgente</SelectItem>
+                      <SelectItem value="all">Ejec.</SelectItem>
+                      <SelectItem value="NORMAL">Norm.</SelectItem>
+                      <SelectItem value="URGENTE">Urg.</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -299,7 +352,7 @@ export default function VpDashboard() {
                 <div className="relative">
                   <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-slate-400" />
                   <Input 
-                    placeholder="Escriba aquí para filtrar registros..." 
+                    placeholder="Filtrar por nombre o folio..." 
                     className="h-8 pl-8 bg-slate-50 border-none text-[10px] font-medium"
                     value={filters.search}
                     onChange={(e) => setFilters({...filters, search: e.target.value})}
@@ -313,9 +366,19 @@ export default function VpDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="border-none shadow-md bg-white border-l-4 border-l-primary overflow-hidden">
               <CardContent className="pt-6">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Auditado</p>
-                <h2 className="text-2xl font-headline font-bold text-slate-800">{formatCurrency(metrics.totalImpact)}</h2>
-                <Badge variant="outline" className="mt-2 text-[8px] bg-primary/5 text-primary border-primary/20 uppercase font-black">{metrics.count} Órdenes Activas</Badge>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Auditado</p>
+                    <h2 className="text-2xl font-headline font-bold text-slate-800">{formatCurrency(metrics.totalImpact)}</h2>
+                  </div>
+                  <div className="bg-primary/10 p-2 rounded-xl text-primary">
+                    <Database className="h-5 w-5" />
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center justify-between">
+                  <Badge variant="outline" className="text-[8px] bg-primary/5 text-primary border-primary/20 uppercase font-black">{metrics.count} Órdenes Activas</Badge>
+                  <span className="text-[8px] font-bold text-slate-400">COBERTURA: {Math.round((metrics.count / (rawOrders?.length || 1)) * 100)}%</span>
+                </div>
               </CardContent>
             </Card>
             <Card className="border-none shadow-md bg-slate-900 text-white overflow-hidden relative">
@@ -329,7 +392,7 @@ export default function VpDashboard() {
                 <div className="mt-3 space-y-1">
                   <div className="flex justify-between text-[8px] font-black uppercase">
                     <span>Índice de Riesgo</span>
-                    <span className={metrics.concentrationRatio > 70 ? "text-rose-400" : "text-emerald-400"}>{metrics.concentrationRatio > 70 ? "CRÍTICO" : "CONTROLADO"}</span>
+                    <span className={metrics.concentrationRatio > 70 ? "text-rose-400" : "text-emerald-400"}>{metrics.concentrationRatio > 70 ? "ALTO" : "ÓPTIMO"}</span>
                   </div>
                   <Progress value={metrics.concentrationRatio} className="h-1 bg-white/10" />
                 </div>
@@ -337,11 +400,14 @@ export default function VpDashboard() {
             </Card>
             <Card className="border-none shadow-md bg-white border-l-4 border-l-emerald-500 overflow-hidden">
               <CardContent className="pt-6">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Driver Dominante</p>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Causa Raíz Top</p>
                 <h2 className="text-lg font-headline font-bold text-slate-800 truncate">{metrics.paretoData[0]?.name || "N/A"}</h2>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-[10px] font-black text-emerald-600">{formatCurrency(metrics.paretoData[0]?.impact || 0)}</span>
-                  <Badge className="bg-emerald-50 text-emerald-700 text-[8px] border-none">TOP CAUSA</Badge>
+                <div className="flex items-center justify-between mt-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black text-emerald-600">{formatCurrency(metrics.paretoData[0]?.impact || 0)}</span>
+                    <Badge className="bg-emerald-50 text-emerald-700 text-[8px] border-none">TOP 1</Badge>
+                  </div>
+                  <ArrowUpRight className="h-4 w-4 text-emerald-500" />
                 </div>
               </CardContent>
             </Card>
@@ -349,9 +415,12 @@ export default function VpDashboard() {
               <CardContent className="pt-6">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Especialidad Crítica</p>
                 <h2 className="text-lg font-headline font-bold text-slate-800 truncate">{metrics.discData[0]?.name || "N/A"}</h2>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-[10px] font-black text-amber-600">{formatCurrency(metrics.discData[0]?.impact || 0)}</span>
-                  <Badge className="bg-amber-50 text-amber-700 text-[8px] border-none">DISCIPLINA TOP</Badge>
+                <div className="flex items-center justify-between mt-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black text-amber-600">{formatCurrency(metrics.discData[0]?.impact || 0)}</span>
+                    <Badge className="bg-amber-50 text-amber-700 text-[8px] border-none">ALERTA</Badge>
+                  </div>
+                  <Activity className="h-4 w-4 text-amber-500" />
                 </div>
               </CardContent>
             </Card>
@@ -365,9 +434,12 @@ export default function VpDashboard() {
                   <CardTitle className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
                     <TrendingUp className="h-4 w-4" /> Curva de Pareto: Causa Raíz vs Impacto Acumulado
                   </CardTitle>
-                  <CardDescription className="text-[10px] font-medium uppercase mt-1">Identificación del Grupo Crítico (Estrategia 80/20)</CardDescription>
+                  <CardDescription className="text-[10px] font-medium uppercase mt-1">Identificación del Grupo Crítico para Toma de Decisión</CardDescription>
                 </div>
-                <Badge variant="outline" className="text-[8px] font-black border-primary/20 text-primary">SINCRO TOTAL</Badge>
+                <div className="flex items-center gap-2">
+                   <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                   <span className="text-[8px] font-black text-slate-400">REAL-TIME ANALYTICS</span>
+                </div>
               </CardHeader>
               <CardContent className="h-[450px] pt-10">
                 {metrics.paretoData.length > 0 ? (
@@ -383,15 +455,16 @@ export default function VpDashboard() {
                         textAnchor="end"
                       />
                       <YAxis yAxisId="left" tick={{ fontSize: 9 }} tickFormatter={(v) => `$${Math.round(v/1000000)}M`} />
-                      <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 9 }} />
+                      <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 9 }} tickFormatter={(v) => `${v}%`} />
                       <Tooltip 
-                        formatter={(value: number, name: string) => [name === 'impact' ? formatCurrency(value) : `${value.toFixed(1)}%`, name === 'impact' ? 'Impacto' : 'Acumulado %']}
-                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
+                        formatter={(value: number, name: string) => [name === 'impact' ? formatCurrency(value) : `${value.toFixed(1)}%`, name === 'impact' ? 'Impacto Total' : 'Participación Acumulada']}
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', fontSize: '10px' }}
                       />
                       <Bar yAxisId="left" dataKey="impact" radius={[4, 4, 0, 0]}>
                         {metrics.paretoData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.cumulativePercentage <= 85 ? '#2962FF' : '#cbd5e1'} />
                         ))}
+                        <LabelList dataKey="count" position="top" style={{ fontSize: '8px', fontWeight: 'bold', fill: '#64748b' }} formatter={(v: any) => `(${v})`} />
                       </Bar>
                       <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" stroke="#FF8F00" strokeWidth={3} dot={{ r: 4, fill: '#FF8F00', strokeWidth: 2, stroke: '#fff' }} />
                     </ComposedChart>
@@ -409,12 +482,11 @@ export default function VpDashboard() {
                   <span className="flex items-center gap-1.5"><div className="h-2 w-2 rounded-full bg-slate-300" /> Otros (20%)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-3 w-3 text-emerald-500" /> Modelo Pareto Activo
+                  <ShieldCheck className="h-3 w-3 text-emerald-500" /> Sincronizado con Base Estructurada
                 </div>
               </CardFooter>
             </Card>
 
-            {/* Panel de IA Action Plan o Diagnóstico */}
             <div className="space-y-6">
               {actionPlan ? (
                 <Card className="border-none shadow-xl bg-slate-900 text-white rounded-3xl overflow-hidden animate-in fade-in slide-in-from-right-5 duration-700">
@@ -423,7 +495,7 @@ export default function VpDashboard() {
                       <Badge className="bg-accent text-slate-900 border-none text-[8px] font-black uppercase">IA Strategic Plan</Badge>
                       <span className={`text-[10px] font-black uppercase ${actionPlan.sentiment === 'Optimista' ? 'text-emerald-400' : 'text-rose-400'}`}>{actionPlan.sentiment}</span>
                     </div>
-                    <CardTitle className="text-xl font-headline font-bold uppercase tracking-tight mt-4">Diagnóstico 80/20</CardTitle>
+                    <CardTitle className="text-xl font-headline font-bold uppercase tracking-tight mt-4">Diagnóstico Ejecutivo</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-6">
                     <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
@@ -485,29 +557,76 @@ export default function VpDashboard() {
                     )}
                   </CardContent>
                   <CardFooter className="bg-slate-50 border-t py-4 text-center">
-                    <p className="text-[9px] text-slate-400 font-bold uppercase italic mx-auto">Click en una barra para drill-down (Próximamente)</p>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase italic mx-auto">Análisis Semántico Homologado</p>
                   </CardFooter>
                 </Card>
               )}
             </div>
           </div>
 
-          {/* Sección de Registros del Lote Actual */}
+          {/* Comparativa Multi-Anual */}
           <Card className="border-none shadow-md bg-white rounded-2xl overflow-hidden">
             <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between py-4">
               <div>
-                <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Registros en Segmento Actual</CardTitle>
-                <CardDescription className="text-[9px] font-medium uppercase mt-1">Muestra de {filteredData.length} registros que alimentan este análisis</CardDescription>
+                <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-primary" /> Tendencia Histórica de Impacto Mensual
+                </CardTitle>
+                <CardDescription className="text-[9px] font-medium uppercase mt-1">Comparativa de estacionalidad y picos estacionales multi-anuales</CardDescription>
               </div>
-              <div className="flex gap-2">
-                <Badge className="bg-emerald-50 text-emerald-700 text-[8px] font-black border-none px-3 py-1 uppercase">Filtro Sincronizado</Badge>
+              <div className="flex gap-4">
+                {YEARS.slice(2).map((y, i) => (
+                  <div key={y} className="flex items-center gap-1.5">
+                    <div className="h-2 w-2 rounded-full" style={{ backgroundColor: YEAR_COLORS[i+2] }} />
+                    <span className="text-[9px] font-black text-slate-500">{y}</span>
+                  </div>
+                ))}
               </div>
+            </CardHeader>
+            <CardContent className="h-[250px] pt-6">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={trendData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="month" tick={{ fontSize: 9, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 9 }} tickFormatter={(v) => `$${Math.round(v/1000)}k`} axisLine={false} tickLine={false} />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '10px' }}
+                    formatter={(v: number) => formatCurrency(v)}
+                  />
+                  {YEARS.slice(2).map((y, i) => (
+                    <Area 
+                      key={y}
+                      type="monotone" 
+                      dataKey={`impact_${y}`} 
+                      stroke={YEAR_COLORS[i+2]} 
+                      fill={YEAR_COLORS[i+2]} 
+                      fillOpacity={0.05} 
+                      strokeWidth={3}
+                    />
+                  ))}
+                </AreaChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Tabla de Muestra */}
+          <Card className="border-none shadow-md bg-white rounded-2xl overflow-hidden">
+            <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between py-4">
+              <div>
+                <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                  <LayoutGrid className="h-4 w-4" /> Muestra de Registros Activos
+                </CardTitle>
+                <CardDescription className="text-[9px] font-medium uppercase mt-1">Exhibiendo {filteredData.length} registros que alimentan el análisis actual</CardDescription>
+              </div>
+              <Badge className="bg-emerald-50 text-emerald-700 text-[8px] font-black border-none px-3 py-1 uppercase flex items-center gap-1.5">
+                <CheckCircle2 className="h-3 w-3" /> Datos Sincronizados
+              </Badge>
             </CardHeader>
             <ScrollArea className="h-60">
               <Table>
                 <TableHeader className="bg-slate-50/30 sticky top-0 z-10">
                   <TableRow>
                     <TableHead className="text-[9px] font-black uppercase">PID / Proyecto</TableHead>
+                    <TableHead className="text-[9px] font-black uppercase">Formato</TableHead>
                     <TableHead className="text-[9px] font-black uppercase">Disciplina</TableHead>
                     <TableHead className="text-[9px] font-black uppercase">Causa Raíz</TableHead>
                     <TableHead className="text-[9px] font-black uppercase text-right">Impacto Neto</TableHead>
@@ -515,12 +634,15 @@ export default function VpDashboard() {
                 </TableHeader>
                 <TableBody>
                   {filteredData.slice(0, 50).map((o, idx) => (
-                    <TableRow key={idx} className="hover:bg-slate-50/50 border-slate-100 group transition-colors">
+                    <TableRow key={o.id || idx} className="hover:bg-slate-50/50 border-slate-100 group transition-colors">
                       <TableCell>
                         <div className="flex flex-col">
                           <span className="font-bold text-primary text-xs">{o.projectId}</span>
                           <span className="text-[9px] text-slate-400 uppercase truncate max-w-[200px]">{o.projectName}</span>
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[8px] border-none bg-slate-100 font-bold uppercase">{o.format || "N/A"}</Badge>
                       </TableCell>
                       <TableCell className="text-[10px] font-bold text-slate-600">{o.disciplina_normalizada || "—"}</TableCell>
                       <TableCell className="text-[10px] font-bold text-slate-600">{o.causa_raiz_normalizada || o.causaRaiz}</TableCell>
@@ -531,7 +653,7 @@ export default function VpDashboard() {
               </Table>
             </ScrollArea>
             <CardFooter className="bg-slate-50/50 border-t py-2 flex justify-center">
-               <p className="text-[8px] font-bold text-slate-400 uppercase">Mostrando los primeros 50 registros del segmento filtrado</p>
+               <p className="text-[8px] font-bold text-slate-400 uppercase">Análisis basado en el universo completo de la base de datos de Walmart</p>
             </CardFooter>
           </Card>
         </main>
