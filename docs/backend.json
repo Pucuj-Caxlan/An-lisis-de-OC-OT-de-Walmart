@@ -48,6 +48,31 @@
       },
       "required": ["projectId", "impactoNeto"]
     },
+    "RootCauseInsight": {
+      "title": "Root Cause Insight",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "rootCauseId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "driversDetected": { "type": "array", "items": { "type": "string" } },
+        "recurrenceReasoning": { "type": "string" },
+        "recommendedActions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": { "type": "string" },
+              "owner": { "type": "string" },
+              "priority": { "type": "string", "enum": ["Alta", "Media", "Baja"] }
+            }
+          }
+        },
+        "expectedReductionPct": { "type": "number" },
+        "confidence": { "type": "number" },
+        "supportingEvidence": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "AuditReport": {
       "title": "Audit Report",
       "type": "object",
@@ -99,17 +124,6 @@
             },
             "iaSensitivity": { "type": "number" }
           }
-        },
-        "apiKeys": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name": { "type": "string" },
-              "key": { "type": "string" },
-              "createdAt": { "type": "string" }
-            }
-          }
         }
       }
     }
@@ -120,6 +134,7 @@
   "firestore": {
     "/orders/{orderId}": { "schema": "Order", "description": "Normalized records with semantic AI enrichment" },
     "/audits/{auditId}": { "schema": "AuditReport", "description": "Historical forensic audit reports" },
+    "/insights_rootcause/{insightId}": { "schema": "RootCauseInsight", "description": "AI-generated deep intelligence on recurrence and mitigation" },
     "/users/{userId}": { "schema": "UserProfile", "description": "Private user settings and preferences" }
   }
 }

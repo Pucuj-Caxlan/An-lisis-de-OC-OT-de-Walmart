@@ -27,7 +27,11 @@ import {
   AlertTriangle,
   Zap,
   Hammer,
-  ShieldAlert
+  ShieldAlert,
+  Lightbulb,
+  CheckCircle2,
+  FileText,
+  Loader2
 } from 'lucide-react';
 import {
   PieChart,
@@ -46,7 +50,7 @@ import {
   Area
 } from 'recharts';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query } from 'firebase/firestore';
+import { collection, query, doc, setDoc, getDoc } from 'firebase/firestore';
 import {
   Select,
   SelectContent,
@@ -74,17 +78,23 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { generateRootCauseIntelligence, RootCauseIntelligenceOutput } from '@/ai/flows/root-cause-intelligence-flow';
+import { useToast } from '@/hooks/use-toast';
 
 const YEARS = [2022, 2023, 2024, 2025, 2026];
 const COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00B8D4', '#FFD600', '#AA00FF', '#37474F', '#9E9E9E'];
 
 export default function VpDashboard() {
+  const { toast } = useToast();
   const db = useFirestore();
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState<number | 'all'>(currentYear);
   const [comparisonYear, setComparisonYear] = useState<number>(2024);
   const [mounted, setMounted] = useState(false);
   const [drilldownConcept, setDrilldownConcept] = useState<string | null>(null);
+  const [isGeneratingIntelligence, setIsGeneratingIntelligence] = useState(false);
+  const [activeIntelligence, setActiveIntelligence] = useState<RootCauseIntelligenceOutput | null>(null);
+  
   const [filters, setFilters] = useState({
     type: 'all',
     format: 'all',
@@ -256,15 +266,6 @@ export default function VpDashboard() {
     };
   }, [filteredData]);
 
-  const comparatives = useMemo(() => {
-    if (!rawOrders || selectedYear === 'all') return null;
-    const comparisonData = rawOrders.filter(o => getOrderYear(o) === comparisonYear);
-    const compTotal = comparisonData.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0);
-    const delta = metrics.totalImpact - compTotal;
-    const pct = compTotal > 0 ? ((metrics.totalImpact - compTotal) / compTotal) * 100 : 0;
-    return { compTotal, delta, pct };
-  }, [metrics.totalImpact, rawOrders, comparisonYear, selectedYear]);
-
   const drilldownOrders = useMemo(() => {
     if (!drilldownConcept) return [];
     return filteredData.filter(o => {
@@ -273,6 +274,65 @@ export default function VpDashboard() {
       return concept === drilldownConcept || cause === drilldownConcept;
     });
   }, [filteredData, drilldownConcept]);
+
+  const runIntelligence = async () => {
+    if (!drilldownConcept || drilldownOrders.length === 0) return;
+    setIsGeneratingIntelligence(true);
+    setActiveIntelligence(null);
+    try {
+      // Intentar recuperar de Firestore primero si ya existe
+      if (db) {
+        const insightId = `insight_${drilldownConcept.replace(/\s+/g, '_').toLowerCase()}`;
+        const docRef = doc(db, 'insights_rootcause', insightId);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          setActiveIntelligence(docSnap.data() as RootCauseIntelligenceOutput);
+          setIsGeneratingIntelligence(false);
+          return;
+        }
+      }
+
+      const input = {
+        causeId: drilldownConcept,
+        orders: drilldownOrders.map(o => ({
+          id: o.id,
+          projectId: o.projectId || o.projectInfo?.projectId || "N/A",
+          impactoNeto: o.impactoNeto || o.financialImpact?.netImpact || 0,
+          descripcion: o.descripcion || o.standardizedDescription || "",
+          subCausa: o.semanticAnalysis?.subCausa,
+          tipoError: o.semanticAnalysis?.tipoError,
+          proveedor: o.proveedor,
+          etapa: o.etapaProyecto || o.projectStage
+        }))
+      };
+
+      const result = await generateRootCauseIntelligence(input);
+      setActiveIntelligence(result);
+
+      // Guardar en Firestore para versionado
+      if (db) {
+        const insightId = `insight_${drilldownConcept.replace(/\s+/g, '_').toLowerCase()}`;
+        await setDoc(doc(db, 'insights_rootcause', insightId), {
+          ...result,
+          rootCauseId: drilldownConcept,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      toast({ title: "Inteligencia Generada", description: "El análisis sistémico de recurrencia está listo." });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error de IA", description: error.message });
+    } finally {
+      setIsGeneratingIntelligence(false);
+    }
+  };
+
+  useEffect(() => {
+    if (drilldownConcept) {
+      setActiveIntelligence(null);
+    }
+  }, [drilldownConcept]);
 
   const drilldownAnalysis = useMemo(() => {
     if (drilldownOrders.length === 0) return null;
@@ -328,6 +388,8 @@ export default function VpDashboard() {
     );
   }
 
+  const mitigationMatrix = metrics.paretoData.filter(c => c.cumulativePercentage <= 80).slice(0, 3);
+
   return (
     <div className="flex min-h-screen w-full bg-slate-50/50">
       <AppSidebar />
@@ -369,12 +431,6 @@ export default function VpDashboard() {
                 <h2 className="text-2xl font-headline font-bold text-slate-800">{formatCurrency(metrics.totalImpact)}</h2>
                 <div className="flex items-center gap-2 mt-2">
                   <Badge variant="outline" className="text-[9px] bg-primary/5 text-primary border-primary/20">{metrics.count} Órdenes</Badge>
-                  {comparatives && selectedYear !== 'all' && (
-                    <span className={`text-[10px] font-bold flex items-center ${comparatives.pct > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                      {comparatives.pct > 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                      {Math.abs(comparatives.pct).toFixed(1)}% vs {comparisonYear}
-                    </span>
-                  )}
                 </div>
               </CardContent>
             </Card>
@@ -390,27 +446,16 @@ export default function VpDashboard() {
             <Card className="border-none shadow-md bg-slate-800 text-white md:col-span-2">
               <CardContent className="pt-6 flex justify-between items-center">
                 <div className="space-y-1">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Comparativa Interanual</p>
-                  <div className="flex items-center gap-4">
-                    <Select value={String(comparisonYear)} onValueChange={(v) => setComparisonYear(Number(v))}>
-                      <SelectTrigger className="w-[120px] h-9 bg-slate-700 border-none text-white font-bold"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {YEARS.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <div className="flex flex-col">
-                      <span className="text-xs text-slate-400 font-bold uppercase">Variación Nominal</span>
-                      <span className={`text-lg font-bold ${comparatives && comparatives.delta > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                        {comparatives ? formatCurrency(Math.abs(comparatives.delta)) : '--'}
-                      </span>
-                    </div>
-                  </div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Matriz de Mitigación 80/20 (IA)</p>
+                  <p className="text-xs text-slate-400">Atacando las 3 causas críticas se mitiga el 80% del impacto.</p>
                 </div>
-                <div className="text-right bg-white/10 p-4 rounded-2xl">
-                   <p className="text-[10px] font-black text-slate-400 uppercase">Crecimiento (%)</p>
-                   <p className={`text-2xl font-headline font-bold ${comparatives && comparatives.pct > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                     {comparatives ? `${comparatives.pct > 0 ? '+' : ''}${comparatives.pct.toFixed(1)}%` : '--'}
-                   </p>
+                <div className="flex gap-2">
+                  {mitigationMatrix.map((item, i) => (
+                    <div key={i} className="bg-white/10 p-2 rounded-lg text-center min-w-[100px] border border-white/5">
+                      <p className="text-[8px] font-bold text-slate-400 uppercase truncate">{item.name}</p>
+                      <p className="text-sm font-black text-emerald-400">{formatCurrency(item.impact)}</p>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -496,11 +541,11 @@ export default function VpDashboard() {
               <TabsTrigger value="pareto" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
                 <Activity className="h-4 w-4" /> Pareto 80/20 Impacto
               </TabsTrigger>
+              <TabsTrigger value="mitigation" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                <Zap className="h-4 w-4" /> IA Mitigation Plan
+              </TabsTrigger>
               <TabsTrigger value="recurrence" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
                 <ListOrdered className="h-4 w-4" /> Recurrencia Concepto
-              </TabsTrigger>
-              <TabsTrigger value="distribution" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <PieChartIcon className="h-4 w-4" /> Distribución Plan
               </TabsTrigger>
             </TabsList>
 
@@ -529,25 +574,11 @@ export default function VpDashboard() {
                           yAxisId="left" 
                           tick={{ fontSize: 9, fill: '#2962FF' }} 
                           tickFormatter={(v) => `$${Math.round(v/1000000)}M`} 
-                          label={{ value: 'Impacto ($)', angle: -90, position: 'insideLeft', fontSize: 10 }}
                         />
-                        <YAxis 
-                          yAxisId="right" 
-                          orientation="right" 
-                          tick={{ fontSize: 9, fill: '#FF8F00' }} 
-                          tickFormatter={(v) => `${v}%`}
-                          domain={[0, 100]}
-                          label={{ value: '% Acumulado', angle: 90, position: 'insideRight', fontSize: 10 }}
-                        />
-                        <Tooltip 
-                          formatter={(value, name) => [
-                            name === 'Impacto Total' ? formatCurrency(value as number) : `${(value as number).toFixed(1)}%`,
-                            name
-                          ]}
-                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
-                        />
-                        <Bar yAxisId="left" dataKey="impact" name="Impacto Total" fill="#2962FF" radius={[4, 4, 0, 0]} barSize={40} />
-                        <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" name="% Acumulado" stroke="#FF8F00" strokeWidth={3} dot={{ fill: '#FF8F00', r: 4 }} />
+                        <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 9, fill: '#FF8F00' }} />
+                        <Tooltip />
+                        <Bar yAxisId="left" dataKey="impact" fill="#2962FF" radius={[4, 4, 0, 0]} />
+                        <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" stroke="#FF8F00" strokeWidth={3} />
                       </ComposedChart>
                     </ResponsiveContainer>
                   </CardContent>
@@ -556,12 +587,9 @@ export default function VpDashboard() {
                 <div className="lg:col-span-2 space-y-4">
                   <Card className="border-none shadow-md bg-white h-full flex flex-col">
                     <CardHeader className="bg-slate-800 text-white rounded-t-xl shrink-0">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                          <Zap className="h-4 w-4 text-accent" /> Ranking Pareto (Top 10)
-                        </CardTitle>
-                        <Badge variant="outline" className="text-[10px] border-white/20 text-white">80/20 Engine</Badge>
-                      </div>
+                      <CardTitle className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-accent" /> Ranking Pareto (Top 10)
+                      </CardTitle>
                     </CardHeader>
                     <ScrollArea className="flex-1">
                       <div className="p-0">
@@ -578,25 +606,15 @@ export default function VpDashboard() {
                               </Badge>
                             </div>
                             <h4 className="text-sm font-bold text-slate-800 group-hover:text-primary mb-2 truncate">{item.name}</h4>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-2 gap-2">
                               <div className="flex flex-col">
                                 <span className="text-[9px] font-bold text-slate-400 uppercase">Impacto Total</span>
                                 <span className="text-xs font-black text-slate-900">{formatCurrency(item.impact)}</span>
-                              </div>
-                              <div className="flex flex-col">
-                                <span className="text-[9px] font-bold text-slate-400 uppercase">Promedio</span>
-                                <span className="text-xs font-bold text-primary">{formatCurrency(item.averageImpact)}</span>
                               </div>
                               <div className="flex flex-col text-right">
                                 <span className="text-[9px] font-bold text-slate-400 uppercase">Recurrencia</span>
                                 <span className="text-xs font-black text-slate-900">{item.count} OCs</span>
                               </div>
-                            </div>
-                            <div className="mt-3 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
-                              <div 
-                                className={`h-full ${item.cumulativePercentage <= 80 ? 'bg-primary' : 'bg-slate-300'}`} 
-                                style={{ width: `${item.impactPercentage}%` }} 
-                              />
                             </div>
                           </div>
                         ))}
@@ -607,15 +625,36 @@ export default function VpDashboard() {
               </div>
             </TabsContent>
 
+            <TabsContent value="mitigation">
+               <div className="grid md:grid-cols-3 gap-6">
+                 {mitigationMatrix.map((item, i) => (
+                   <Card key={i} className="border-none shadow-md overflow-hidden bg-white hover:border-primary/20 border transition-all">
+                     <CardHeader className="bg-slate-50 border-b">
+                       <Badge className="w-fit mb-2 bg-rose-500">CAUSA CRÍTICA #0{i+1}</Badge>
+                       <CardTitle className="text-lg font-headline font-bold text-slate-800">{item.name}</CardTitle>
+                       <CardDescription className="text-xs font-bold text-primary">Impacto: {formatCurrency(item.impact)}</CardDescription>
+                     </CardHeader>
+                     <CardContent className="pt-6">
+                        <Button 
+                          variant="outline" 
+                          className="w-full gap-2 text-primary border-primary/20 hover:bg-primary/5"
+                          onClick={() => setDrilldownConcept(item.name)}
+                        >
+                          <BrainCircuit className="h-4 w-4" /> Analizar Mitigación IA
+                        </Button>
+                        <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                          <p className="text-[10px] text-slate-500 italic">Haga clic en analizar para desglosar drivers técnicos y plan de retorno.</p>
+                        </div>
+                     </CardContent>
+                   </Card>
+                 ))}
+               </div>
+            </TabsContent>
+
             <TabsContent value="recurrence">
               <Card className="border-none shadow-md overflow-hidden bg-white">
                 <CardHeader className="bg-slate-50/50 border-b">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Recurrencia por Concepto (Filtro Semántico)</CardTitle>
-                      <CardDescription>Frecuencia de incidencias detectadas por el motor de IA.</CardDescription>
-                    </div>
-                  </div>
+                  <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Recurrencia por Concepto</CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
                   <Table>
@@ -624,7 +663,6 @@ export default function VpDashboard() {
                         <TableHead className="p-4">Concepto Normalizado</TableHead>
                         <TableHead className="text-center">Frecuencia</TableHead>
                         <TableHead className="text-right">Impacto Total</TableHead>
-                        <TableHead className="text-right">Peso %</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -635,64 +673,10 @@ export default function VpDashboard() {
                             <Badge className="bg-slate-100 text-slate-600 border-none font-bold">{row.count}</Badge>
                           </TableCell>
                           <TableCell className="text-right font-black tabular-nums">{formatCurrency(row.impact)}</TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <span className="text-[10px] font-bold text-slate-400">
-                                {metrics.totalImpact > 0 ? ((row.impact / metrics.totalImpact) * 100).toFixed(1) : 0}%
-                              </span>
-                              <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-primary" style={{ width: `${metrics.totalImpact > 0 ? (row.impact / metrics.totalImpact) * 100 : 0}%` }} />
-                              </div>
-                            </div>
-                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="distribution">
-              <Card className="border-none shadow-md bg-white">
-                <CardHeader className="border-b bg-slate-50/50">
-                  <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Distribución por Tipo de Plan</CardTitle>
-                </CardHeader>
-                <CardContent className="h-[450px] p-6">
-                  <div className="grid md:grid-cols-3 h-full">
-                    <div className="md:col-span-1 flex flex-col justify-center gap-4">
-                      {metrics.planChartData.map((item, i) => (
-                        <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                          <div className="flex items-center gap-3">
-                            <div className="h-3 w-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                            <span className="text-xs font-bold text-slate-600">{item.name}</span>
-                          </div>
-                          <span className="text-xs font-black text-slate-800">{formatCurrency(item.value)}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="md:col-span-2">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={metrics.planChartData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={80}
-                            outerRadius={140}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {metrics.planChartData.map((_, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={(v) => formatCurrency(v as number)} />
-                          <Legend verticalAlign="bottom" height={36} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -708,17 +692,23 @@ export default function VpDashboard() {
                     <BrainCircuit className="h-7 w-7 text-primary" />
                   </div>
                   <div>
-                    <DialogTitle className="text-2xl font-headline font-bold text-slate-800 tracking-tight">
+                    <DialogTitle className="text-2xl font-headline font-bold text-slate-800">
                       Deep Drill-down: {drilldownConcept}
                     </DialogTitle>
                     <Badge variant="outline" className="mt-1 text-primary border-primary/20 bg-primary/5 uppercase font-black text-[10px]">
-                      Análisis de Drivers Técnicos MEP
+                      Root Cause Intelligence (RCI)
                     </Badge>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-black text-slate-400 uppercase">Muestra Auditada</p>
-                  <p className="text-lg font-bold text-slate-800">{drilldownOrders.length} Eventos</p>
+                <div className="flex gap-3">
+                  <Button 
+                    onClick={runIntelligence} 
+                    disabled={isGeneratingIntelligence}
+                    className="bg-slate-800 hover:bg-slate-700 gap-2 shadow-md h-10 px-6"
+                  >
+                    {isGeneratingIntelligence ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                    Generar Inteligencia Sistémica
+                  </Button>
                 </div>
               </div>
             </DialogHeader>
@@ -726,7 +716,92 @@ export default function VpDashboard() {
             <div className="flex-1 min-h-0 relative">
               <ScrollArea className="h-full w-full">
                 <div className="p-6 space-y-8">
-                  {/* Visualización de Drivers Subcausas y Errores */}
+                  
+                  {activeIntelligence ? (
+                    <div className="grid md:grid-cols-3 gap-6 animate-in fade-in duration-500">
+                      <Card className="md:col-span-2 border-none bg-primary/5 shadow-none p-6 space-y-6">
+                        <div className="space-y-2">
+                           <h4 className="text-xs font-black uppercase text-primary flex items-center gap-2">
+                             <Lightbulb className="h-4 w-4" /> ¿Por qué se repite? (Análisis Sistémico)
+                           </h4>
+                           <p className="text-sm text-slate-700 leading-relaxed italic border-l-4 border-primary/30 pl-4 py-1">
+                             "{activeIntelligence.recurrenceReasoning}"
+                           </p>
+                        </div>
+
+                        <div className="grid md:grid-cols-2 gap-6">
+                          <div className="space-y-3">
+                            <h4 className="text-[10px] font-black uppercase text-slate-400">Drivers Detectados</h4>
+                            <div className="flex flex-wrap gap-2">
+                              {activeIntelligence.driversDetected.map((d, i) => (
+                                <Badge key={i} variant="outline" className="bg-white border-primary/10 text-primary text-[9px] uppercase font-bold">
+                                  {d}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-3">
+                            <h4 className="text-[10px] font-black uppercase text-slate-400">Evidencia Forense (PIDs)</h4>
+                            <div className="flex flex-wrap gap-2">
+                              {activeIntelligence.supportingEvidence.map((e, i) => (
+                                <Badge key={i} variant="secondary" className="bg-slate-200 text-slate-600 text-[9px] font-mono">
+                                  {e}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-4 border-t border-primary/10 flex items-center justify-between">
+                           <div className="flex flex-col">
+                              <span className="text-[9px] font-black text-slate-400 uppercase">Reducción de Impacto Esperada</span>
+                              <span className="text-2xl font-black text-emerald-600">{activeIntelligence.expectedReductionPct}%</span>
+                           </div>
+                           <Badge className="bg-primary text-white font-bold h-8 px-4">IA Confidence: {(activeIntelligence.confidence * 100).toFixed(0)}%</Badge>
+                        </div>
+                      </Card>
+
+                      <Card className="border shadow-sm overflow-hidden">
+                        <CardHeader className="bg-slate-800 text-white py-3">
+                          <CardTitle className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-400" /> Plan de Mitigación
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-4 space-y-4">
+                           {activeIntelligence.recommendedActions.map((action, i) => (
+                             <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100 group">
+                               <div className="flex items-start justify-between mb-2">
+                                 <Badge className={`${action.priority === 'Alta' ? 'bg-rose-500' : 'bg-amber-500'} text-[8px] uppercase font-bold`}>
+                                   Prioridad {action.priority}
+                                 </Badge>
+                                 <span className="text-[9px] font-black text-primary uppercase">{action.owner}</span>
+                               </div>
+                               <p className="text-xs text-slate-700 font-medium group-hover:text-primary transition-colors">{action.action}</p>
+                             </div>
+                           ))}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  ) : isGeneratingIntelligence ? (
+                    <div className="h-60 flex flex-col items-center justify-center space-y-4 text-slate-400">
+                      <Loader2 className="h-12 w-12 animate-spin text-primary opacity-20" />
+                      <p className="text-sm font-black uppercase tracking-[0.2em] animate-pulse">Consultando Motor RCI de Gemini...</p>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 border-2 border-dashed rounded-3xl p-12 text-center space-y-4">
+                       <BrainCircuit className="h-12 w-12 text-primary opacity-20 mx-auto" />
+                       <div className="max-w-md mx-auto">
+                         <h4 className="text-lg font-bold text-slate-800">Análisis Sistémico Pendiente</h4>
+                         <p className="text-xs text-slate-500 mt-1">
+                           Para identificar por qué se repite esta causa y obtener un plan de mitigación accionable, inicie la generación de inteligencia.
+                         </p>
+                         <Button onClick={runIntelligence} className="mt-6 bg-primary">Generar Inteligencia de Causa Raíz</Button>
+                       </div>
+                    </div>
+                  )}
+
+                  <Separator />
+
                   <div className="grid md:grid-cols-3 gap-6">
                     <Card className="md:col-span-2 border shadow-sm">
                       <CardHeader className="pb-2">
@@ -740,8 +815,8 @@ export default function VpDashboard() {
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                             <XAxis type="number" hide />
                             <YAxis dataKey="name" type="category" width={150} tick={{ fontSize: 10, fontWeight: 'bold' }} />
-                            <Tooltip formatter={(v) => formatCurrency(v as number)} />
-                            <Bar dataKey="value" fill="#2962FF" radius={[0, 4, 4, 0]} barSize={20} />
+                            <Tooltip />
+                            <Bar dataKey="value" fill="#2962FF" radius={[0, 4, 4, 0]} />
                           </BarChart>
                         </ResponsiveContainer>
                       </CardContent>
@@ -770,33 +845,30 @@ export default function VpDashboard() {
                               ))}
                             </Pie>
                             <Tooltip />
-                            <Legend verticalAlign="bottom" height={36} iconSize={10} wrapperStyle={{ fontSize: '10px' }} />
+                            <Legend verticalAlign="bottom" iconSize={10} wrapperStyle={{ fontSize: '10px' }} />
                           </PieChart>
                         </ResponsiveContainer>
                       </CardContent>
                     </Card>
                   </div>
 
-                  <Separator />
-
-                  {/* Tabla de Registros Detallados */}
                   <div className="space-y-4">
                     <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                       <ListOrdered className="h-4 w-4" /> Detalle de Frecuencias e Inteligencia Forense
                     </h3>
                     <Table>
                       <TableHeader className="bg-slate-50/50">
-                        <TableRow className="hover:bg-transparent">
-                          <TableHead className="w-[180px] font-black uppercase text-[9px] tracking-widest">PID / Proyecto</TableHead>
-                          <TableHead className="font-black uppercase text-[9px] tracking-widest text-center">Driver Error</TableHead>
-                          <TableHead className="font-black uppercase text-[9px] tracking-widest">Subcausa Técnica</TableHead>
-                          <TableHead className="font-black uppercase text-[9px] tracking-widest">Estructura Semántica</TableHead>
-                          <TableHead className="text-right font-black uppercase text-[9px] tracking-widest">Impacto Neto</TableHead>
+                        <TableRow>
+                          <TableHead className="w-[180px] font-black uppercase text-[9px]">PID / Proyecto</TableHead>
+                          <TableHead className="font-black uppercase text-[9px] text-center">Driver Error</TableHead>
+                          <TableHead className="font-black uppercase text-[9px]">Subcausa Técnica</TableHead>
+                          <TableHead className="font-black uppercase text-[9px]">Estructura Semántica</TableHead>
+                          <TableHead className="text-right font-black uppercase text-[9px]">Impacto Neto</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {drilldownOrders.map((order) => (
-                          <TableRow key={order.id} className="hover:bg-primary/5 transition-colors group">
+                          <TableRow key={order.id} className="hover:bg-primary/5">
                             <TableCell className="font-medium">
                               <div className="flex flex-col">
                                 <span className="text-primary font-bold">{order.projectId || "S/P"}</span>
@@ -821,19 +893,9 @@ export default function VpDashboard() {
                               </div>
                             </TableCell>
                             <TableCell>
-                              <div className="max-w-[300px] space-y-1">
-                                <p className="text-[10px] leading-relaxed text-slate-600 italic">
-                                  {order.standardizedDescription || order.descripcion}
-                                </p>
-                                <div className="flex gap-1">
-                                  <Badge variant="secondary" className="text-[8px] h-4 px-1.5 uppercase bg-slate-100 border-none">
-                                    {order.etapaProyecto || "Construcción"}
-                                  </Badge>
-                                  {order.isSigned && (
-                                    <Badge variant="secondary" className="text-[8px] h-4 px-1.5 uppercase bg-emerald-50 text-emerald-600 border-none">Firmado</Badge>
-                                  )}
-                                </div>
-                              </div>
+                              <p className="text-[10px] leading-relaxed text-slate-600 italic truncate max-w-[250px]">
+                                {order.standardizedDescription || order.descripcion}
+                              </p>
                             </TableCell>
                             <TableCell className="text-right font-black text-slate-900 tabular-nums">
                               {formatCurrency(order.impactoNeto || order.financialImpact?.netImpact || 0)}
@@ -848,18 +910,11 @@ export default function VpDashboard() {
             </div>
 
             <div className="p-6 bg-slate-50 border-t shrink-0 flex items-center justify-between shadow-[0_-4px_10px_rgba(0,0,0,0.03)]">
-              <div className="flex items-center gap-6">
-                 <div className="flex flex-col">
-                    <span className="text-[9px] font-black text-slate-400 uppercase">Impacto Total Auditado</span>
-                    <span className="text-2xl font-black text-primary tabular-nums">
-                      {formatCurrency(drilldownOrders.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0))}
-                    </span>
-                 </div>
-                 <Separator orientation="vertical" className="h-10" />
-                 <div className="flex flex-col">
-                    <span className="text-[9px] font-black text-slate-400 uppercase">Eficiencia Pareto</span>
-                    <span className="text-xs font-bold text-slate-800">Causa Raíz Crítica (Top Drivers)</span>
-                 </div>
+              <div className="flex flex-col">
+                  <span className="text-[9px] font-black text-slate-400 uppercase">Impacto Total Auditado</span>
+                  <span className="text-2xl font-black text-primary tabular-nums">
+                    {formatCurrency(drilldownOrders.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0))}
+                  </span>
               </div>
               <Button size="lg" className="h-11 px-8 shadow-md" onClick={() => setDrilldownConcept(null)}>Cerrar Auditoría Deep</Button>
             </div>
