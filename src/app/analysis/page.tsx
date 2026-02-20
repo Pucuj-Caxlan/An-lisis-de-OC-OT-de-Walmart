@@ -82,7 +82,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const MAX_BULK_AI_RECORDS = 300;
-const AI_BATCH_SIZE = 10; // Reducido para máxima estabilidad y evitar timeouts
+const AI_BATCH_SIZE = 10; 
 
 type AuditStatus = 'all' | 'pending' | 'audited' | 'review' | 'manual';
 
@@ -163,6 +163,44 @@ export default function AnalysisPage() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
+  const handleSingleSemanticAnalysis = async (order: any) => {
+    if (!db) return;
+    setIsAnalyzing(order.id);
+    try {
+      const result = await analyzeOrderSemantically({
+        descripcion: order.descripcion || "",
+        monto: order.impactoNeto,
+        contexto: {
+          justificacionDetallada: order.technicalJustification?.detailedReasoning
+        }
+      });
+
+      const orderRef = doc(db, 'orders', order.id);
+      updateDocumentNonBlocking(orderRef, {
+        disciplina_normalizada: result.disciplina_normalizada,
+        causa_raiz_normalizada: result.causa_raiz_normalizada,
+        semanticAnalysis: result,
+        structural_quality_score: 95,
+        reliability_level: 'HIGH',
+        rationale_tecnico: result.rationale_tecnico,
+        needs_review: result.needs_review
+      });
+
+      toast({ 
+        title: "Clasificación IA Exitosa", 
+        description: `Disciplina detectada: ${result.disciplina_normalizada}` 
+      });
+    } catch (e: any) {
+      toast({ 
+        variant: "destructive", 
+        title: "Fallo en IA", 
+        description: e.message 
+      });
+    } finally {
+      setIsAnalyzing(null);
+    }
+  };
+
   const handleValidateAudit = (orderId: string) => {
     if (!db || !user) return;
     updateDocumentNonBlocking(doc(db, 'orders', orderId), {
@@ -216,8 +254,8 @@ export default function AnalysisPage() {
   };
 
   const handleBulkAiAnalysis = async () => {
-    if (selectedIds.length < 2) {
-      toast({ variant: "destructive", title: "Selección insuficiente", description: "Seleccione al menos 2 registros." });
+    if (selectedIds.length < 1) {
+      toast({ variant: "destructive", title: "Selección insuficiente", description: "Seleccione al menos 1 registro." });
       return;
     }
 
@@ -225,7 +263,7 @@ export default function AnalysisPage() {
       toast({ 
         variant: "destructive", 
         title: "Límite Excedido", 
-        description: `El análisis masivo está limitado a ${MAX_BULK_AI_RECORDS} registros para garantizar estabilidad.` 
+        description: `El análisis masivo está limitado a ${MAX_BULK_AI_RECORDS} registros.` 
       });
       return;
     }
@@ -252,29 +290,24 @@ export default function AnalysisPage() {
           impactoNeto: o.impactoNeto,
           disciplina_normalizada: o.disciplina_normalizada,
           causa_raiz_normalizada: o.causa_raiz_normalizada,
-          descripcion: String(o.descripcion || "").substring(0, 300), // Truncado para ahorrar tokens
+          descripcion: String(o.descripcion || "").substring(0, 300), 
           isSigned: o.isSigned,
           fechaSolicitud: o.fechaSolicitud
         }));
 
         try {
           const chunkResult = await analyzeBulkOrders({ orders: chunk });
-          
-          // Consolidación de Inteligencia
           allAnomalies = [...allAnomalies, ...(chunkResult.anomaliesDetected || [])];
           allPatterns = Array.from(new Set([...allPatterns, ...(chunkResult.commonPatterns || [])]));
           allRecommendations = Array.from(new Set([...allRecommendations, ...(chunkResult.recommendations || [])]));
-          finalSummary = chunkResult.executiveSummary; // Usamos el último como base de resumen
+          finalSummary = chunkResult.executiveSummary;
           lastConfidence = chunkResult.confidenceScore;
 
           setProcessedCount(prev => prev + chunk.length);
           setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
-          
-          // Throttle para evitar saturación del servidor
           await new Promise(r => setTimeout(r, 400));
         } catch (chunkError) {
           console.error(`Fallo en bloque ${i / AI_BATCH_SIZE}:`, chunkError);
-          // Si falla un bloque, continuamos con el siguiente si es posible
         }
       }
 
@@ -282,15 +315,15 @@ export default function AnalysisPage() {
         executiveSummary: finalSummary,
         totalImpactFormatted: formatAmount(selectedTotalAmount),
         commonPatterns: allPatterns.slice(0, 8),
-        recurrenceAnalysis: "Análisis consolidado de múltiples lotes ejecutado con éxito.",
+        recurrenceAnalysis: "Análisis consolidado ejecutado.",
         anomaliesDetected: allAnomalies.slice(0, 10),
-        disciplineImpact: [], // Calculado por el frontend si es necesario
+        disciplineImpact: [], 
         recommendations: allRecommendations.slice(0, 6),
         isEligibleForBulkAudit: allAnomalies.length < (selectedIds.length * 0.1),
         confidenceScore: lastConfidence
       });
 
-      toast({ title: "Análisis Masivo Finalizado", description: `Se procesaron ${selectedOrders.length} registros en bloques.` });
+      toast({ title: "Análisis Masivo Finalizado" });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Fallo Crítico en IA", description: e.message });
       setShowBulkAiDialog(false);
@@ -350,7 +383,7 @@ export default function AnalysisPage() {
             </Card>
           </div>
 
-          {/* Panel de Acciones Masivas (Aparece al seleccionar registros) */}
+          {/* Panel de Acciones Masivas */}
           {selectedIds.length > 0 && (
             <Card className="border-none shadow-xl bg-primary text-white p-4 flex flex-col md:flex-row items-center justify-between gap-4 animate-in slide-in-from-top-2 duration-300">
               <div className="flex items-center gap-4">
@@ -461,6 +494,15 @@ export default function AnalysisPage() {
                     <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-8 w-8 p-0 text-accent hover:bg-accent/10"
+                          disabled={isAnalyzing === order.id}
+                          onClick={() => handleSingleSemanticAnalysis(order)}
+                        >
+                          {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        </Button>
                         <Dialog>
                           <DialogTrigger asChild>
                             <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-primary hover:bg-primary/10"><FileSearch className="h-4 w-4" /></Button>
@@ -480,7 +522,6 @@ export default function AnalysisPage() {
                             <ScrollArea className="max-h-[70vh] bg-slate-50 p-6">
                               {reportResult ? (
                                 <div className="space-y-8 animate-in fade-in duration-500">
-                                  {/* Cabecera del Reporte de IA */}
                                   <section className="grid md:grid-cols-3 gap-6">
                                     <Card className="p-5 bg-white border-none shadow-sm rounded-2xl space-y-4">
                                       <h4 className="text-[10px] font-black text-primary uppercase tracking-widest">Resumen Ejecutivo</h4>
@@ -503,7 +544,6 @@ export default function AnalysisPage() {
                                     </Card>
                                   </section>
 
-                                  {/* Línea de Tiempo Forense */}
                                   <section className="space-y-4">
                                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                                       <History className="h-4 w-4 text-primary" /> Reconstrucción de Línea de Tiempo
@@ -527,7 +567,6 @@ export default function AnalysisPage() {
                                     </div>
                                   </section>
 
-                                  {/* Recomendaciones de Mitigación */}
                                   <section className="space-y-4">
                                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Planes de Acción Sugeridos</h4>
                                     <div className="grid md:grid-cols-2 gap-4">
@@ -624,7 +663,6 @@ export default function AnalysisPage() {
 
         {/* DIÁLOGOS DE CONFIRMACIÓN Y PROCESAMIENTO */}
 
-        {/* Diálogo de IA Masiva */}
         <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
           <DialogContent className="max-w-3xl rounded-3xl border-none shadow-2xl p-0 overflow-hidden bg-white">
             <header className="bg-slate-900 text-white p-6 flex justify-between items-center">
@@ -723,7 +761,6 @@ export default function AnalysisPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Diálogo de Borrado Seguro */}
         <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
           <DialogContent className="rounded-3xl border-none shadow-2xl p-0 overflow-hidden bg-white max-w-md">
             <div className="bg-rose-600 text-white p-6 flex flex-col items-center text-center space-y-2">
