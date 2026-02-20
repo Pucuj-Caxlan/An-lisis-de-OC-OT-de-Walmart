@@ -99,7 +99,6 @@ export default function AnalysisPage() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportResult, setReportResult] = useState<TraceabilityReportOutput | null>(null);
   const [mounted, setMounted] = useState(false);
-  const reportContainerRef = useRef<HTMLDivElement>(null);
   
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -202,33 +201,6 @@ export default function AnalysisPage() {
     }
   };
 
-  const processSingleOrder = async (order: any) => {
-    setIsAnalyzing(order.id);
-    try {
-      const result = await analyzeOrderSemantically({
-        descripcion: order.descripcion || order.standardizedDescription || "",
-        monto: order.impactoNeto || 0,
-        contexto: {
-          disciplinasVigentes: DISCIPLINAS_CATALOGO,
-          causasVigentes: CAUSAS_CATALOGO
-        }
-      });
-      if (db) {
-        updateDocumentNonBlocking(doc(db, 'orders', order.id), {
-          ...result,
-          classification_status: 'auto',
-          ai_model_version: 'gemini-2.5-flash-forensic',
-          classified_at: new Date().toISOString()
-        });
-      }
-      toast({ title: "Análisis Finalizado", description: `Clasificación: ${result.disciplina_normalizada}` });
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Fallo en Clasificación", description: error.message });
-    } finally {
-      setIsAnalyzing(null);
-    }
-  };
-
   const handleGenerateReport = async (order: any) => {
     setIsGeneratingReport(true);
     setReportResult(null);
@@ -288,6 +260,16 @@ export default function AnalysisPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            {selectedIds.length > 0 && (
+              <Button 
+                variant="destructive" 
+                size="sm" 
+                className="gap-2 h-9 px-4 animate-in fade-in zoom-in"
+                onClick={() => handleOpenDelete('bulk')}
+              >
+                <Trash2 className="h-4 w-4" /> BORRAR ({selectedIds.length})
+              </Button>
+            )}
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
               <Input
@@ -305,6 +287,13 @@ export default function AnalysisPage() {
                 <DropdownMenuItem onClick={() => setStatusFilter('all')}>Todos</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setStatusFilter('processed')}>Auditados</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setStatusFilter('review')}>Revisión Pendiente</DropdownMenuItem>
+                <Separator />
+                <DropdownMenuItem 
+                  className="text-rose-600 focus:text-rose-600 focus:bg-rose-50"
+                  onClick={() => handleOpenDelete('all')}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" /> Borrar por Filtro
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -316,7 +305,7 @@ export default function AnalysisPage() {
               <Table>
                 <TableHeader className="bg-slate-50/50">
                   <TableRow>
-                    <TableHead className="w-[40px]"><Checkbox onCheckedChange={handleToggleSelectAll} /></TableHead>
+                    <TableHead className="w-[40px]"><Checkbox checked={selectedIds.length === filteredOrders.length && filteredOrders.length > 0} onCheckedChange={handleToggleSelectAll} /></TableHead>
                     <TableHead>Estatus Doc</TableHead>
                     <TableHead>PID / Origen</TableHead>
                     <TableHead>Clasificación</TableHead>
@@ -419,7 +408,7 @@ export default function AnalysisPage() {
                                       {['Detección', 'Solicitud', 'Aprobación', 'Ejecución', 'Cierre'].map((label, i) => (
                                         <div key={label} className={`space-y-0.5 ${i > 0 ? 'border-l' : ''}`}>
                                           <p className="text-[8px] font-black text-slate-400 uppercase">{label}</p>
-                                          <p className="text-[10px] font-bold text-slate-700">
+                                          <p className="text-xs font-bold text-slate-700">
                                             {formatDate(order[`fecha${label}`] || order[label.toLowerCase() + 'Date'])}
                                           </p>
                                         </div>
@@ -439,11 +428,6 @@ export default function AnalysisPage() {
                                           <p className="text-[10px] text-slate-700 italic font-medium leading-relaxed">"{frag.text}"</p>
                                         </Card>
                                       ))}
-                                      {(!order.pdfEvidenceFragments || order.pdfEvidenceFragments.length === 0) && (
-                                        <div className="text-center py-4 bg-slate-50 border border-dashed rounded-xl">
-                                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sin evidencia documental mapeada</p>
-                                        </div>
-                                      )}
                                     </div>
                                   </section>
 
@@ -515,6 +499,45 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
         </main>
+
+        {/* Diálogo de Confirmación de Borrado */}
+        <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-rose-600 uppercase font-headline">
+                <ShieldAlert className="h-5 w-5" /> Confirmación Crítica
+              </DialogTitle>
+              <DialogDescription className="pt-2">
+                Está por eliminar <strong>{deleteMode === 'all' ? filteredOrders.length : selectedIds.length}</strong> registro(s). Esta acción es irreversible y se registrará en el log de auditoría.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="bg-rose-50 p-4 rounded-xl border border-rose-100">
+                <p className="text-[10px] font-black uppercase text-rose-700 mb-2">Instrucciones</p>
+                <p className="text-xs text-rose-800">Para confirmar, escriba <strong>BORRAR</strong> en el campo de abajo:</p>
+              </div>
+              <Input 
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value.toUpperCase())}
+                placeholder="Escriba BORRAR..."
+                className="font-black tracking-widest text-center h-12 rounded-xl"
+              />
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="ghost" onClick={() => setShowDeleteConfirm(false)} className="rounded-xl uppercase text-[10px] font-black">Cancelar</Button>
+              <Button 
+                variant="destructive" 
+                onClick={processDelete}
+                disabled={deleteConfirmText !== 'BORRAR' || isDeleting}
+                className="rounded-xl uppercase text-[10px] font-black px-8"
+              >
+                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                Confirmar Borrado
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </SidebarInset>
     </div>
   );
