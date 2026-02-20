@@ -28,104 +28,138 @@ export interface NormalizedRow {
   qcFlags: string[];
   rowNumber: number;
   sheetName: string;
+  structuralQuality: number;
 }
 
-// Mapa de alias ampliado para soportar múltiples estructuras de reportes Walmart
+/**
+ * Mapa de alias exhaustivo para homologación de esquemas Walmart.
+ * Permite detectar columnas en formatos CAM, BAE, B2, S3 y reportes ad-hoc.
+ */
 const COLUMN_MAP: Record<string, string[]> = {
-  projectId: ['PID', 'ID TRIRIGA', 'TRIRIGA', 'FOLIO PROYECTO', 'NUMERO DE PROYECTO', 'ID_PROYECTO'],
-  projectName: ['Nombre del proyecto', 'PROYECTO', 'NAME', 'DESCRIPCION PROYECTO'],
-  type: ['Tipo', 'OT/OCR/OCI', 'TIPO ORDEN', 'CLASE', 'TIPO_SOLICITUD'],
-  format: ['Formato', 'FORMATO', 'PROTOTIPO', 'UNIDAD_NEGOCIO'],
-  country: ['País', 'PAIS', 'COUNTRY'],
-  state: ['Estado', 'ESTADO', 'PROVINCIA'],
-  municipality: ['Municipio', 'MUNICIPIO', 'CIUDAD'],
-  coordinador: ['Coordinador', 'COORDINADOR', 'COORDINADOR_PROYECTO'],
-  plan: ['Plan', 'PLAN', 'PROGRAMA'],
-  etapaProyecto: ['Etapa del Proyecto', 'ETAPA', 'FASE'],
-  causaRaiz: ['Causa Raiz', 'CAUSA', 'MOTIVO', 'ORIGEN_DESVIACION'],
-  descripcion: ['Descripcion', 'DESCRIPCIÓN', 'QUE SE REALIZARA', 'JUSTIFICACION'],
-  montoDeductiva: ['Monto Deductiva', 'DEDUCTIVA', 'MONTO_NEGATIVO', 'DEDUCCIONES'],
-  montoAditiva: ['Monto Aditiva', 'ADITIVA', 'MONTO_POSITIVO', 'ADICIONALES'],
-  impactoNeto: ['Impacto Neto', 'IMPACTO', 'NETO', 'TOTAL_ORDEN'],
-  areaSolicitante: ['Área solicitante', 'AREA SOLICITANTE', 'SOLICITA'],
-  generadorDesviacion: ['Generador de la desviación', 'GENERADOR', 'RESPONSABLE_DESVIACION'],
-  areaEjerceRecurso: ['Área que Ejerce el Recurso', 'AREA EJERCE', 'AREA_PAGO'],
-  estatus: ['Estatus', 'ESTATUS', 'STATUS', 'ESTADO_SOLICITUD'],
-  fechaSolicitud: ['Fecha de Solicitud', 'FECHA_SOLICITUD', 'DATE_REQUESTED', 'F. SOLICITUD'],
-  fechaAprobacionGerente: ['Fecha de Aprobacion Gerente', 'FECHA_APROBACION'],
-  fechaPptoProyectista: ['Fecha ppto Proyectista', 'FECHA_PPTO'],
-  proveedor: ['Proveedor', 'PROVEEDOR', 'CONTRATISTA', 'VENDOR']
+  projectId: ['pid', 'id tririga', 'tririga', 'folio proyecto', 'numero de proyecto', 'id_proyecto', 'project id', 'num proyecto'],
+  projectName: ['nombre del proyecto', 'proyecto', 'name', 'descripcion proyecto', 'unidad de negocio', 'nombre unidad'],
+  type: ['tipo', 'ot/ocr/oci', 'tipo orden', 'clase', 'tipo_solicitud', 'clase de orden'],
+  format: ['formato', 'prototipo', 'unidad_negocio', 'formato tienda', 'business unit'],
+  country: ['país', 'pais', 'country', 'region'],
+  state: ['estado', 'provincia', 'state', 'entidad'],
+  municipality: ['municipio', 'ciudad', 'municipality', 'delegacion'],
+  coordinador: ['coordinador', 'pm', 'project manager', 'responsable pmo'],
+  plan: ['plan', 'programa', 'plan de inversion', 'budget line'],
+  etapaProyecto: ['etapa del proyecto', 'etapa', 'fase', 'stage', 'status obra'],
+  causaRaiz: ['causa raiz', 'causa', 'motivo', 'origen_desviacion', 'root cause', 'causa_normalizada'],
+  descripcion: ['descripcion', 'descripción', 'que se realizara', 'justificacion', 'comentarios', 'detalle tecnico', 'description'],
+  montoDeductiva: ['monto deductiva', 'deductiva', 'monto_negativo', 'deducciones', 'ahorro', 'credit'],
+  montoAditiva: ['monto aditiva', 'aditiva', 'monto_positivo', 'adicionales', 'extra cost', 'debit'],
+  impactoNeto: ['impacto neto', 'impacto', 'neto', 'total_orden', 'monto total', 'net impact', 'amount'],
+  areaSolicitante: ['área solicitante', 'area solicitante', 'solicita', 'requesting area'],
+  generadorDesviacion: ['generador de la desviación', 'generador', 'responsable_desviacion', 'causante'],
+  areaEjerceRecurso: ['área que ejerce el recurso', 'area ejerce', 'area_pago', 'ejecutor'],
+  estatus: ['estatus', 'estatus solicitud', 'status', 'estado_solicitud', 'estado actual'],
+  fechaSolicitud: ['fecha de solicitud', 'fecha_solicitud', 'date_requested', 'f. solicitud', 'created date'],
+  fechaAprobacionGerente: ['fecha de aprobacion gerente', 'fecha_aprobacion', 'approval date', 'f. aprobacion'],
+  fechaPptoProyectista: ['fecha ppto proyectista', 'fecha_ppto', 'quote date'],
+  proveedor: ['proveedor', 'contratista', 'vendor', 'razon social', 'empresa']
 };
 
 function parseNumber(val: any): number {
   if (typeof val === 'number') return val;
-  if (!val || val === '#VALUE!' || val === '#REF!' || val === '#N/A' || val === 'NULL') return 0;
+  if (!val || val === '#VALUE!' || val === '#REF!' || val === '#N/A' || val === 'NULL' || val === 'NaN') return 0;
+  // Eliminar símbolos de moneda y comas
   const cleaned = String(val).replace(/[^0-9.-]+/g, '');
   const parsed = parseFloat(cleaned);
   return isNaN(parsed) ? 0 : parsed;
 }
 
 function parseDate(val: any): string | null {
-  if (!val || val === '#VALUE!' || val === 'NULL') return null;
+  if (!val || val === '#VALUE!' || val === 'NULL' || val === '0') return null;
   try {
-    // Manejo de fechas seriales de Excel
+    // Manejo de fechas seriales de Excel (números)
     if (typeof val === 'number') {
       const d = new Date((val - 25569) * 86400 * 1000);
-      return d.toISOString();
+      return isNaN(d.getTime()) ? null : d.toISOString();
     }
-    const d = new Date(val);
-    return isNaN(d.getTime()) ? null : d.toISOString();
+    
+    // Intento de parseo de strings
+    const dateStr = String(val).trim();
+    if (!dateStr) return null;
+    
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) return d.toISOString();
+    
+    // Fallback para formatos DD/MM/YYYY comunes en Latam
+    const parts = dateStr.split(/[\/\-]/);
+    if (parts.length === 3) {
+      const day = parseInt(parts[0]);
+      const month = parseInt(parts[1]) - 1;
+      const year = parts[2].length === 2 ? 2000 + parseInt(parts[2]) : parseInt(parts[2]);
+      const d2 = new Date(year, month, day);
+      if (!isNaN(d2.getTime())) return d2.toISOString();
+    }
+    
+    return null;
   } catch {
     return null;
   }
 }
 
+/**
+ * Calcula un índice de calidad estructural del registro (0-100)
+ */
+function calculateStructuralQuality(normalized: any): number {
+  const criticalFields = ['projectId', 'impactoNeto', 'descripcion', 'causaRaiz', 'fechaSolicitud'];
+  let score = 100;
+  const penaltyPerMissingCritical = 20;
+  
+  criticalFields.forEach(field => {
+    if (!normalized[field] || normalized[field] === '' || normalized[field] === 0) {
+      score -= penaltyPerMissingCritical;
+    }
+  });
+  
+  return Math.max(0, score);
+}
+
 export function processExcelFile(buffer: ArrayBuffer): { data: NormalizedRow[], errors: any[] } {
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, cellNF: false, cellText: false });
   const allData: NormalizedRow[] = [];
   const errors: any[] = [];
 
   workbook.SheetNames.forEach(sheetName => {
     const sheet = workbook.Sheets[sheetName];
-    // Convertimos a matriz para buscar las cabeceras inteligentemente
+    // Convertimos a matriz para búsqueda de cabeceras profunda
     const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
     
     if (rawRows.length < 1) return;
 
-    // 1. Detección Inteligente de Cabeceras
+    // 1. Detección Inteligente de Cabeceras (Escaneo de las primeras 25 filas)
     let headerIdx = -1;
-    for (let i = 0; i < Math.min(20, rawRows.length); i++) {
+    for (let i = 0; i < Math.min(25, rawRows.length); i++) {
       const row = rawRows[i];
       if (!row) continue;
       
       const potentialHeaders = row.map(cell => String(cell || '').toLowerCase().trim());
-      // Buscamos coincidencia con campos clave obligatorios
-      const hasKeyFields = potentialHeaders.some(h => 
-        h.includes('pid') || 
-        h.includes('país') || 
-        h.includes('tririga') || 
-        h.includes('impacto') ||
-        h.includes('proyecto')
-      );
+      // Requerimos al menos 3 coincidencias clave para confirmar que es la fila de cabeceras
+      const matches = potentialHeaders.filter(h => 
+        Object.values(COLUMN_MAP).flat().some(alias => h === alias || h.includes(alias))
+      ).length;
       
-      if (hasKeyFields) {
+      if (matches >= 3) {
         headerIdx = i;
         break;
       }
     }
 
     if (headerIdx === -1) {
-      console.warn(`No se detectaron cabeceras claras en la hoja ${sheetName}. Usando fila 0.`);
-      headerIdx = 0;
+      console.warn(`No se detectó un esquema claro en la hoja ${sheetName}.`);
+      headerIdx = 0; // Fallback
     }
 
-    const headers = rawRows[headerIdx].map(h => String(h || '').trim());
+    const headers = rawRows[headerIdx].map(h => String(h || '').trim().toLowerCase());
     const dataRows = rawRows.slice(headerIdx + 1);
 
     dataRows.forEach((row, idx) => {
       const rowNum = headerIdx + idx + 2;
       
-      // Saltamos filas vacías
       if (!row || row.every(cell => cell === null || cell === '')) return;
 
       const normalized: any = { 
@@ -134,39 +168,46 @@ export function processExcelFile(buffer: ArrayBuffer): { data: NormalizedRow[], 
         qcFlags: [] 
       };
 
-      Object.entries(COLUMN_MAP).forEach(([key, aliases]) => {
+      // 2. Mapeo Forense de Columnas
+      Object.entries(COLUMN_MAP).forEach(([canonicalKey, aliases]) => {
+        // Buscar la columna por coincidencia exacta o parcial de alias
         const colIdx = headers.findIndex(h => 
-          aliases.some(a => h.toLowerCase().includes(a.toLowerCase()))
+          aliases.some(alias => h === alias || h.includes(alias))
         );
         
         const rawValue = colIdx !== -1 ? row[colIdx] : null;
 
-        if (key.startsWith('monto') || key === 'impactoNeto') {
-          normalized[key] = parseNumber(rawValue);
-          if (String(rawValue).includes('#VALUE!')) normalized.qcFlags.push(`FIXED_VALUE_ERROR_${key}`);
-        } else if (key.startsWith('fecha')) {
-          normalized[key] = parseDate(rawValue);
-          if (!normalized[key] && rawValue && String(rawValue).trim() !== '') {
-            normalized.qcFlags.push(`DATE_FORMAT_ISSUE_${key}`);
+        if (canonicalKey.startsWith('monto') || canonicalKey === 'impactoNeto') {
+          normalized[canonicalKey] = parseNumber(rawValue);
+          if (String(rawValue).includes('#VALUE!')) normalized.qcFlags.push(`CLEANED_VALUE_ERROR_${canonicalKey}`);
+        } else if (canonicalKey.startsWith('fecha')) {
+          normalized[canonicalKey] = parseDate(rawValue);
+          if (!normalized[canonicalKey] && rawValue && String(rawValue).trim() !== '') {
+            normalized.qcFlags.push(`INVALID_DATE_FORMAT_${canonicalKey}`);
           }
         } else {
-          normalized[key] = rawValue !== null ? String(rawValue).trim() : '';
+          normalized[canonicalKey] = rawValue !== null ? String(rawValue).trim() : '';
         }
       });
 
-      // Lógica de Negocio: Autocalcular Impacto Neto si falta o es 0
+      // 3. Lógica de Consistencia Financiera
       if (normalized.impactoNeto === 0 && (normalized.montoAditiva !== 0 || normalized.montoDeductiva !== 0)) {
         normalized.impactoNeto = normalized.montoAditiva - normalized.montoDeductiva;
-        normalized.qcFlags.push('NET_IMPACT_AUTO_CALCULATED');
+        normalized.qcFlags.push('FINANCIAL_RECONCILIATION_APPLIED');
       }
 
-      // Validación Mínima para considerarlo un registro válido
-      const hasMinInfo = normalized.projectId || normalized.projectName;
+      // 4. Validación de Calidad Estructural
+      normalized.structuralQuality = calculateStructuralQuality(normalized);
+      if (normalized.structuralQuality < 60) {
+        normalized.qcFlags.push('LOW_STRUCTURAL_INTEGRITY');
+      }
+
+      // 5. Criterio de Aceptación Mínima
+      const hasIdentity = normalized.projectId && normalized.projectId !== '';
       
-      if (!hasMinInfo) {
-        // Solo registramos error si la fila tiene algo de contenido pero le falta el ID
+      if (!hasIdentity) {
         if (row.some(cell => cell !== null && cell !== '')) {
-          errors.push({ row: rowNum, sheet: sheetName, field: 'projectId', error: 'PID/Proyecto no detectado' });
+          errors.push({ row: rowNum, sheet: sheetName, field: 'projectId', error: 'Identificador Crítico (PID) Faltante' });
         }
       } else {
         allData.push(normalized as NormalizedRow);
