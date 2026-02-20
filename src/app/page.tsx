@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { 
   BarChart3, 
@@ -61,6 +61,14 @@ import { useToast } from '@/hooks/use-toast';
 import { analyzeStrategicTrends, TrendAnalysisOutput } from '@/ai/flows/trend-analysis-flow';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const YEARS = [2022, 2023, 2024, 2025, 2026];
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -170,7 +178,7 @@ export default function VpDashboard() {
     setIsGeneratingPlan(true);
     try {
       const result = await analyzeStrategicTrends({
-        monthlyData: [], // Agregado simplificado si es necesario
+        monthlyData: [], 
         years: selectedYear === 'all' ? YEARS : [Number(selectedYear)],
         totalImpact: metrics.totalImpact,
         rootCauseSummary: metrics.paretoData.slice(0, 10).map(p => ({
