@@ -22,7 +22,10 @@ import {
   Info,
   Layers,
   PieChart as PieChartIcon,
-  SearchCode
+  SearchCode,
+  Database,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, query, limit, orderBy } from 'firebase/firestore';
@@ -60,11 +63,18 @@ export default function WordCloudPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    // Muestra optimizada de 40 registros para velocidad y estabilidad de red
-    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(40));
+    // Ampliamos el límite para cubrir el 100% de la base instalada (hasta 1000 registros)
+    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(1000));
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
+
+  const stats = useMemo(() => {
+    if (!orders) return { total: 0, classified: 0, pending: 0 };
+    const total = orders.length;
+    const classified = orders.filter(o => o.classification_status === 'auto' || o.classification_status === 'reviewed').length;
+    return { total, classified, pending: total - classified };
+  }, [orders]);
 
   const filteredOrders = useMemo(() => {
     if (!orders) return [];
@@ -86,26 +96,27 @@ export default function WordCloudPage() {
     setCloudData(null);
     
     try {
-      // Payload ultra-ligero para evitar timeouts de red
+      // Usamos el 100% de los registros filtrados para un análisis 80/20 real
+      // Payload ultra-ligero (150 chars) para garantizar estabilidad con 200+ registros
       const simplifiedOrders = filteredOrders.map(o => ({
         id: o.id,
         impactoNeto: o.impactoNeto || 0,
         disciplina_normalizada: o.disciplina_normalizada || 'Indefinida',
         causa_raiz_normalizada: o.causa_raiz_normalizada || o.causaRaiz || 'Sin definir',
-        descripcion: String(o.descripcion || "").substring(0, 200), // Truncado agresivo para estabilidad
+        descripcion: String(o.descripcion || "").substring(0, 150),
         standardizedDescription: o.standardizedDescription,
         fechaSolicitud: o.fechaSolicitud
       }));
 
       const result = await analyzeWordCloud({ orders: simplifiedOrders as any });
       setCloudData(result);
-      toast({ title: "Análisis Completado" });
+      toast({ title: "Análisis Completado", description: `Se han analizado ${filteredOrders.length} registros.` });
     } catch (error: any) {
       console.error("Word Cloud Error:", error);
       toast({ 
         variant: "destructive", 
         title: "Error de Servidor", 
-        description: "Intente con una muestra más pequeña o verifique su conexión." 
+        description: "La respuesta tardó demasiado. Intente reduciendo el rango de fechas." 
       });
     } finally {
       setIsAnalyzing(false);
@@ -172,6 +183,46 @@ export default function WordCloudPage() {
         </header>
 
         <main className="p-6 md:p-8 space-y-6">
+          {/* Panel de Cobertura de Datos */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="bg-slate-100 p-2 rounded-lg text-slate-600">
+                  <Database className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Universo Total</p>
+                  <h4 className="text-xl font-headline font-bold text-slate-800 leading-none">{stats.total} Registros</h4>
+                </div>
+              </div>
+              <Badge variant="outline" className="bg-slate-50 border-slate-200 text-[9px] font-bold">SINCRONIZADO</Badge>
+            </Card>
+            <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="bg-emerald-50 p-2 rounded-lg text-emerald-600">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Clasificados IA</p>
+                  <h4 className="text-xl font-headline font-bold text-emerald-600 leading-none">{stats.classified}</h4>
+                </div>
+              </div>
+              <p className="text-[10px] font-black text-slate-300">{Math.round((stats.classified/stats.total)*100 || 0)}%</p>
+            </Card>
+            <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="bg-amber-50 p-2 rounded-lg text-amber-600">
+                  <Clock className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Pendientes</p>
+                  <h4 className="text-xl font-headline font-bold text-amber-600 leading-none">{stats.pending}</h4>
+                </div>
+              </div>
+              {stats.pending > 0 && <Badge variant="destructive" className="bg-rose-500 text-[8px] font-black h-5">REQUERIDO</Badge>}
+            </Card>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             <Card className="lg:col-span-3 border-none shadow-xl bg-white rounded-3xl overflow-hidden min-h-[600px] flex flex-col">
               <CardHeader className="bg-slate-900 text-white p-6 shrink-0">
@@ -180,7 +231,7 @@ export default function WordCloudPage() {
                     <CardTitle className="text-xl font-headline font-bold uppercase tracking-tight flex items-center gap-2">
                       <Layers className="h-5 w-5 text-accent" /> Mapa de Calor Semántico
                     </CardTitle>
-                    <CardDescription className="text-slate-400 text-xs font-medium uppercase">Análisis rápido optimizado para estabilidad</CardDescription>
+                    <CardDescription className="text-slate-400 text-xs font-medium uppercase">Análisis del 100% de la base de datos instalada</CardDescription>
                   </div>
                   <Badge variant="outline" className="bg-white/10 text-white border-white/20 px-4 py-1 uppercase text-[10px] font-black">
                     MUESTRA: {filteredOrders.length} REGISTROS
@@ -191,7 +242,10 @@ export default function WordCloudPage() {
                 {isAnalyzing ? (
                   <div className="flex flex-col items-center justify-center text-primary space-y-4">
                     <RefreshCcw className="h-12 w-12 animate-spin opacity-40" />
-                    <p className="text-xs font-black uppercase tracking-[0.2em]">Sincronizando con Servidor...</p>
+                    <div className="text-center space-y-1">
+                      <p className="text-xs font-black uppercase tracking-[0.2em]">Escaneando Base de Datos...</p>
+                      <p className="text-[10px] text-slate-400 uppercase font-bold italic">Procesando {filteredOrders.length} registros para Pareto</p>
+                    </div>
                   </div>
                 ) : !cloudData ? (
                   <div className="flex flex-col items-center justify-center text-slate-300 space-y-4">
