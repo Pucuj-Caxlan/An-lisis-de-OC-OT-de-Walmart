@@ -40,6 +40,34 @@
       },
       "required": ["projectId", "impactoNeto"]
     },
+    "DeletionJob": {
+      "title": "Deletion Job",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "type": "string", "enum": ["queued", "running", "done", "failed"] },
+        "mode": { "type": "string", "enum": ["single", "bulk", "all"] },
+        "progress": { "type": "number" },
+        "total": { "type": "number" },
+        "deletedCount": { "type": "number" },
+        "filters": { "type": "object" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      }
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "details": { "type": "object" }
+      }
+    },
     "TaxonomyDiscipline": {
       "title": "Taxonomy Discipline",
       "type": "object",
@@ -91,6 +119,8 @@
   },
   "firestore": {
     "/orders/{orderId}": { "schema": "Order", "description": "Normalized records with semantic AI enrichment" },
+    "/deletion_jobs/{jobId}": { "schema": "DeletionJob", "description": "Tracking for batch deletion processes" },
+    "/audit_logs/{logId}": { "schema": "AuditLog", "description": "Audit trails for critical actions" },
     "/taxonomy_disciplines/{id}": { "schema": "TaxonomyDiscipline", "description": "Master list of disciplines" },
     "/taxonomy_rootcauses/{id}": { "schema": "TaxonomyRootCause", "description": "Master list of root causes" },
     "/classification_overrides/{id}": { "schema": "ClassificationOverride", "description": "Audit log of human overrides" },

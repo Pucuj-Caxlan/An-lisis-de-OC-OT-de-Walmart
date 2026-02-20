@@ -17,6 +17,16 @@ service cloud.firestore {
     match /audits/{auditId} {
       allow read, write: if isSignedIn();
     }
+    
+    match /audit_logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+
+    match /deletion_jobs/{jobId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
 
     match /importBatches/{batchId} {
       allow read, write: if isSignedIn();
@@ -45,7 +55,6 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
-    // Regla comodín para subcolecciones de agregados si fuera necesario
     match /aggregates/{document=**} {
       allow read, write: if isSignedIn();
     }
