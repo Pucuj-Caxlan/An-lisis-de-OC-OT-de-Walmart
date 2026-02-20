@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -484,13 +485,13 @@ export default function AnalysisPage() {
                                   <FileSearch className="h-4 w-4" />
                                 </Button>
                               </DialogTrigger>
-                              <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col rounded-3xl p-0">
-                                <header className="bg-slate-900 text-white p-8 shrink-0 flex items-center justify-between">
+                              <DialogContent className="w-[95vw] md:max-w-5xl max-h-[95vh] overflow-hidden flex flex-col rounded-3xl p-0 shadow-2xl">
+                                <header className="bg-slate-900 text-white p-6 md:p-8 shrink-0 flex items-center justify-between">
                                   <div className="space-y-1">
                                     <Badge variant="outline" className="bg-white/10 text-white border-white/20 uppercase text-[9px] font-black tracking-widest">
                                       Analítica Forense Walmart
                                     </Badge>
-                                    <DialogTitle className="text-3xl font-headline font-bold leading-tight">
+                                    <DialogTitle className="text-2xl md:text-3xl font-headline font-bold leading-tight">
                                       Trazabilidad: {order.projectId}
                                     </DialogTitle>
                                     <DialogDescription className="text-slate-400 text-sm font-medium">
@@ -502,7 +503,7 @@ export default function AnalysisPage() {
                                       <Button 
                                         onClick={() => handleGenerateReport(order)} 
                                         disabled={isGeneratingReport}
-                                        className="bg-primary hover:bg-primary/90 gap-2 font-black uppercase text-[10px] tracking-widest h-10 px-6 rounded-xl shadow-lg shadow-primary/20"
+                                        className="bg-primary hover:bg-primary/90 gap-2 font-black uppercase text-[10px] tracking-widest h-10 px-4 md:px-6 rounded-xl shadow-lg shadow-primary/20"
                                       >
                                         {isGeneratingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                                         {isGeneratingReport ? "Generando..." : "Informe Forense"}
@@ -512,7 +513,7 @@ export default function AnalysisPage() {
                                       <Button 
                                         variant="outline" 
                                         onClick={handleDownloadReportPdf}
-                                        className="bg-white/10 text-white border-white/20 hover:bg-white/20 gap-2 font-black uppercase text-[10px] tracking-widest h-10 px-6 rounded-xl"
+                                        className="bg-white/10 text-white border-white/20 hover:bg-white/20 gap-2 font-black uppercase text-[10px] tracking-widest h-10 px-4 md:px-6 rounded-xl"
                                       >
                                         <FileDown className="h-4 w-4" /> Exportar PDF
                                       </Button>
@@ -522,7 +523,7 @@ export default function AnalysisPage() {
 
                                 <ScrollArea className="flex-1 bg-slate-50">
                                   {reportResult ? (
-                                    <div ref={reportContainerRef} className="p-10 space-y-12 bg-white min-h-screen max-w-[900px] mx-auto shadow-2xl my-8 rounded-2xl border">
+                                    <div ref={reportContainerRef} className="p-6 md:p-10 space-y-12 bg-white min-h-screen max-w-[900px] mx-auto shadow-2xl my-4 md:my-8 rounded-2xl border pb-24">
                                       {/* Informe Foresne UI */}
                                       <section className="space-y-6">
                                         <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4">
@@ -629,7 +630,7 @@ export default function AnalysisPage() {
                                       )}
                                     </div>
                                   ) : (
-                                    <div className="p-10 space-y-8">
+                                    <div className="p-6 md:p-10 space-y-8 pb-24">
                                       <section>
                                         <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
                                           <BookOpenCheck className="h-4 w-4 text-primary" /> Descripción Original
@@ -640,7 +641,7 @@ export default function AnalysisPage() {
                                       </section>
 
                                       <div className="grid md:grid-cols-2 gap-8">
-                                        <Card className="p-8 border-none bg-slate-900 text-white rounded-3xl shadow-xl overflow-hidden relative">
+                                        <Card className="p-6 md:p-8 border-none bg-slate-900 text-white rounded-3xl shadow-xl overflow-hidden relative">
                                           <div className="absolute top-0 right-0 p-4 opacity-10">
                                             <Fingerprint className="h-24 w-24" />
                                           </div>
@@ -664,7 +665,7 @@ export default function AnalysisPage() {
                                           </div>
                                         </Card>
 
-                                        <Card className="p-8 border-none bg-white rounded-3xl shadow-sm border border-slate-100">
+                                        <Card className="p-6 md:p-8 border-none bg-white rounded-3xl shadow-sm border border-slate-100">
                                           <h4 className="text-[10px] font-black uppercase text-primary mb-6 flex items-center gap-2 tracking-widest">
                                             <Microscope className="h-4 w-4" /> Lógica de Clasificación
                                           </h4>
@@ -690,7 +691,7 @@ export default function AnalysisPage() {
                                         </Card>
                                       </div>
 
-                                      <div className="flex items-center justify-between pt-8">
+                                      <div className="flex flex-col md:flex-row items-center justify-between pt-8 gap-6 border-t mt-4">
                                         <div className="flex items-center gap-6">
                                           <div className="text-center">
                                             <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Confianza</p>
@@ -704,11 +705,11 @@ export default function AnalysisPage() {
                                             <span className="text-xl font-headline font-bold text-slate-800">${formatAmount(order.impactoNeto || 0)}</span>
                                           </div>
                                         </div>
-                                        <div className="flex gap-3">
-                                          <Button variant="outline" onClick={() => handleStartEditing(order)} className="rounded-xl px-8 h-12 text-[10px] font-black uppercase tracking-widest border-2">
+                                        <div className="flex gap-3 w-full md:w-auto">
+                                          <Button variant="outline" onClick={() => handleStartEditing(order)} className="flex-1 md:flex-none rounded-xl px-6 md:px-8 h-12 text-[10px] font-black uppercase tracking-widest border-2">
                                             Corregir Manual
                                           </Button>
-                                          <Button onClick={() => handleValidateAudit(order)} className="rounded-xl px-8 h-12 text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
+                                          <Button onClick={() => handleValidateAudit(order)} className="flex-1 md:flex-none rounded-xl px-6 md:px-8 h-12 text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
                                             Validar Auditoría
                                           </Button>
                                         </div>
@@ -718,8 +719,8 @@ export default function AnalysisPage() {
                                 </ScrollArea>
 
                                 {isEditing && (
-                                  <div className="absolute inset-0 bg-white z-20 p-10 animate-in slide-in-from-bottom-10">
-                                    <div className="max-w-4xl mx-auto space-y-10">
+                                  <div className="absolute inset-0 bg-white z-20 p-6 md:p-10 animate-in slide-in-from-bottom-10 overflow-y-auto">
+                                    <div className="max-w-4xl mx-auto space-y-10 pb-20">
                                       <div className="flex justify-between items-center">
                                         <h3 className="text-2xl font-headline font-bold text-slate-900">Sobreescritura Manual</h3>
                                         <Button variant="ghost" size="icon" onClick={() => setIsEditing(false)} className="rounded-full">
