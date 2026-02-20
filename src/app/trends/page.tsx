@@ -24,7 +24,8 @@ import {
   CalendarDays,
   Filter,
   Search,
-  ChevronDown
+  ChevronDown,
+  Activity
 } from 'lucide-react';
 import {
   AreaChart,
