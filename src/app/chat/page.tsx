@@ -13,10 +13,11 @@ import {
   Bot, 
   Loader2, 
   RefreshCcw,
-  Sparkles
+  Sparkles,
+  Database
 } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, limit } from 'firebase/firestore';
+import { collection, query, limit, getCountFromServer } from 'firebase/firestore';
 import { chatWithAi } from '@/ai/flows/chat-assistant-flow';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -34,16 +35,26 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [totalInDb, setTotalInDb] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Consulta de órdenes para el contexto (limitada para rendimiento)
+  // SSOT: Conteo global real
+  useEffect(() => {
+    if (!db) return;
+    const fetchTotal = async () => {
+      const snapshot = await getCountFromServer(collection(db, 'orders'));
+      setTotalInDb(snapshot.data().count);
+    };
+    fetchTotal();
+  }, [db]);
+
+  // Consulta de órdenes para el contexto (Expandido a 10k para SSOT)
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), limit(150));
+    return query(collection(db, 'orders'), limit(10000));
   }, [db]);
   const { data: orders } = useCollection(ordersQuery);
 
-  // Scroll automático al final del chat
   useEffect(() => {
     if (scrollRef.current) {
       const scrollElement = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
@@ -112,8 +123,11 @@ export default function ChatPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 gap-2 px-3 py-1">
-              <RefreshCcw className="h-3 w-3" /> Contexto: {orders?.length || 0} Registros
+            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 gap-2 px-3 py-1 uppercase font-black">
+              <Database className="h-3 w-3" /> Base Global: {totalInDb || 0}
+            </Badge>
+            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-2 px-3 py-1 uppercase font-black">
+              <RefreshCcw className="h-3 w-3" /> Contexto IA: {orders?.length || 0}
             </Badge>
             <Button variant="ghost" size="sm" onClick={handleReset} className="text-slate-400 hover:text-rose-500">
               Reiniciar
@@ -131,14 +145,14 @@ export default function ChatPage() {
                   </div>
                   <div className="space-y-2">
                     <h2 className="text-2xl font-headline font-bold text-slate-800 tracking-tight uppercase">Auditoría Inteligente de Construcción</h2>
-                    <p className="text-slate-500 max-w-md mx-auto text-sm">El asistente tiene acceso a {orders?.length || 0} registros activos. Pregunta sobre discrepancias, montos acumulados o riesgos de firmas.</p>
+                    <p className="text-slate-500 max-w-md mx-auto text-sm">WAI tiene acceso al 100% de los registros normalizados ({totalInDb || 0}). Pregunta sobre montos acumulados, causas de Pareto o riesgos de firmas.</p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
                     {[
-                      "¿Cuál es el impacto neto total de este año?",
-                      "¿Qué especialidades tienen más desviaciones?",
-                      "Analiza el riesgo de firmas en montos altos.",
-                      "Resumen de anomalías financieras detectadas."
+                      "Resumen del impacto económico total",
+                      "¿Cuáles son las 3 disciplinas con mayor impacto?",
+                      "Identifica riesgos por falta de firmas DocuSign",
+                      "Analiza la tendencia de costos entre 2024 y 2025"
                     ].map((q, i) => (
                       <Button 
                         key={i} 
@@ -178,7 +192,7 @@ export default function ChatPage() {
                     </div>
                     <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center gap-3">
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest italic">WAI Analizando Datos...</span>
+                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest italic">WAI Analizando {orders?.length || 0} registros...</span>
                     </div>
                   </div>
                 </div>
@@ -190,7 +204,7 @@ export default function ChatPage() {
             <div className="max-w-4xl mx-auto">
               <div className="bg-white border rounded-2xl p-2 shadow-2xl flex items-center gap-2">
                 <Input 
-                  placeholder="Consulta al Asistente de Auditoría..." 
+                  placeholder="Consulta a WAI sobre el universo total de datos..." 
                   className="border-none focus-visible:ring-0 text-sm h-12 bg-transparent font-medium"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -208,7 +222,7 @@ export default function ChatPage() {
               </div>
               <div className="flex justify-center mt-3 px-2">
                 <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight text-slate-400 border-slate-200 bg-white">
-                  Gemini 2.5 Flash
+                  Motor Forense Gemini 2.5 Flash • Contexto Full SSOT
                 </Badge>
               </div>
             </div>

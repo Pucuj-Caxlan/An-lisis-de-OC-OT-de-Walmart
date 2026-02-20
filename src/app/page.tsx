@@ -51,7 +51,7 @@ import {
   LabelList
 } from 'recharts';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, limit } from 'firebase/firestore';
+import { collection, query, limit, getCountFromServer } from 'firebase/firestore';
 import {
   Select,
   SelectContent,
@@ -88,12 +88,12 @@ const YEAR_COLORS: Record<number, string> = {
   2022: '#94a3b8',
   2023: '#64748b',
   2024: '#2962FF',
-  2025: '#1E3A8A', // Corporate Blue
+  2025: '#1E3A8A', 
   2026: '#6200EA'
 };
 
-const CORE_COLOR = '#1E3A8A'; // Azul Corporativo Intenso para Núcleo 80/20
-const NEUTRAL_COLOR = '#E2E8F0'; // Gris Neutro para el resto
+const CORE_COLOR = '#1E3A8A'; 
+const NEUTRAL_COLOR = '#E2E8F0'; 
 
 const CustomTooltip = ({ active, payload, label, currencyFormatter }: any) => {
   if (active && payload && payload.length) {
@@ -126,6 +126,7 @@ export default function VpDashboard() {
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [actionPlan, setActionPlan] = useState<TrendAnalysisOutput | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [totalInDb, setTotalInDb] = useState<number | null>(null);
   
   const [filters, setFilters] = useState({
     month: 'all',
@@ -136,9 +137,19 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
+  // Fetch real total from DB for SSOT
+  useEffect(() => {
+    if (!db) return;
+    const fetchTotal = async () => {
+      const snapshot = await getCountFromServer(collection(db, 'orders'));
+      setTotalInDb(snapshot.data().count);
+    };
+    fetchTotal();
+  }, [db]);
+
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), limit(1500));
+    return query(collection(db, 'orders'), limit(10000)); // SSOT: Aumentado a 10k para cubrir universo completo
   }, [db]);
 
   const { data: rawOrders, isLoading } = useCollection(ordersQuery);
@@ -326,7 +337,7 @@ export default function VpDashboard() {
                 onClick={() => handleToggleYear('all')} 
                 className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-1.5 ${selectedYears.length === YEARS.length ? 'bg-primary text-white shadow-lg' : 'text-slate-500 hover:bg-white'}`}
               >
-                TODO <span className="opacity-60">({yearStats.total || 0})</span>
+                TODO <span className="opacity-60">({totalInDb || 0})</span>
               </button>
               {YEARS.map(y => (
                 <button 
@@ -350,7 +361,6 @@ export default function VpDashboard() {
         </header>
 
         <main className="p-6 space-y-6">
-          {/* Filtros Enterprise */}
           <Card className="border-none shadow-sm bg-white p-4">
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <div className="space-y-1.5">
@@ -401,7 +411,6 @@ export default function VpDashboard() {
             </div>
           </Card>
 
-          {/* KPIs Comparativos */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="border-none shadow-md bg-white border-l-4 border-l-primary overflow-hidden">
               <CardContent className="pt-6">
@@ -453,7 +462,6 @@ export default function VpDashboard() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Pareto Avanzado */}
             <Card className="lg:col-span-2 border-none shadow-xl bg-white overflow-hidden rounded-3xl">
               <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between py-4">
                 <div>
@@ -585,7 +593,6 @@ export default function VpDashboard() {
             </div>
           </div>
 
-          {/* Comparativa Multi-Año */}
           <Card className="border-none shadow-md bg-white rounded-3xl overflow-hidden">
             <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between py-4">
               <div>
@@ -636,7 +643,6 @@ export default function VpDashboard() {
             </CardContent>
           </Card>
 
-          {/* Muestra de Datos */}
           <Card className="border-none shadow-md bg-white rounded-3xl overflow-hidden">
             <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between py-4">
               <div className="space-y-1">
@@ -688,7 +694,6 @@ export default function VpDashboard() {
           </Card>
         </main>
 
-        {/* Modal Ejecutivo IA Action Plan */}
         <Dialog open={!!actionPlan} onOpenChange={(open) => !open && setActionPlan(null)}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-0 rounded-[2.5rem] border-none shadow-2xl bg-slate-50 outline-none">
             <header className="bg-slate-900 text-white p-8 flex justify-between items-center sticky top-0 z-20">
@@ -712,7 +717,6 @@ export default function VpDashboard() {
             </header>
 
             <div className="p-10 space-y-10">
-              {/* Diagnóstico Ejecutivo */}
               <section className="grid md:grid-cols-3 gap-8">
                 <Card className="md:col-span-2 border-none bg-white p-8 rounded-3xl shadow-sm space-y-6">
                   <div className="flex items-center gap-3 text-primary">
@@ -760,7 +764,6 @@ export default function VpDashboard() {
                 </Card>
               </section>
 
-              {/* Drivers y Proyecciones */}
               <section className="grid md:grid-cols-2 gap-8">
                 <div className="space-y-4">
                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
@@ -787,7 +790,6 @@ export default function VpDashboard() {
 
               <Separator className="opacity-50" />
 
-              {/* Action Plan Roadmap */}
               <section className="space-y-6">
                 <div className="flex justify-between items-center">
                   <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] flex items-center gap-2">
