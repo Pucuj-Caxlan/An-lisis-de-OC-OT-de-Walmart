@@ -1,4 +1,3 @@
-
 import { config } from 'dotenv';
 config();
 
@@ -9,3 +8,4 @@ import '@/ai/flows/trend-analysis-flow.ts';
 import '@/ai/flows/anomaly-detection-flow.ts';
 import '@/ai/flows/chat-assistant-flow.ts';
 import '@/ai/flows/root-cause-intelligence-flow.ts';
+import '@/ai/flows/traceability-report-flow.ts';

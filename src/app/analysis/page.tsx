@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card, CardContent } from '@/components/ui/card';
@@ -24,7 +24,14 @@ import {
   Trash2,
   ShieldCheck,
   Loader2,
-  Microscope
+  Microscope,
+  FileText,
+  Clock,
+  ArrowRight,
+  Download,
+  ShieldQuestion,
+  Target,
+  FileDown
 } from 'lucide-react';
 import {
   Table,
@@ -39,6 +46,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, limit, doc, increment, setDoc } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
+import { generateTraceabilityReport, TraceabilityReportOutput } from '@/ai/flows/traceability-report-flow';
 import {
   Dialog,
   DialogContent,
@@ -48,7 +56,7 @@ import {
   DialogTrigger,
   DialogFooter
 } from "@/components/ui/dialog";
-import { updateDocumentNonBlocking, setDocumentNonBlocking } from '@/firebase/non-blocking-updates';
+import { updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,6 +74,9 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { executeDeletion, DeletionMode } from '@/lib/deletion-service';
 import { Progress } from '@/components/ui/progress';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 
 const DISCIPLINAS_CATALOGO = ["Eléctrica", "Civil", "Estructura Metálica", "HVAC", "Legal/Permisos", "Prototipos", "Contra Incendio", "Indefinida"];
 const CAUSAS_CATALOGO = ["Error Diseño", "Cambio Prototipo", "Omisión Contratista", "Requerimiento Autoridad", "Interferencia Constructiva", "Otros"];
@@ -77,7 +88,10 @@ export default function AnalysisPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'processed' | 'review'>('all');
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportResult, setReportResult] = useState<TraceabilityReportOutput | null>(null);
   const [mounted, setMounted] = useState(false);
+  const reportContainerRef = useRef<HTMLDivElement>(null);
   
   // Selección y Borrado
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -205,7 +219,6 @@ export default function AnalysisPage() {
 
         updateDocumentNonBlocking(doc(db, 'orders', order.id), updateData);
 
-        // Actualización de Agregados
         const safeDisciplineId = result.disciplina_normalizada.replace(/\//g, '-');
         const aggregateRef = doc(db, 'aggregates', 'global', 'disciplines_stats', safeDisciplineId);
         
@@ -228,6 +241,41 @@ export default function AnalysisPage() {
       });
     } finally {
       setIsAnalyzing(null);
+    }
+  };
+
+  const handleGenerateReport = async (order: any) => {
+    setIsGeneratingReport(true);
+    setReportResult(null);
+    try {
+      const report = await generateTraceabilityReport({ orderData: order });
+      setReportResult(report);
+      toast({ title: "Informe Generado", description: "La trazabilidad semántica ha sido reconstruida exitosamente." });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error de Informe", description: error.message });
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
+  const handleDownloadReportPdf = async () => {
+    if (!reportContainerRef.current) return;
+    toast({ title: "Exportando PDF", description: "Preparando documento de alta fidelidad..." });
+    
+    try {
+      const element = reportContainerRef.current;
+      const canvas = await html2canvas(element, { scale: 2, useCORS: true });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Informe_Forense_${reportResult?.header.projectId}_${reportResult?.header.orderId}.pdf`);
+      toast({ title: "Descarga Completa", description: "El informe corporativo ha sido guardado." });
+    } catch (error) {
+      toast({ variant: "destructive", title: "Error al descargar", description: "No se pudo generar el archivo PDF." });
     }
   };
 
@@ -425,168 +473,314 @@ export default function AnalysisPage() {
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1">
                           {order.disciplina_normalizada ? (
-                            <Dialog onOpenChange={(open) => !open && setIsEditing(false)}>
+                            <Dialog onOpenChange={(open) => {
+                              if (!open) {
+                                setIsEditing(false);
+                                setReportResult(null);
+                              }
+                            }}>
                               <DialogTrigger asChild>
                                 <Button variant="ghost" size="sm" className="text-primary gap-1 group-hover:bg-primary group-hover:text-white transition-all rounded-lg">
                                   <FileSearch className="h-4 w-4" />
                                 </Button>
                               </DialogTrigger>
-                              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl p-8">
-                                <DialogHeader className="mb-6">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 uppercase text-[10px] font-black tracking-widest">
-                                      Informe de Trazabilidad Semántica
+                              <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col rounded-3xl p-0">
+                                <header className="bg-slate-900 text-white p-8 shrink-0 flex items-center justify-between">
+                                  <div className="space-y-1">
+                                    <Badge variant="outline" className="bg-white/10 text-white border-white/20 uppercase text-[9px] font-black tracking-widest">
+                                      Analítica Forense Walmart
                                     </Badge>
-                                    <span className="text-[10px] text-slate-400 font-bold uppercase">ID: {order.id}</span>
+                                    <DialogTitle className="text-3xl font-headline font-bold leading-tight">
+                                      Trazabilidad: {order.projectId}
+                                    </DialogTitle>
+                                    <DialogDescription className="text-slate-400 text-sm font-medium">
+                                      {order.projectName} | ID Interno: {order.id}
+                                    </DialogDescription>
                                   </div>
-                                  <DialogTitle className="text-3xl font-headline font-bold text-slate-900 leading-tight">
-                                    {order.disciplina_normalizada} <span className="text-slate-300 mx-2">/</span> {order.causa_raiz_normalizada}
-                                  </DialogTitle>
-                                  <DialogDescription className="text-lg text-slate-500 font-medium">
-                                    Proyecto: {order.projectName} ({order.projectId})
-                                  </DialogDescription>
-                                </DialogHeader>
+                                  <div className="flex gap-2">
+                                    {!reportResult && (
+                                      <Button 
+                                        onClick={() => handleGenerateReport(order)} 
+                                        disabled={isGeneratingReport}
+                                        className="bg-primary hover:bg-primary/90 gap-2 font-black uppercase text-[10px] tracking-widest h-10 px-6 rounded-xl shadow-lg shadow-primary/20"
+                                      >
+                                        {isGeneratingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                                        {isGeneratingReport ? "Generando..." : "Informe Forense"}
+                                      </Button>
+                                    )}
+                                    {reportResult && (
+                                      <Button 
+                                        variant="outline" 
+                                        onClick={handleDownloadReportPdf}
+                                        className="bg-white/10 text-white border-white/20 hover:bg-white/20 gap-2 font-black uppercase text-[10px] tracking-widest h-10 px-6 rounded-xl"
+                                      >
+                                        <FileDown className="h-4 w-4" /> Exportar PDF
+                                      </Button>
+                                    )}
+                                  </div>
+                                </header>
 
-                                {!isEditing ? (
-                                  <div className="space-y-8">
-                                    <section>
-                                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
-                                        <BookOpenCheck className="h-4 w-4 text-primary" /> Descripción Original
-                                      </h4>
-                                      <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 italic text-slate-700 text-sm leading-relaxed">
-                                        "{order.descripcion_original || order.descripcion}"
-                                      </div>
-                                    </section>
-
-                                    <div className="grid md:grid-cols-2 gap-6">
-                                      <Card className="p-6 border-none bg-slate-900 text-white rounded-2xl shadow-xl overflow-hidden relative">
-                                        <div className="absolute top-0 right-0 p-4 opacity-10">
-                                          <Fingerprint className="h-20 w-20" />
-                                        </div>
-                                        <h4 className="text-[10px] font-black uppercase text-slate-400 mb-4 flex items-center gap-2">
-                                          <SearchCode className="h-4 w-4 text-accent" /> Razonamiento Forense
-                                        </h4>
-                                        <p className="text-sm font-medium leading-relaxed mb-6">
-                                          {order.rationale_tecnico || "Análisis automatizado basado en taxonomía MEP."}
-                                        </p>
-                                        <div className="space-y-4">
+                                <ScrollArea className="flex-1 bg-slate-50">
+                                  {reportResult ? (
+                                    <div ref={reportContainerRef} className="p-10 space-y-12 bg-white min-h-screen max-w-[900px] mx-auto shadow-2xl my-8 rounded-2xl border">
+                                      {/* Informe Foresne UI */}
+                                      <section className="space-y-6">
+                                        <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4">
                                           <div>
-                                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Evidencia Térmica</p>
-                                            <div className="flex flex-wrap gap-2">
-                                              {order.evidence_terms?.map((term: string, i: number) => (
-                                                <Badge key={i} variant="secondary" className="bg-white/10 text-white border-none text-[9px] font-bold">
-                                                  {term}
-                                                </Badge>
+                                            <h4 className="text-2xl font-black text-slate-900 uppercase">{reportResult.header.title}</h4>
+                                            <p className="text-xs text-slate-500 font-bold">FOLIO: {reportResult.header.orderId} | ESTATUS: {reportResult.header.status}</p>
+                                          </div>
+                                          <Badge variant={reportResult.executiveSummary.currentRisk === 'P0' ? 'destructive' : 'default'} className="uppercase">
+                                            Prioridad {reportResult.executiveSummary.currentRisk}
+                                          </Badge>
+                                        </div>
+                                        
+                                        <div className="grid md:grid-cols-3 gap-8">
+                                          <div className="md:col-span-2 space-y-4">
+                                            <p className="text-[10px] font-black text-primary uppercase tracking-widest">Resumen Ejecutivo</p>
+                                            <p className="text-sm text-slate-700 leading-relaxed font-medium">{reportResult.executiveSummary.overview}</p>
+                                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 italic text-xs text-slate-600">
+                                              Impacto Estimado: {reportResult.executiveSummary.economicImpact}
+                                            </div>
+                                          </div>
+                                          <div className="bg-slate-900 p-6 rounded-2xl text-white">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-3">Riesgo Semántico</p>
+                                            <div className="space-y-4">
+                                              {Object.entries(reportResult.riskIndex).map(([key, val]) => (
+                                                <div key={key} className="space-y-1">
+                                                  <div className="flex justify-between text-[10px] uppercase font-bold">
+                                                    <span>{key}</span>
+                                                    <span>{val}%</span>
+                                                  </div>
+                                                  <Progress value={val} className="h-1 bg-white/10" />
+                                                </div>
                                               ))}
                                             </div>
                                           </div>
                                         </div>
-                                      </Card>
+                                      </section>
 
-                                      <Card className="p-6 border-none bg-white rounded-2xl shadow-sm border border-slate-100">
-                                        <h4 className="text-[10px] font-black uppercase text-primary mb-4 flex items-center gap-2 tracking-widest">
-                                          <Microscope className="h-4 w-4" /> Lógica de Clasificación
+                                      <Separator />
+
+                                      <section className="space-y-6">
+                                        <h4 className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                                          <Clock className="h-4 w-4" /> Línea de Tiempo Forense
                                         </h4>
-                                        <div className="space-y-5">
-                                          <div className="space-y-1">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase">Criterio Aplicado</p>
-                                            <p className="text-xs font-bold text-slate-800">{order.logica_clasificacion?.criterio_aplicado || "Inferencia Semántica"}</p>
-                                          </div>
-                                          <div className="space-y-1">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase">Taxonomía Nivel 3</p>
-                                            <p className="text-xs font-bold text-slate-800">{order.detalle_nivel_3 || "No determinado"}</p>
-                                          </div>
-                                          <Separator className="bg-slate-50" />
-                                          <div className="space-y-1">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
-                                              <AlertTriangle className="h-3 w-3 text-rose-500" /> Ambigüedades Detectadas
-                                            </p>
-                                            <p className="text-xs text-slate-500 italic">
-                                              {order.logica_clasificacion?.posibles_ambiguedades || "Ninguna detectada. Clasificación robusta."}
-                                            </p>
-                                          </div>
+                                        <div className="space-y-0 relative">
+                                          <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-slate-100" />
+                                          {reportResult.forensicTimeline.map((item, i) => (
+                                            <div key={i} className="flex gap-6 pb-8 relative group">
+                                              <div className="h-4 w-4 rounded-full bg-white border-2 border-primary z-10 shrink-0 group-hover:scale-125 transition-transform" />
+                                              <div className="space-y-1">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase">{item.date}</p>
+                                                <p className="text-sm font-bold text-slate-800">{item.event}</p>
+                                                <p className="text-[10px] text-slate-500 italic">{item.evidence}</p>
+                                                {item.gapDays && item.gapDays > 0 && (
+                                                  <Badge variant="secondary" className="bg-slate-100 text-[8px] font-black text-slate-500 uppercase mt-2">
+                                                    Brecha: {item.gapDays} días
+                                                  </Badge>
+                                                )}
+                                              </div>
+                                            </div>
+                                          ))}
                                         </div>
-                                      </Card>
-                                    </div>
+                                      </section>
 
-                                    <div className="flex items-center justify-between pt-6 border-t border-slate-100">
-                                      <div className="flex items-center gap-4">
-                                        <div className="text-center">
-                                          <p className="text-[9px] font-black text-slate-400 uppercase">Confianza</p>
-                                          <span className={`text-xl font-headline font-bold ${order.confidence_score > 0.8 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                            {Math.round(order.confidence_score * 100)}%
-                                          </span>
-                                        </div>
-                                        <Separator orientation="vertical" className="h-10" />
-                                        <div className="text-center">
-                                          <p className="text-[9px] font-black text-slate-400 uppercase">Modelo IA</p>
-                                          <span className="text-xs font-bold text-slate-600">Gemini 2.5 Forensic</span>
-                                        </div>
-                                      </div>
-                                      <div className="flex gap-3">
-                                        <Button variant="outline" onClick={() => handleStartEditing(order)} className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest">
-                                          Corregir Manualmente
-                                        </Button>
-                                        <Button onClick={() => handleValidateAudit(order)} className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
-                                          Validar Auditoría
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-8 animate-in fade-in duration-300">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                      <div className="space-y-4">
-                                        <div className="space-y-2">
-                                          <Label className="text-[10px] font-black uppercase text-slate-400">Disciplina Técnica</Label>
-                                          <Select value={editValues.disciplina} onValueChange={(v) => setEditValues({...editValues, disciplina: v})}>
-                                            <SelectTrigger className="rounded-xl">
-                                              <SelectValue placeholder="Seleccionar Disciplina" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              {DISCIPLINAS_CATALOGO.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                                            </SelectContent>
-                                          </Select>
-                                        </div>
-                                        <div className="space-y-2">
-                                          <Label className="text-[10px] font-black uppercase text-slate-400">Causa Raíz</Label>
-                                          <Select value={editValues.causa} onValueChange={(v) => setEditValues({...editValues, causa: v})}>
-                                            <SelectTrigger className="rounded-xl">
-                                              <SelectValue placeholder="Seleccionar Causa" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              {CAUSAS_CATALOGO.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                                            </SelectContent>
-                                          </Select>
-                                        </div>
-                                        <div className="space-y-2">
-                                          <Label className="text-[10px] font-black uppercase text-slate-400">Subcausa / Detalle</Label>
-                                          <Input 
-                                            value={editValues.subcausa} 
-                                            onChange={(e) => setEditValues({...editValues, subcausa: e.target.value})}
-                                            className="rounded-xl"
-                                            placeholder="Especifique el detalle técnico..."
-                                          />
-                                        </div>
-                                      </div>
-                                      <div className="bg-slate-50 p-6 rounded-3xl border border-dashed border-slate-200">
-                                        <h4 className="text-[10px] font-black uppercase text-slate-400 mb-4 flex items-center gap-2">
-                                          <X className="h-4 w-4" /> Notas de Edición
+                                      <section className="space-y-6">
+                                        <h4 className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                                          <Target className="h-4 w-4" /> Inteligencia Sistémica
                                         </h4>
-                                        <p className="text-xs text-slate-500 leading-relaxed">
-                                          Al aplicar una corrección manual, el registro se marcará como <strong>"Sobreescrito" (Overridden)</strong>. 
-                                          Esto permite a la IA aprender de tus decisiones para futuras clasificaciones.
-                                        </p>
+                                        <div className="grid md:grid-cols-2 gap-6">
+                                          <Card className="p-6 border-none bg-slate-50 rounded-2xl">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-3">Patrones Recurrentes</p>
+                                            <p className="text-xs text-slate-700 leading-relaxed font-medium">{reportResult.deepAnalysis.recurrentPatterns}</p>
+                                          </Card>
+                                          <Card className="p-6 border-none bg-slate-50 rounded-2xl">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-3">Acciones Recomendadas</p>
+                                            <div className="space-y-3">
+                                              {reportResult.recommendations.map((rec, i) => (
+                                                <div key={i} className="flex gap-3 items-start">
+                                                  <ArrowRight className="h-3 w-3 text-primary mt-1 shrink-0" />
+                                                  <div className="space-y-0.5">
+                                                    <p className="text-[10px] font-black text-slate-800 uppercase leading-none">{rec.action}</p>
+                                                    <p className="text-[9px] text-slate-400 font-bold uppercase">{rec.owner} | {rec.type}</p>
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </Card>
+                                        </div>
+                                      </section>
+
+                                      {reportResult.missingData.length > 0 && (
+                                        <section className="bg-rose-50 p-6 rounded-2xl border border-rose-100">
+                                          <h4 className="text-[10px] font-black text-rose-600 uppercase tracking-widest flex items-center gap-2 mb-4">
+                                            <ShieldQuestion className="h-4 w-4" /> Brechas de Información Detectadas
+                                          </h4>
+                                          <div className="space-y-4">
+                                            {reportResult.missingData.map((item, i) => (
+                                              <div key={i} className="flex justify-between items-center text-[10px] border-b border-rose-100 pb-2 last:border-0">
+                                                <span className="font-bold text-rose-900 uppercase">{item.field}</span>
+                                                <span className="text-rose-500 italic">{item.reason}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </section>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="p-10 space-y-8">
+                                      <section>
+                                        <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
+                                          <BookOpenCheck className="h-4 w-4 text-primary" /> Descripción Original
+                                        </h4>
+                                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 italic text-slate-700 text-sm leading-relaxed">
+                                          "{order.descripcion_original || order.descripcion}"
+                                        </div>
+                                      </section>
+
+                                      <div className="grid md:grid-cols-2 gap-8">
+                                        <Card className="p-8 border-none bg-slate-900 text-white rounded-3xl shadow-xl overflow-hidden relative">
+                                          <div className="absolute top-0 right-0 p-4 opacity-10">
+                                            <Fingerprint className="h-24 w-24" />
+                                          </div>
+                                          <h4 className="text-[10px] font-black uppercase text-slate-400 mb-6 flex items-center gap-2">
+                                            <SearchCode className="h-4 w-4 text-accent" /> Razonamiento Forense
+                                          </h4>
+                                          <p className="text-sm font-medium leading-relaxed mb-8">
+                                            {order.rationale_tecnico || "Análisis automatizado basado en taxonomía MEP."}
+                                          </p>
+                                          <div className="space-y-4">
+                                            <div>
+                                              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Evidencia Térmica</p>
+                                              <div className="flex flex-wrap gap-2">
+                                                {order.evidence_terms?.map((term: string, i: number) => (
+                                                  <Badge key={i} variant="secondary" className="bg-white/10 text-white border-none text-[9px] font-bold px-3 py-1">
+                                                    {term}
+                                                  </Badge>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </Card>
+
+                                        <Card className="p-8 border-none bg-white rounded-3xl shadow-sm border border-slate-100">
+                                          <h4 className="text-[10px] font-black uppercase text-primary mb-6 flex items-center gap-2 tracking-widest">
+                                            <Microscope className="h-4 w-4" /> Lógica de Clasificación
+                                          </h4>
+                                          <div className="space-y-6">
+                                            <div className="space-y-1">
+                                              <p className="text-[9px] font-black text-slate-400 uppercase">Criterio Aplicado</p>
+                                              <p className="text-sm font-bold text-slate-800">{order.logica_clasificacion?.criterio_aplicado || "Inferencia Semántica"}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                              <p className="text-[9px] font-black text-slate-400 uppercase">Taxonomía Nivel 3</p>
+                                              <p className="text-sm font-bold text-slate-800">{order.detalle_nivel_3 || "No determinado"}</p>
+                                            </div>
+                                            <Separator className="bg-slate-50" />
+                                            <div className="space-y-2">
+                                              <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
+                                                <AlertTriangle className="h-3 w-3 text-rose-500" /> Ambigüedades Detectadas
+                                              </p>
+                                              <p className="text-xs text-slate-500 italic leading-relaxed">
+                                                {order.logica_clasificacion?.posibles_ambiguedades || "Ninguna detectada. Clasificación robusta."}
+                                              </p>
+                                            </div>
+                                          </div>
+                                        </Card>
+                                      </div>
+
+                                      <div className="flex items-center justify-between pt-8">
+                                        <div className="flex items-center gap-6">
+                                          <div className="text-center">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Confianza</p>
+                                            <span className={`text-2xl font-headline font-bold ${order.confidence_score > 0.8 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                              {Math.round(order.confidence_score * 100)}%
+                                            </span>
+                                          </div>
+                                          <Separator orientation="vertical" className="h-12" />
+                                          <div className="text-center">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Impacto</p>
+                                            <span className="text-xl font-headline font-bold text-slate-800">${formatAmount(order.impactoNeto || 0)}</span>
+                                          </div>
+                                        </div>
+                                        <div className="flex gap-3">
+                                          <Button variant="outline" onClick={() => handleStartEditing(order)} className="rounded-xl px-8 h-12 text-[10px] font-black uppercase tracking-widest border-2">
+                                            Corregir Manual
+                                          </Button>
+                                          <Button onClick={() => handleValidateAudit(order)} className="rounded-xl px-8 h-12 text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
+                                            Validar Auditoría
+                                          </Button>
+                                        </div>
                                       </div>
                                     </div>
+                                  )}
+                                </ScrollArea>
 
-                                    <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
-                                      <Button variant="ghost" onClick={() => setIsEditing(false)} className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest gap-2">
-                                        <X className="h-4 w-4" /> Cancelar
-                                      </Button>
-                                      <Button onClick={() => handleSaveManualOverride(order.id)} className="rounded-xl px-8 h-10 text-[10px] font-black uppercase tracking-widest gap-2 shadow-lg shadow-primary/20 bg-primary">
-                                        <Save className="h-4 w-4" /> Guardar Corrección
-                                      </Button>
+                                {isEditing && (
+                                  <div className="absolute inset-0 bg-white z-20 p-10 animate-in slide-in-from-bottom-10">
+                                    <div className="max-w-4xl mx-auto space-y-10">
+                                      <div className="flex justify-between items-center">
+                                        <h3 className="text-2xl font-headline font-bold text-slate-900">Sobreescritura Manual</h3>
+                                        <Button variant="ghost" size="icon" onClick={() => setIsEditing(false)} className="rounded-full">
+                                          <X className="h-6 w-6" />
+                                        </Button>
+                                      </div>
+                                      <div className="grid md:grid-cols-2 gap-10">
+                                        <div className="space-y-6">
+                                          <div className="space-y-2">
+                                            <Label className="text-[10px] font-black uppercase text-slate-400">Disciplina Técnica</Label>
+                                            <Select value={editValues.disciplina} onValueChange={(v) => setEditValues({...editValues, disciplina: v})}>
+                                              <SelectTrigger className="h-12 rounded-xl text-sm font-bold">
+                                                <SelectValue placeholder="Seleccionar Disciplina" />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                {DISCIPLINAS_CATALOGO.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
+                                          <div className="space-y-2">
+                                            <Label className="text-[10px] font-black uppercase text-slate-400">Causa Raíz</Label>
+                                            <Select value={editValues.causa} onValueChange={(v) => setEditValues({...editValues, causa: v})}>
+                                              <SelectTrigger className="h-12 rounded-xl text-sm font-bold">
+                                                <SelectValue placeholder="Seleccionar Causa" />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                {CAUSAS_CATALOGO.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
+                                          <div className="space-y-2">
+                                            <Label className="text-[10px] font-black uppercase text-slate-400">Subcausa / Detalle</Label>
+                                            <Input 
+                                              value={editValues.subcausa} 
+                                              onChange={(e) => setEditValues({...editValues, subcausa: e.target.value})}
+                                              className="h-12 rounded-xl font-bold"
+                                              placeholder="Especifique el detalle técnico..."
+                                            />
+                                          </div>
+                                        </div>
+                                        <div className="bg-slate-50 p-8 rounded-3xl border border-dashed border-slate-200">
+                                          <h4 className="text-[10px] font-black uppercase text-slate-400 mb-6 flex items-center gap-2">
+                                            <ShieldAlert className="h-4 w-4" /> Notas de Gobernanza
+                                          </h4>
+                                          <p className="text-sm text-slate-500 leading-relaxed italic mb-6">
+                                            "Al aplicar una corrección manual, el registro se marcará como **'Overridden'**. La IA aprenderá de esta decisión para futuras auditorías de este PID."
+                                          </p>
+                                          <div className="flex items-center gap-2 text-rose-500">
+                                            <AlertTriangle className="h-4 w-4" />
+                                            <span className="text-[10px] font-black uppercase tracking-widest">Esta acción es permanente</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-end gap-4 pt-10 border-t">
+                                        <Button variant="ghost" onClick={() => setIsEditing(false)} className="rounded-xl px-10 h-12 text-[10px] font-black uppercase tracking-widest border-2">
+                                          Descartar
+                                        </Button>
+                                        <Button onClick={() => handleSaveManualOverride(order.id)} className="rounded-xl px-12 h-12 text-[10px] font-black uppercase tracking-widest shadow-xl shadow-primary/20 bg-primary">
+                                          <Save className="h-4 w-4 mr-2" /> Aplicar Cambio
+                                        </Button>
+                                      </div>
                                     </div>
                                   </div>
                                 )}
