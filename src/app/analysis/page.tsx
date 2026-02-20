@@ -254,7 +254,8 @@ export default function AnalysisPage() {
     setAnalysisStep('Iniciando Inteligencia Forense...');
 
     try {
-      const BATCH_SIZE = 50; // AI process blocks
+      // Reducción del tamaño de bloque para evitar timeouts (batchSize: 30)
+      const BATCH_SIZE = 30; 
       const chunks = [];
       for (let i = 0; i < selectedOrders.length; i += BATCH_SIZE) {
         chunks.push(selectedOrders.slice(i, i + BATCH_SIZE));
@@ -263,21 +264,29 @@ export default function AnalysisPage() {
       const results: BulkIntelligenceOutput[] = [];
       for (let i = 0; i < chunks.length; i++) {
         setAnalysisStep(`Procesando bloque ${i + 1} de ${chunks.length}...`);
+        
+        // Truncamiento preventivo de descripciones para reducir carga de payload
+        const sanitizedOrders = chunks[i].map(o => ({
+          id: o.id,
+          projectId: String(o.projectId || "N/A"),
+          projectName: String(o.projectName || "N/A"),
+          impactoNeto: Number(o.impactoNeto || 0),
+          disciplina_normalizada: o.disciplina_normalizada,
+          causa_raiz_normalizada: o.causa_raiz_normalizada,
+          descripcion: String(o.descripcion || o.description || "").substring(0, 400), // Truncar a 400 chars
+          isSigned: o.isSigned,
+          fechaSolicitud: o.fechaSolicitud
+        }));
+
         const result = await analyzeBulkOrders({
-          orders: chunks[i].map(o => ({
-            id: o.id,
-            projectId: o.projectId || "N/A",
-            projectName: o.projectName || "N/A",
-            impactoNeto: o.impactoNeto || 0,
-            disciplina_normalizada: o.disciplina_normalizada,
-            causa_raiz_normalizada: o.causa_raiz_normalizada,
-            descripcion: o.descripcion || o.description || "",
-            isSigned: o.isSigned,
-            fechaSolicitud: o.fechaSolicitud
-          }))
+          orders: sanitizedOrders
         });
+        
         results.push(result);
         setAnalysisProgress(Math.round(((i + 1) / chunks.length) * 100));
+        
+        // Pequeño delay para no saturar el canal de peticiones
+        if (i < chunks.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
       }
 
       // Merge results logic
@@ -309,7 +318,8 @@ export default function AnalysisPage() {
       setBulkAnalysisResult(mergedResult);
       setAnalysisStep('Análisis Masivo Finalizado.');
     } catch (error: any) {
-      toast({ variant: "destructive", title: "Error Análisis Masivo", description: error.message });
+      console.error("Error en análisis masivo:", error);
+      toast({ variant: "destructive", title: "Error Análisis Masivo", description: "La petición ha excedido el tiempo de espera o el volumen de datos es muy alto. Intente con un lote más pequeño." });
       setShowBulkAiDialog(false);
     } finally {
       setIsBulkAnalyzing(false);
