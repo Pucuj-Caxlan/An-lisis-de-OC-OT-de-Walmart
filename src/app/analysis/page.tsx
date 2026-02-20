@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -37,7 +36,8 @@ import {
   ListChecks,
   Zap,
   Layers,
-  BarChart3
+  BarChart3,
+  X
 } from 'lucide-react';
 import {
   Table,
@@ -967,4 +967,3 @@ export default function AnalysisPage() {
     </div>
   );
 }
-
