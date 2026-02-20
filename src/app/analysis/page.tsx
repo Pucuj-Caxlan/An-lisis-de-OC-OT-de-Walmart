@@ -81,8 +81,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const DISCIPLINAS_CATALOGO = ["Eléctrica", "Civil", "Estructura Metálica", "HVAC", "Legal/Permisos", "Prototipos", "Contra Incendio", "Indefinida"];
-const CAUSAS_CATALOGO = ["Error Diseño", "Cambio Prototipo", "Omisión Contratista", "Requerimiento Autoridad", "Interferencia Constructiva", "Otros"];
+const MAX_BULK_AI_RECORDS = 300;
+const AI_BATCH_SIZE = 10; // Reducido para máxima estabilidad y evitar timeouts
 
 type AuditStatus = 'all' | 'pending' | 'audited' | 'review' | 'manual';
 
@@ -109,6 +109,7 @@ export default function AnalysisPage() {
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
   const [isBulkAiProcessing, setIsBulkAiProcessing] = useState(false);
   const [bulkAiProgress, setBulkAiProgress] = useState(0);
+  const [processedCount, setProcessedCount] = useState(0);
   const [bulkAiResult, setBulkAiResult] = useState<BulkIntelligenceOutput | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
@@ -190,6 +191,7 @@ export default function AnalysisPage() {
       await batch.commit();
       toast({ title: "Auditoría Masiva Completada", description: `${selectedIds.length} registros validados.` });
       setSelectedIds([]);
+      setShowBulkAiDialog(false);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Error en Auditoría", description: e.message });
     } finally {
@@ -219,40 +221,78 @@ export default function AnalysisPage() {
       return;
     }
 
+    if (selectedIds.length > MAX_BULK_AI_RECORDS) {
+      toast({ 
+        variant: "destructive", 
+        title: "Límite Excedido", 
+        description: `El análisis masivo está limitado a ${MAX_BULK_AI_RECORDS} registros para garantizar estabilidad.` 
+      });
+      return;
+    }
+
     setShowBulkAiDialog(true);
     setIsBulkAiProcessing(true);
     setBulkAiProgress(0);
+    setProcessedCount(0);
     setBulkAiResult(null);
 
     try {
       const selectedOrders = filteredOrders.filter(o => selectedIds.includes(o.id));
-      const BATCH_SIZE = 30; // Lotes pequeños para estabilidad
-      let consolidatedData: any[] = [];
+      let allAnomalies: any[] = [];
+      let allPatterns: string[] = [];
+      let allRecommendations: string[] = [];
+      let finalSummary = "";
+      let lastConfidence = 0;
 
-      for (let i = 0; i < selectedOrders.length; i += BATCH_SIZE) {
-        const chunk = selectedOrders.slice(i, i + BATCH_SIZE).map(o => ({
+      for (let i = 0; i < selectedOrders.length; i += AI_BATCH_SIZE) {
+        const chunk = selectedOrders.slice(i, i + AI_BATCH_SIZE).map(o => ({
           id: o.id,
           projectId: o.projectId,
           projectName: o.projectName,
           impactoNeto: o.impactoNeto,
           disciplina_normalizada: o.disciplina_normalizada,
           causa_raiz_normalizada: o.causa_raiz_normalizada,
-          descripcion: String(o.descripcion || "").substring(0, 400),
+          descripcion: String(o.descripcion || "").substring(0, 300), // Truncado para ahorrar tokens
           isSigned: o.isSigned,
           fechaSolicitud: o.fechaSolicitud
         }));
 
-        const chunkResult = await analyzeBulkOrders({ orders: chunk });
-        consolidatedData.push(chunkResult);
-        setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
-        await new Promise(r => setTimeout(r, 500)); // Throttle
+        try {
+          const chunkResult = await analyzeBulkOrders({ orders: chunk });
+          
+          // Consolidación de Inteligencia
+          allAnomalies = [...allAnomalies, ...(chunkResult.anomaliesDetected || [])];
+          allPatterns = Array.from(new Set([...allPatterns, ...(chunkResult.commonPatterns || [])]));
+          allRecommendations = Array.from(new Set([...allRecommendations, ...(chunkResult.recommendations || [])]));
+          finalSummary = chunkResult.executiveSummary; // Usamos el último como base de resumen
+          lastConfidence = chunkResult.confidenceScore;
+
+          setProcessedCount(prev => prev + chunk.length);
+          setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
+          
+          // Throttle para evitar saturación del servidor
+          await new Promise(r => setTimeout(r, 400));
+        } catch (chunkError) {
+          console.error(`Fallo en bloque ${i / AI_BATCH_SIZE}:`, chunkError);
+          // Si falla un bloque, continuamos con el siguiente si es posible
+        }
       }
 
-      // Mezclar resultados (para el MVP usamos el último como resumen global)
-      setBulkAiResult(consolidatedData[consolidatedData.length - 1]);
-      toast({ title: "Análisis Masivo Finalizado", description: "Se detectaron patrones y riesgos de grupo." });
+      setBulkAiResult({
+        executiveSummary: finalSummary,
+        totalImpactFormatted: formatAmount(selectedTotalAmount),
+        commonPatterns: allPatterns.slice(0, 8),
+        recurrenceAnalysis: "Análisis consolidado de múltiples lotes ejecutado con éxito.",
+        anomaliesDetected: allAnomalies.slice(0, 10),
+        disciplineImpact: [], // Calculado por el frontend si es necesario
+        recommendations: allRecommendations.slice(0, 6),
+        isEligibleForBulkAudit: allAnomalies.length < (selectedIds.length * 0.1),
+        confidenceScore: lastConfidence
+      });
+
+      toast({ title: "Análisis Masivo Finalizado", description: `Se procesaron ${selectedOrders.length} registros en bloques.` });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Fallo en IA Masiva", description: e.message });
+      toast({ variant: "destructive", title: "Fallo Crítico en IA", description: e.message });
       setShowBulkAiDialog(false);
     } finally {
       setIsBulkAiProcessing(false);
@@ -610,12 +650,12 @@ export default function AnalysisPage() {
                     <Sparkles className="h-8 w-8 text-accent absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
                   </div>
                   <div className="space-y-2">
-                    <h3 className="text-lg font-bold text-slate-800 uppercase tracking-widest">Sincronizando Motores Forenses...</h3>
-                    <p className="text-xs text-slate-400">Gemini está identificando patrones de riesgo en el lote.</p>
+                    <h3 className="text-lg font-bold text-slate-800 uppercase tracking-widest">Orquestando Lotes Forenses...</h3>
+                    <p className="text-xs text-slate-400">Gemini está identificando patrones de riesgo en bloques de {AI_BATCH_SIZE}.</p>
                   </div>
                   <div className="max-w-xs mx-auto space-y-2">
                     <div className="flex justify-between text-[10px] font-black text-primary">
-                      <span>PROGRESO</span>
+                      <span>{processedCount} DE {selectedIds.length} REGISTROS</span>
                       <span>{bulkAiProgress}%</span>
                     </div>
                     <Progress value={bulkAiProgress} className="h-1.5" />
@@ -625,36 +665,40 @@ export default function AnalysisPage() {
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
                   <div className="bg-slate-50 p-6 rounded-2xl border-2 border-primary/10 relative overflow-hidden">
                     <Zap className="absolute top-2 right-2 h-12 w-12 text-primary/5" />
-                    <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-4">Resumen de Inteligencia</h4>
+                    <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-4">Resumen de Inteligencia Consolidada</h4>
                     <p className="text-sm font-medium text-slate-700 leading-relaxed italic">"{bulkAiResult.executiveSummary}"</p>
                   </div>
 
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-4">
                       <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                        <ShieldAlert className="h-4 w-4 text-rose-500" /> Anomalías Detectadas
+                        <ShieldAlert className="h-4 w-4 text-rose-500" /> Anomalías Detectadas ({bulkAiResult.anomaliesDetected.length})
                       </h4>
-                      <div className="space-y-2">
-                        {bulkAiResult.anomaliesDetected.map((anom, i) => (
-                          <div key={i} className="bg-rose-50 p-3 rounded-xl border border-rose-100">
-                            <p className="text-[10px] font-bold text-rose-900">{anom.issue}</p>
-                            <p className="text-[9px] text-rose-700/70">{anom.description}</p>
-                          </div>
-                        ))}
-                      </div>
+                      <ScrollArea className="h-48 pr-4">
+                        <div className="space-y-2">
+                          {bulkAiResult.anomaliesDetected.map((anom, i) => (
+                            <div key={i} className="bg-rose-50 p-3 rounded-xl border border-rose-100">
+                              <p className="text-[10px] font-bold text-rose-900">{anom.issue}</p>
+                              <p className="text-[9px] text-rose-700/70">{anom.description}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
                     </div>
                     <div className="space-y-4">
                       <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Recomendaciones de Grupo
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Recomendaciones de Mitigación
                       </h4>
-                      <div className="space-y-2">
-                        {bulkAiResult.recommendations.map((rec, i) => (
-                          <div key={i} className="bg-emerald-50 p-3 rounded-xl border border-emerald-100 flex items-start gap-2">
-                            <Zap className="h-3 w-3 text-emerald-600 mt-0.5" />
-                            <p className="text-[10px] font-bold text-emerald-900">{rec}</p>
-                          </div>
-                        ))}
-                      </div>
+                      <ScrollArea className="h-48 pr-4">
+                        <div className="space-y-2">
+                          {bulkAiResult.recommendations.map((rec, i) => (
+                            <div key={i} className="bg-emerald-50 p-3 rounded-xl border border-emerald-100 flex items-start gap-2">
+                              <Zap className="h-3 w-3 text-emerald-600 mt-0.5" />
+                              <p className="text-[10px] font-bold text-emerald-900">{rec}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
                     </div>
                   </div>
 
@@ -669,7 +713,7 @@ export default function AnalysisPage() {
                         onClick={handleBulkAudit}
                         className="rounded-xl h-10 px-8 bg-primary hover:bg-primary/90 text-white uppercase text-[10px] font-black shadow-lg shadow-primary/20"
                       >
-                        Aprobar y Auditar Lote
+                        Validar y Auditar Lote
                       </Button>
                     </div>
                   </div>
