@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useEffect } from 'react';
@@ -16,7 +17,12 @@ import {
   ShieldAlert,
   Fingerprint,
   Info,
-  Filter
+  Filter,
+  SearchCode,
+  Eye,
+  Microscope,
+  FileSearch,
+  BookOpenCheck
 } from 'lucide-react';
 import {
   Table,
@@ -46,6 +52,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Separator } from '@/components/ui/separator';
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -81,28 +88,22 @@ export default function AnalysisPage() {
         descripcion: order.descripcion || order.standardizedDescription || "",
         monto: order.impactoNeto || 0,
         contexto: {
-          disciplinasVigentes: ["Eléctrica", "Civil", "Estructura Metálica", "HVAC", "Legal/Permisos", "Prototipos"],
-          causasVigentes: ["Error Diseño", "Cambio Prototipo", "Omisión Contratista", "Requerimiento Autoridad"]
+          disciplinasVigentes: ["Eléctrica", "Civil", "Estructura Metálica", "HVAC", "Legal/Permisos", "Prototipos", "Contra Incendio"],
+          causasVigentes: ["Error Diseño", "Cambio Prototipo", "Omisión Contratista", "Requerimiento Autoridad", "Interferencia Constructiva"]
         }
       });
 
       if (db) {
         const updateData = {
-          disciplina_normalizada: result.disciplina_normalizada,
-          causa_raiz_normalizada: result.causa_raiz_normalizada,
-          subcausa_normalizada: result.subcausa_normalizada,
-          confidence_score: result.confidence_score,
-          evidence_terms: result.evidence_terms,
-          rationale_short: result.rationale_short,
-          needs_review: result.needs_review,
+          ...result,
           classification_status: 'auto',
-          ai_model_version: 'gemini-2.5-flash',
+          ai_model_version: 'gemini-2.5-flash-forensic',
           classified_at: new Date().toISOString()
         };
 
         updateDocumentNonBlocking(doc(db, 'orders', order.id), updateData);
 
-        // Actualización de Agregados (Simulación de Trigger de Cloud Function)
+        // Actualización de Agregados
         const safeDisciplineId = result.disciplina_normalizada.replace(/\//g, '-');
         const aggregateRef = doc(db, 'aggregates', 'global', 'disciplines_stats', safeDisciplineId);
         
@@ -114,8 +115,8 @@ export default function AnalysisPage() {
       }
 
       toast({
-        title: "Clasificación IA Exitosa",
-        description: `Disciplina: ${result.disciplina_normalizada} (Confianza: ${Math.round(result.confidence_score * 100)}%)`,
+        title: "Análisis Forense Finalizado",
+        description: `Clasificación: ${result.disciplina_normalizada} con trazabilidad explicable.`,
       });
     } catch (error: any) {
       toast({
@@ -143,13 +144,16 @@ export default function AnalysisPage() {
   }) || [];
 
   return (
-    <div className="flex min-h-screen w-full bg-background/50">
+    <div className="flex min-h-screen w-full bg-slate-50/30">
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10">
           <div className="flex items-center gap-4">
             <SidebarTrigger />
-            <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">Clasificación Semántica IA</h1>
+            <div className="flex items-center gap-2">
+              <Microscope className="h-6 w-6 text-primary" />
+              <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">Clasificación & Trazabilidad Forense</h1>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="relative">
@@ -166,7 +170,7 @@ export default function AnalysisPage() {
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2">
                   <Filter className="h-4 w-4" />
-                  Filtro: {statusFilter.toUpperCase()}
+                  Estado: {statusFilter.toUpperCase()}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -180,16 +184,16 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6">
-          <Card className="border-none shadow-sm overflow-hidden bg-white">
+          <Card className="border-none shadow-sm overflow-hidden bg-white rounded-2xl">
             <CardContent className="p-0">
               <Table>
                 <TableHeader className="bg-slate-50/50">
                   <TableRow>
-                    <TableHead>Estado</TableHead>
+                    <TableHead>Estado IA</TableHead>
                     <TableHead>PID / Proyecto</TableHead>
-                    <TableHead>Disciplina IA</TableHead>
+                    <TableHead>Clasificación Forense</TableHead>
                     <TableHead>Confianza</TableHead>
-                    <TableHead className="text-right">Impacto Neto</TableHead>
+                    <TableHead className="text-right">Monto Neto</TableHead>
                     <TableHead className="text-center">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -197,20 +201,20 @@ export default function AnalysisPage() {
                   {isLoading ? (
                     <TableRow><TableCell colSpan={6} className="text-center py-20"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
                   ) : filteredOrders.map((order) => (
-                    <TableRow key={order.id} className={`hover:bg-primary/5 group ${order.needs_review ? 'bg-rose-50/30' : ''}`}>
+                    <TableRow key={order.id} className={`hover:bg-primary/5 group ${order.needs_review ? 'bg-rose-50/20' : ''}`}>
                       <TableCell>
                         {order.disciplina_normalizada ? (
                           order.needs_review ? (
-                            <Badge variant="outline" className="text-rose-500 border-rose-200 bg-rose-50 gap-1">
+                            <Badge variant="outline" className="text-rose-500 border-rose-200 bg-rose-50 gap-1 uppercase text-[9px]">
                               <AlertTriangle className="h-3 w-3" /> Revisión
                             </Badge>
                           ) : (
-                            <Badge className="bg-emerald-500 gap-1">
+                            <Badge className="bg-emerald-500 gap-1 uppercase text-[9px]">
                               <CheckCircle2 className="h-3 w-3" /> Auto
                             </Badge>
                           )
                         ) : (
-                          <Badge variant="outline" className="text-slate-300">Pendiente</Badge>
+                          <Badge variant="outline" className="text-slate-300 uppercase text-[9px]">Pendiente</Badge>
                         )}
                       </TableCell>
                       <TableCell>
@@ -220,86 +224,148 @@ export default function AnalysisPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="font-medium text-slate-700">{order.disciplina_normalizada || "—"}</span>
+                        <div className="flex flex-col">
+                           <span className="font-bold text-slate-700">{order.disciplina_normalizada || "—"}</span>
+                           <span className="text-[9px] text-slate-400 uppercase font-medium">{order.causa_raiz_normalizada || ""}</span>
+                        </div>
                       </TableCell>
                       <TableCell>
                          {order.confidence_score ? (
                            <div className="flex items-center gap-2">
-                             <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                             <div className="w-16 h-1 bg-slate-100 rounded-full overflow-hidden">
                                <div 
                                  className={`h-full ${order.confidence_score > 0.8 ? 'bg-emerald-500' : 'bg-amber-500'}`}
                                  style={{ width: `${order.confidence_score * 100}%` }}
                                />
                              </div>
-                             <span className="text-[10px] font-bold text-slate-500">{Math.round(order.confidence_score * 100)}%</span>
+                             <span className="text-[10px] font-black text-slate-500">{Math.round(order.confidence_score * 100)}%</span>
                            </div>
                          ) : "—"}
                       </TableCell>
-                      <TableCell className="text-right font-bold text-slate-800">
+                      <TableCell className="text-right font-black text-slate-800">
                         ${formatAmount(order.impactoNeto || 0)}
                       </TableCell>
                       <TableCell className="text-center">
                         {order.disciplina_normalizada ? (
                           <Dialog>
                             <DialogTrigger asChild>
-                              <Button variant="ghost" size="sm" className="text-primary gap-1">
-                                <ArrowUpRight className="h-4 w-4" /> Detalle
+                              <Button variant="ghost" size="sm" className="text-primary gap-1 group-hover:bg-primary group-hover:text-white transition-all">
+                                <FileSearch className="h-4 w-4" /> Ver Ficha
                               </Button>
                             </DialogTrigger>
-                            <DialogContent className="max-w-3xl">
-                              <DialogHeader>
-                                <DialogTitle className="text-2xl flex items-center gap-3">
-                                  {order.disciplina_normalizada} 
-                                  <Badge variant="outline" className="bg-primary/5 text-primary">IA Classified</Badge>
+                            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl p-8">
+                              <DialogHeader className="mb-6">
+                                <div className="flex items-center justify-between mb-2">
+                                  <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 uppercase text-[10px] font-black tracking-widest">
+                                    Informe de Trazabilidad Semántica
+                                  </Badge>
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase">ID: {order.id}</span>
+                                </div>
+                                <DialogTitle className="text-3xl font-headline font-bold text-slate-900 leading-tight">
+                                  {order.disciplina_normalizada} <span className="text-slate-300 mx-2">/</span> {order.causa_raiz_normalizada}
                                 </DialogTitle>
-                                <DialogDescription className="text-lg">
-                                  {order.projectName} ({order.projectId})
+                                <DialogDescription className="text-lg text-slate-500 font-medium">
+                                  Proyecto: {order.projectName} ({order.projectId})
                                 </DialogDescription>
                               </DialogHeader>
-                              <div className="grid gap-6 py-4">
-                                <div className="grid md:grid-cols-2 gap-4">
-                                   <Card className="p-4 border shadow-none bg-white">
-                                      <h4 className="text-[10px] font-black uppercase text-slate-400 mb-3 flex items-center gap-2">
-                                        <Fingerprint className="h-4 w-4 text-emerald-500" /> Evidencia Técnica
-                                      </h4>
-                                      <div className="flex flex-wrap gap-2">
-                                        {order.evidence_terms?.map((term: string, i: number) => (
-                                          <Badge key={i} variant="secondary" className="text-[10px] bg-slate-50 text-slate-600">
-                                            {term}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                      <p className="mt-4 text-xs text-slate-500 italic">
-                                        "{order.rationale_short}"
-                                      </p>
-                                   </Card>
-                                   <Card className="p-4 border shadow-none bg-white">
-                                      <h4 className="text-[10px] font-black uppercase text-rose-500 mb-3 flex items-center gap-2">
-                                        <ShieldAlert className="h-4 w-4" /> Diagnóstico Forense
-                                      </h4>
-                                      <div className="space-y-3">
-                                        <div className="flex justify-between text-xs">
-                                          <span className="text-slate-400">Causa Raíz:</span>
-                                          <span className="font-bold">{order.causa_raiz_normalizada}</span>
-                                        </div>
-                                        <div className="flex justify-between text-xs">
-                                          <span className="text-slate-400">Subcausa:</span>
-                                          <span className="font-bold">{order.subcausa_normalizada || "No detectada"}</span>
-                                        </div>
-                                        <div className="pt-2 border-t border-dashed">
-                                          <p className="text-[10px] text-slate-400 uppercase font-black mb-1">Status de Clasificación</p>
-                                          <Badge variant="outline" className="text-[9px] uppercase">{order.classification_status}</Badge>
+
+                              <div className="space-y-8">
+                                <section>
+                                  <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
+                                    <BookOpenCheck className="h-4 w-4 text-primary" /> Descripción Original
+                                  </h4>
+                                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 italic text-slate-700 text-sm leading-relaxed">
+                                    "{order.descripcion_original || order.descripcion}"
+                                  </div>
+                                </section>
+
+                                <div className="grid md:grid-cols-2 gap-6">
+                                  <Card className="p-6 border-none bg-slate-900 text-white rounded-2xl shadow-xl overflow-hidden relative">
+                                    <div className="absolute top-0 right-0 p-4 opacity-10">
+                                      <Fingerprint className="h-20 w-20" />
+                                    </div>
+                                    <h4 className="text-[10px] font-black uppercase text-slate-400 mb-4 flex items-center gap-2">
+                                      <SearchCode className="h-4 w-4 text-accent" /> Razonamiento Forense
+                                    </h4>
+                                    <p className="text-sm font-medium leading-relaxed mb-6">
+                                      {order.rationale_tecnico || order.rationale_short}
+                                    </p>
+                                    <div className="space-y-4">
+                                      <div>
+                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Evidencia Térmica</p>
+                                        <div className="flex flex-wrap gap-2">
+                                          {order.evidence_terms?.map((term: string, i: number) => (
+                                            <Badge key={i} variant="secondary" className="bg-white/10 text-white border-none text-[9px] font-bold">
+                                              {term}
+                                            </Badge>
+                                          ))}
                                         </div>
                                       </div>
-                                   </Card>
+                                    </div>
+                                  </Card>
+
+                                  <Card className="p-6 border-none bg-white rounded-2xl shadow-sm border border-slate-100">
+                                    <h4 className="text-[10px] font-black uppercase text-primary mb-4 flex items-center gap-2 tracking-widest">
+                                      <Microscope className="h-4 w-4" /> Lógica de Clasificación
+                                    </h4>
+                                    <div className="space-y-5">
+                                      <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase">Criterio Aplicado</p>
+                                        <p className="text-xs font-bold text-slate-800">{order.logica_clasificacion?.criterio_aplicado || "Inferencia Semántica"}</p>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase">Taxonomía Nivel 3</p>
+                                        <p className="text-xs font-bold text-slate-800">{order.detalle_nivel_3 || "No determinado"}</p>
+                                      </div>
+                                      <Separator className="bg-slate-50" />
+                                      <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
+                                          <AlertTriangle className="h-3 w-3 text-rose-500" /> Ambigüedades Detectadas
+                                        </p>
+                                        <p className="text-xs text-slate-500 italic">
+                                          {order.logica_clasificacion?.posibles_ambiguedades || "Ninguna detectada. Clasificación robusta."}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </Card>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-6 border-t border-slate-100">
+                                  <div className="flex items-center gap-4">
+                                    <div className="text-center">
+                                      <p className="text-[9px] font-black text-slate-400 uppercase">Confianza</p>
+                                      <span className={`text-xl font-headline font-bold ${order.confidence_score > 0.8 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                        {Math.round(order.confidence_score * 100)}%
+                                      </span>
+                                    </div>
+                                    <Separator orientation="vertical" className="h-10" />
+                                    <div className="text-center">
+                                      <p className="text-[9px] font-black text-slate-400 uppercase">Modelo IA</p>
+                                      <span className="text-xs font-bold text-slate-600">Gemini 2.5 Forensic</span>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-3">
+                                    <Button variant="outline" className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest">
+                                      Corregir Manualmente
+                                    </Button>
+                                    <Button className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
+                                      Validar Auditoría
+                                    </Button>
+                                  </div>
                                 </div>
                               </div>
                             </DialogContent>
                           </Dialog>
                         ) : (
-                          <Button variant="outline" size="sm" onClick={() => processSingleOrder(order)} disabled={isAnalyzing === order.id}>
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => processSingleOrder(order)} 
+                            disabled={isAnalyzing === order.id}
+                            className="bg-primary/5 text-primary border-primary/20 hover:bg-primary hover:text-white rounded-xl h-9 px-4 gap-2 transition-all font-bold"
+                          >
                             {isAnalyzing === order.id ? <RefreshCcw className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                            Clasificar
+                            {isAnalyzing === order.id ? "Analizando..." : "Iniciar Auditoría"}
                           </Button>
                         )}
                       </TableCell>

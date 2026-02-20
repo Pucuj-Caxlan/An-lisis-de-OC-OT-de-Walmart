@@ -19,13 +19,24 @@
         "disciplina_normalizada": { "type": "string" },
         "causa_raiz_normalizada": { "type": "string" },
         "subcausa_normalizada": { "type": "string" },
+        "detalle_nivel_3": { "type": "string" },
         "confidence_score": { "type": "number" },
         "evidence_terms": { "type": "array", "items": { "type": "string" } },
+        "descripcion_original": { "type": "string" },
+        "rationale_tecnico": { "type": "string" },
         "ai_model_version": { "type": "string" },
         "classified_at": { "type": "string", "format": "date-time" },
         "needs_review": { "type": "boolean" },
         "classification_status": { "type": "string", "enum": ["auto", "reviewed", "overridden"] },
-        "rationale_short": { "type": "string" }
+        "logica_clasificacion": {
+          "type": "object",
+          "properties": {
+            "terminos_detectados": { "type": "array", "items": { "type": "string" } },
+            "mapa_taxonomia": { "type": "string" },
+            "criterio_aplicado": { "type": "string" },
+            "posibles_ambiguedades": { "type": "string" }
+          }
+        }
       },
       "required": ["projectId", "impactoNeto"]
     },

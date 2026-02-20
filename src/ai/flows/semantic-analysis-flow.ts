@@ -3,7 +3,7 @@
 /**
  * @fileOverview Motor de Inteligencia Semántica Avanzada para Clasificación Automática de OC/OT.
  * 
- * Realiza una clasificación híbrida (Taxonomía + LLM) para normalizar Disciplinas y Causas Raíz.
+ * Realiza una clasificación híbrida con explicabilidad y trazabilidad forense.
  */
 
 import {ai} from '@/ai/genkit';
@@ -22,11 +22,19 @@ export type SemanticAnalysisInput = z.infer<typeof SemanticAnalysisInputSchema>;
 const SemanticAnalysisOutputSchema = z.object({
   disciplina_normalizada: z.string().describe("Disciplina técnica detectada (ej. Eléctrica, Civil, Estructura)."),
   causa_raiz_normalizada: z.string().describe("Causa raíz normalizada según catálogo."),
-  subcausa_normalizada: z.string().nullable().describe("Subcategoría técnica específica detectada."),
+  subcausa_normalizada: z.string().describe("Subcategoría técnica específica detectada."),
+  detalle_nivel_3: z.string().describe("Tercer nivel de especificidad técnica detectado."),
   confidence_score: z.number().describe("Nivel de certeza de la clasificación (0.0 a 1.0)."),
   evidence_terms: z.array(z.string()).describe("Palabras clave o frases que justifican la clasificación."),
-  rationale_short: z.string().describe("Explicación breve del razonamiento de la IA (máx 2 líneas)."),
-  needs_review: z.boolean().describe("True si la descripción es vaga o la confianza es baja."),
+  descripcion_original: z.string().describe("Texto íntegro analizado."),
+  rationale_tecnico: z.string().describe("Explicación resumida del porqué técnico de la decisión."),
+  logica_clasificacion: z.object({
+    terminos_detectados: z.array(z.string()),
+    mapa_taxonomia: z.string().describe("Relación entre términos y taxonomía."),
+    criterio_aplicado: z.string().describe("Lógica o patrón detectado."),
+    posibles_ambiguedades: z.string().describe("Menciona si hubo dudas o términos confusos.")
+  }),
+  needs_review: z.boolean(),
 });
 export type SemanticAnalysisOutput = z.infer<typeof SemanticAnalysisOutputSchema>;
 
@@ -34,24 +42,26 @@ const semanticPrompt = ai.definePrompt({
   name: 'semanticPrompt',
   input: {schema: SemanticAnalysisInputSchema},
   output: {schema: SemanticAnalysisOutputSchema},
-  prompt: `Eres un Arquitecto de Datos y Auditor Forense Senior de Walmart. Tu misión es clasificar registros de Órdenes de Cambio (OC/OT) con precisión quirúrgica.
+  prompt: `Eres un Arquitecto de IA y Auditor Forense Senior especializado en Control de Cambios de Walmart. 
+Tu misión es clasificar registros OC/OT con trazabilidad absoluta y explicabilidad técnica.
+
+REGLAS DE CLASIFICACIÓN FORENSE:
+1. EXPLICABILIDAD: No solo elijas una categoría. Explica qué elementos del texto activaron la decisión en 'rationale_tecnico'.
+2. TRAZABILIDAD: Lista los términos exactos encontrados que coinciden con la taxonomía en 'evidence_terms'.
+3. AMBIGÜEDAD: Si el texto es vago (ej. "ajustes varios", "extra", "trabajos"), clasifica como "Indefinida", pon confianza < 0.6 y detalla la ambigüedad.
+4. TAXONOMÍA: 
+   - Disciplina -> Causa -> Subcausa -> Detalle Nivel 3.
+   - Si no puedes llegar al Nivel 3, pon "No determinado".
 
 CATÁLOGO DE REFERENCIA (DISCIPLINAS):
 {{#each contexto.disciplinasVigentes}}
 - {{{this}}}
 {{/each}}
-(Si no coincide con ninguna, usa "Indefinida")
 
 CATÁLOGO DE REFERENCIA (CAUSAS RAÍZ):
 {{#each contexto.causasVigentes}}
 - {{{this}}}
 {{/each}}
-
-REGLAS DE CLASIFICACIÓN:
-1. IDIOMA: Maneja español, inglés o mezcla (spanglish) con abreviaturas técnicas.
-2. ROBUSTEZ: Si el texto es vago (ej. "ajustes varios", "varios", "extra"), clasifica como "Indefinida", pon confianza < 0.5 y needs_review: true.
-3. EVIDENCIA: Extrae los términos técnicos que dispararon la clasificación (ej. "UVIE", "Tablero", "Trinchera").
-4. NORMALIZACIÓN: Mapea sinónimos al nombre canónico (ej. "Herrería" -> "Estructura Metálica").
 
 DESCRIPCIÓN PARA ANALIZAR:
 """
@@ -63,13 +73,13 @@ RESPONDE ÚNICAMENTE EN JSON VÁLIDO.`,
 
 export async function analyzeOrderSemantically(input: SemanticAnalysisInput): Promise<SemanticAnalysisOutput> {
   const {output} = await semanticPrompt(input);
-  if (!output) throw new Error("Fallo en la generación del análisis semántico por parte de la IA.");
+  if (!output) throw new Error("Fallo en la generación del análisis semántico forense.");
   
-  // Lógica de validación post-IA
   const needsReview = output.confidence_score < 0.75 || output.disciplina_normalizada === 'Indefinida';
   
   return {
     ...output,
+    descripcion_original: input.descripcion,
     needs_review: needsReview
   };
 }
