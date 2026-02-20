@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -50,7 +51,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, query, limit, doc, writeBatch } from 'firebase/firestore';
+import { collection, query, limit, doc, writeBatch, setDoc } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { generateTraceabilityReport, TraceabilityReportOutput } from '@/ai/flows/traceability-report-flow';
 import { analyzeBulkOrders, BulkIntelligenceOutput } from '@/ai/flows/bulk-intelligence-analysis-flow';
@@ -117,6 +118,8 @@ export default function AnalysisPage() {
   const [isBulkAnalyzing, setIsBulkAnalyzing] = useState(false);
   const [bulkAnalysisResult, setBulkAnalysisResult] = useState<BulkIntelligenceOutput | null>(null);
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisStep, setAnalysisStep] = useState('');
 
   useEffect(() => {
     setMounted(true);
@@ -192,8 +195,10 @@ export default function AnalysisPage() {
     if (!db || !user || selectedIds.length === 0) return;
     setIsAuditing(true);
     try {
-      const batchSize = 500;
-      for (let i = 0; i < selectedIds.length; i += batchSize) {
+      const batchSize = 400; // Firestore limit safe
+      const totalToAudit = selectedIds.length;
+      
+      for (let i = 0; i < totalToAudit; i += batchSize) {
         const chunk = selectedIds.slice(i, i + batchSize);
         const batch = writeBatch(db);
         chunk.forEach(id => {
@@ -208,9 +213,26 @@ export default function AnalysisPage() {
         });
         await batch.commit();
       }
-      toast({ title: "Auditoría Masiva Exitosa", description: `Se han validado ${selectedIds.length} registros.` });
+
+      // Log the audit action for compliance
+      const logId = `log_audit_${Date.now()}`;
+      await setDoc(doc(db, 'audit_logs', logId), {
+        id: logId,
+        action: 'bulk_audit_validation',
+        userId: user.uid,
+        userEmail: user.email,
+        timestamp: new Date().toISOString(),
+        details: {
+          count: totalToAudit,
+          totalImpact: selectedImpact,
+          orderIds: selectedIds.slice(0, 100) // Log sample IDs
+        }
+      });
+
+      toast({ title: "Auditoría Masiva Exitosa", description: `Se han validado ${totalToAudit} registros oficialmente.` });
       setSelectedIds([]);
       setShowAuditConfirm(false);
+      setShowBulkAiDialog(false); // Close AI dialog if audit was triggered from there
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error en Auditoría", description: error.message });
     } finally {
@@ -228,22 +250,64 @@ export default function AnalysisPage() {
     setIsBulkAnalyzing(true);
     setBulkAnalysisResult(null);
     setShowBulkAiDialog(true);
+    setAnalysisProgress(0);
+    setAnalysisStep('Iniciando Inteligencia Forense...');
 
     try {
-      const result = await analyzeBulkOrders({
-        orders: selectedOrders.map(o => ({
-          id: o.id,
-          projectId: o.projectId || "N/A",
-          projectName: o.projectName || "N/A",
-          impactoNeto: o.impactoNeto || 0,
-          disciplina_normalizada: o.disciplina_normalizada,
-          causa_raiz_normalizada: o.causa_raiz_normalizada,
-          descripcion: o.descripcion || o.description || "",
-          isSigned: o.isSigned,
-          fechaSolicitud: o.fechaSolicitud
-        }))
+      const BATCH_SIZE = 50; // AI process blocks
+      const chunks = [];
+      for (let i = 0; i < selectedOrders.length; i += BATCH_SIZE) {
+        chunks.push(selectedOrders.slice(i, i + BATCH_SIZE));
+      }
+
+      const results: BulkIntelligenceOutput[] = [];
+      for (let i = 0; i < chunks.length; i++) {
+        setAnalysisStep(`Procesando bloque ${i + 1} de ${chunks.length}...`);
+        const result = await analyzeBulkOrders({
+          orders: chunks[i].map(o => ({
+            id: o.id,
+            projectId: o.projectId || "N/A",
+            projectName: o.projectName || "N/A",
+            impactoNeto: o.impactoNeto || 0,
+            disciplina_normalizada: o.disciplina_normalizada,
+            causa_raiz_normalizada: o.causa_raiz_normalizada,
+            descripcion: o.descripcion || o.description || "",
+            isSigned: o.isSigned,
+            fechaSolicitud: o.fechaSolicitud
+          }))
+        });
+        results.push(result);
+        setAnalysisProgress(Math.round(((i + 1) / chunks.length) * 100));
+      }
+
+      // Merge results logic
+      const mergedResult: BulkIntelligenceOutput = {
+        executiveSummary: results.length > 1 ? `Análisis consolidado de ${selectedOrders.length} registros en ${results.length} lotes. ` + results[0].executiveSummary : results[0].executiveSummary,
+        totalImpactFormatted: formatAmount(selectedImpact),
+        commonPatterns: Array.from(new Set(results.flatMap(r => r.commonPatterns))),
+        recurrenceAnalysis: results.map(r => r.recurrenceAnalysis).join('\n\n'),
+        anomaliesDetected: results.flatMap(r => r.anomaliesDetected),
+        disciplineImpact: [], // Recalculated below
+        recommendations: Array.from(new Set(results.flatMap(r => r.recommendations))),
+        isEligibleForBulkAudit: results.every(r => r.isEligibleForBulkAudit),
+        confidenceScore: results.reduce((acc, r) => acc + r.confidenceScore, 0) / results.length
+      };
+
+      // Recalculate discipline impact across all batches
+      const disciplineMap = new Map<string, number>();
+      selectedOrders.forEach(o => {
+        const d = o.disciplina_normalizada || 'Indefinida';
+        disciplineMap.set(d, (disciplineMap.get(d) || 0) + (o.impactoNeto || 0));
       });
-      setBulkAnalysisResult(result);
+
+      mergedResult.disciplineImpact = Array.from(disciplineMap.entries()).map(([name, impact]) => ({
+        name,
+        impact,
+        percentage: selectedImpact > 0 ? Math.round((impact / selectedImpact) * 100) : 0
+      })).sort((a, b) => b.impact - a.impact);
+
+      setBulkAnalysisResult(mergedResult);
+      setAnalysisStep('Análisis Masivo Finalizado.');
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error Análisis Masivo", description: error.message });
       setShowBulkAiDialog(false);
@@ -364,7 +428,7 @@ export default function AnalysisPage() {
                   variant="outline" 
                   size="sm" 
                   className="bg-primary/5 text-primary border-primary/20 hover:bg-primary/10 h-9 gap-2 px-4 shadow-sm"
-                  disabled={selectedIds.length < 2}
+                  disabled={selectedIds.length < 2 || isBulkAnalyzing}
                 >
                   <Sparkles className="h-4 w-4" /> ANÁLISIS IA ({selectedIds.length})
                 </Button>
@@ -373,6 +437,7 @@ export default function AnalysisPage() {
                   variant="default" 
                   size="sm" 
                   className="bg-emerald-600 hover:bg-emerald-700 h-9 gap-2 px-4 shadow-sm"
+                  disabled={isAuditing}
                 >
                   <CheckCircle2 className="h-4 w-4" /> AUDITAR ({selectedIds.length})
                 </Button>
@@ -772,12 +837,16 @@ export default function AnalysisPage() {
             <ScrollArea className="flex-1 bg-slate-50">
               <div className="p-6 md:p-8 space-y-6">
                 {isBulkAnalyzing ? (
-                  <div className="flex flex-col items-center justify-center py-24 space-y-4">
+                  <div className="flex flex-col items-center justify-center py-24 space-y-6">
                     <div className="relative">
-                       <Zap className="h-12 w-12 text-primary animate-pulse" />
-                       <Loader2 className="h-12 w-12 text-primary animate-spin absolute inset-0 opacity-20" />
+                       <Zap className="h-16 w-16 text-primary animate-pulse" />
+                       <Loader2 className="h-16 w-16 text-primary animate-spin absolute inset-0 opacity-20" />
                     </div>
-                    <p className="text-xs font-black uppercase text-slate-400 tracking-widest animate-pulse">Sincronizando Patrones Forenses...</p>
+                    <div className="text-center space-y-2 max-w-sm">
+                      <p className="text-xs font-black uppercase text-slate-400 tracking-widest">{analysisStep}</p>
+                      <Progress value={analysisProgress} className="h-2 w-full mt-4" />
+                      <p className="text-[10px] text-slate-400 font-bold uppercase">{analysisProgress}% Completado</p>
+                    </div>
                   </div>
                 ) : bulkAnalysisResult ? (
                   <div className="space-y-8 animate-in fade-in duration-500">
@@ -812,7 +881,7 @@ export default function AnalysisPage() {
                             </div>
                           ))}
                         </div>
-                        <p className="text-[10px] text-slate-500 leading-relaxed p-3 bg-slate-100 rounded-lg italic">
+                        <p className="text-[10px] text-slate-500 leading-relaxed p-3 bg-slate-100 rounded-lg italic whitespace-pre-wrap">
                            {bulkAnalysisResult.recurrenceAnalysis}
                         </p>
                       </section>
@@ -888,8 +957,10 @@ export default function AnalysisPage() {
                   {bulkAnalysisResult?.isEligibleForBulkAudit && (
                     <Button 
                       onClick={handleBulkAudit} 
+                      disabled={isAuditing}
                       className="bg-emerald-600 hover:bg-emerald-700 rounded-xl px-8 h-9 text-[9px] font-black uppercase shadow-lg shadow-emerald-200"
                     >
+                      {isAuditing ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <CheckCircle2 className="h-3 w-3 mr-2" />}
                       Aprobar Lote Masivamente
                     </Button>
                   )}
