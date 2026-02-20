@@ -25,7 +25,7 @@ import {
   SearchCode
 } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, limit } from 'firebase/firestore';
+import { collection, query, limit, orderBy } from 'firebase/firestore';
 import { analyzeWordCloud, WordCloudOutput } from '@/ai/flows/word-cloud-analysis-flow';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
@@ -60,8 +60,8 @@ export default function WordCloudPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    // Limitamos a 100 para estabilidad del payload y evitar Failed to fetch
-    return query(collection(db, 'orders'), limit(100));
+    // Muestra optimizada de 40 registros para velocidad y estabilidad de red
+    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(40));
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -79,33 +79,33 @@ export default function WordCloudPage() {
 
   const runAnalysis = async () => {
     if (filteredOrders.length === 0) {
-      toast({ variant: "destructive", title: "Sin datos", description: "No hay registros para analizar con los filtros actuales." });
+      toast({ variant: "destructive", title: "Sin datos", description: "Cargue registros primero." });
       return;
     }
     setIsAnalyzing(true);
     setCloudData(null);
     
     try {
-      // Optimizamos el payload: solo enviamos lo necesario y truncamos descripciones a 300 chars
+      // Payload ultra-ligero para evitar timeouts de red
       const simplifiedOrders = filteredOrders.map(o => ({
         id: o.id,
         impactoNeto: o.impactoNeto || 0,
         disciplina_normalizada: o.disciplina_normalizada || 'Indefinida',
         causa_raiz_normalizada: o.causa_raiz_normalizada || o.causaRaiz || 'Sin definir',
-        descripcion: String(o.descripcion || "").substring(0, 300),
+        descripcion: String(o.descripcion || "").substring(0, 200), // Truncado agresivo para estabilidad
         standardizedDescription: o.standardizedDescription,
         fechaSolicitud: o.fechaSolicitud
       }));
 
       const result = await analyzeWordCloud({ orders: simplifiedOrders as any });
       setCloudData(result);
-      toast({ title: "Nube Forense Generada", description: "Análisis semántico 80/20 completado." });
+      toast({ title: "Análisis Completado" });
     } catch (error: any) {
-      console.error("Word Cloud Analysis Failed:", error);
+      console.error("Word Cloud Error:", error);
       toast({ 
         variant: "destructive", 
-        title: "Error de IA", 
-        description: "La petición excedió el límite de tiempo. Intente filtrar por un periodo más corto o con menos registros." 
+        title: "Error de Servidor", 
+        description: "Intente con una muestra más pequeña o verifique su conexión." 
       });
     } finally {
       setIsAnalyzing(false);
@@ -173,7 +173,6 @@ export default function WordCloudPage() {
 
         <main className="p-6 md:p-8 space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Panel de Nube de Palabras */}
             <Card className="lg:col-span-3 border-none shadow-xl bg-white rounded-3xl overflow-hidden min-h-[600px] flex flex-col">
               <CardHeader className="bg-slate-900 text-white p-6 shrink-0">
                 <div className="flex justify-between items-center">
@@ -181,7 +180,7 @@ export default function WordCloudPage() {
                     <CardTitle className="text-xl font-headline font-bold uppercase tracking-tight flex items-center gap-2">
                       <Layers className="h-5 w-5 text-accent" /> Mapa de Calor Semántico
                     </CardTitle>
-                    <CardDescription className="text-slate-400 text-xs font-medium uppercase">Ponderación: (0.7 Impacto + 0.3 Recurrencia) × Confianza IA</CardDescription>
+                    <CardDescription className="text-slate-400 text-xs font-medium uppercase">Análisis rápido optimizado para estabilidad</CardDescription>
                   </div>
                   <Badge variant="outline" className="bg-white/10 text-white border-white/20 px-4 py-1 uppercase text-[10px] font-black">
                     MUESTRA: {filteredOrders.length} REGISTROS
@@ -192,12 +191,12 @@ export default function WordCloudPage() {
                 {isAnalyzing ? (
                   <div className="flex flex-col items-center justify-center text-primary space-y-4">
                     <RefreshCcw className="h-12 w-12 animate-spin opacity-40" />
-                    <p className="text-xs font-black uppercase tracking-[0.2em]">Analizando Patrones 80/20...</p>
+                    <p className="text-xs font-black uppercase tracking-[0.2em]">Sincronizando con Servidor...</p>
                   </div>
                 ) : !cloudData ? (
                   <div className="flex flex-col items-center justify-center text-slate-300 space-y-4">
                     <BrainCircuit className="h-20 w-20 opacity-10" />
-                    <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-400">Esperando ejecución del motor semántico...</p>
+                    <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-400">Esperando ejecución del motor...</p>
                   </div>
                 ) : (
                   cloudData.concepts.map((word, i) => (
@@ -217,11 +216,10 @@ export default function WordCloudPage() {
                   <span className="flex items-center gap-1.5"><div className="h-2 w-2 rounded-full bg-amber-500" /> Riesgo de Control</span>
                   <span className="flex items-center gap-1.5"><div className="h-2 w-2 rounded-full bg-primary" /> Tendencia Estable</span>
                 </div>
-                <span>Algoritmo Forense v2.5 • Walmart Intelligence</span>
+                <span>Algoritmo Forense v2.6 • Walmart Intelligence</span>
               </CardFooter>
             </Card>
 
-            {/* Panel de Control e Inteligencia */}
             <aside className="space-y-6">
               <Card className="border-none shadow-lg bg-slate-900 text-white rounded-3xl overflow-hidden">
                 <CardHeader className="pb-2">
@@ -252,13 +250,12 @@ export default function WordCloudPage() {
                   ) : (
                     <div className="py-12 text-center text-slate-500 space-y-3">
                       <SearchCode className="h-8 w-8 mx-auto opacity-20" />
-                      <p className="text-[10px] font-bold uppercase tracking-widest leading-relaxed">Ejecute el análisis para identificar la concentración de impacto.</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest leading-relaxed">Analice los datos de mayor impacto financiero.</p>
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Detalle del Concepto Seleccionado */}
               {selectedConcept ? (
                 <Card className="border-none shadow-xl bg-white rounded-3xl animate-in slide-in-from-right-5 duration-500">
                   <CardHeader className="border-b bg-slate-50/50 pb-4">
@@ -279,18 +276,6 @@ export default function WordCloudPage() {
                         <p className="text-sm font-black text-slate-800">{selectedConcept.frequency} Órdenes</p>
                       </div>
                     </div>
-                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
-                      <div className="flex justify-between items-center">
-                        <p className="text-[9px] font-black text-slate-400 uppercase">Tendencia Temporal</p>
-                        <Badge className={`text-[8px] font-black uppercase ${selectedConcept.trend === 'Creciente' ? 'bg-rose-500' : 'bg-emerald-500'}`}>
-                          {selectedConcept.trend}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className={`h-4 w-4 ${selectedConcept.trend === 'Creciente' ? 'text-rose-500' : 'text-emerald-500'}`} />
-                        <span className="text-[10px] font-bold text-slate-600">Alta concentración en el periodo</span>
-                      </div>
-                    </div>
                     <div className="space-y-3">
                       <p className="text-[9px] font-black text-primary uppercase tracking-widest">Ejemplos en Base</p>
                       <ScrollArea className="h-32 pr-4">
@@ -308,43 +293,15 @@ export default function WordCloudPage() {
                       </ScrollArea>
                     </div>
                   </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button variant="outline" className="w-full h-9 rounded-xl text-[9px] font-black uppercase tracking-widest border-2 border-primary/10 text-primary hover:bg-primary/5">
-                      Ver Auditoría Completa <ArrowRight className="h-3 w-3 ml-2" />
-                    </Button>
-                  </CardFooter>
                 </Card>
               ) : (
                 <div className="h-60 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-slate-300 p-8 text-center bg-white/50">
                   <Info className="h-8 w-8 mb-3 opacity-20" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Seleccione un concepto de la nube para profundizar en su impacto forense.</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Seleccione un concepto para auditar.</p>
                 </div>
               )}
             </aside>
           </div>
-
-          {/* Recomendaciones Estratégicas AI */}
-          {cloudData && (
-            <section className="space-y-4 pt-4">
-              <div className="flex items-center gap-3">
-                <Zap className="h-6 w-6 text-accent animate-pulse" />
-                <h2 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Estrategia de Mitigación Priorizada</h2>
-              </div>
-              <div className="grid md:grid-cols-3 gap-6">
-                {cloudData.strategicRecommendations.map((rec, i) => (
-                  <Card key={i} className="border-none shadow-md bg-white hover:border-primary/20 transition-all rounded-3xl group overflow-hidden">
-                    <div className="h-1.5 w-full bg-primary/10 group-hover:bg-primary transition-colors" />
-                    <CardContent className="p-6 flex gap-4">
-                      <div className="h-10 w-10 rounded-2xl bg-primary/5 flex items-center justify-center shrink-0">
-                        <span className="text-primary font-black text-lg">{i + 1}</span>
-                      </div>
-                      <p className="text-xs font-bold text-slate-700 leading-relaxed">{rec}</p>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </section>
-          )}
         </main>
       </SidebarInset>
     </div>

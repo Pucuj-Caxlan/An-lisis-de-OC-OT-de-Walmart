@@ -82,7 +82,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const MAX_BULK_AI_RECORDS = 300;
-const AI_BATCH_SIZE = 5; // Reducido de 10 a 5 para mayor estabilidad de red y evitar 'Failed to fetch'
+const AI_BATCH_SIZE = 3; // Reducido a 3 para máxima estabilidad de red y evitar 'Unexpected response'
 
 type AuditStatus = 'all' | 'pending' | 'audited' | 'review' | 'manual';
 
@@ -168,10 +168,10 @@ export default function AnalysisPage() {
     setIsAnalyzing(order.id);
     try {
       const result = await analyzeOrderSemantically({
-        descripcion: order.descripcion || "",
+        descripcion: String(order.descripcion || "").substring(0, 250),
         monto: order.impactoNeto,
         contexto: {
-          justificacionDetallada: order.technicalJustification?.detailedReasoning
+          justificacionDetallada: String(order.technicalJustification?.detailedReasoning || "").substring(0, 250)
         }
       });
 
@@ -199,7 +199,7 @@ export default function AnalysisPage() {
       toast({ 
         variant: "destructive", 
         title: "Fallo en IA", 
-        description: e.message 
+        description: "Error de conexión. Intente nuevamente." 
       });
     } finally {
       setIsAnalyzing(null);
@@ -233,7 +233,6 @@ export default function AnalysisPage() {
       });
       await batch.commit();
       
-      // Registrar Audit Log
       const auditLogId = `log_${Date.now()}`;
       await setDoc(doc(db, 'audit_logs', auditLogId), {
         id: auditLogId,
@@ -283,7 +282,7 @@ export default function AnalysisPage() {
       toast({ 
         variant: "destructive", 
         title: "Límite Excedido", 
-        description: `El análisis masivo está limitado a ${MAX_BULK_AI_RECORDS} registros.` 
+        description: `Seleccione máximo ${MAX_BULK_AI_RECORDS} para estabilidad.` 
       });
       return;
     }
@@ -305,26 +304,23 @@ export default function AnalysisPage() {
       for (let i = 0; i < selectedOrders.length; i += AI_BATCH_SIZE) {
         const chunk = selectedOrders.slice(i, i + AI_BATCH_SIZE);
         
-        // 1. Clasificación Semántica Individual por Lote (Parallel Execution - Safer batch size)
-        const classificationPromises = chunk.map(async (order) => {
+        // 1. Clasificación Semántica Individual (Serializada para evitar timeouts)
+        const classifications = [];
+        for (const order of chunk) {
           try {
             const semanticResult = await analyzeOrderSemantically({
-              descripcion: String(order.descripcion || "").substring(0, 400), // Truncado para estabilidad de payload
+              descripcion: String(order.descripcion || "").substring(0, 250),
               monto: order.impactoNeto,
               contexto: {
-                justificacionDetallada: String(order.technicalJustification?.detailedReasoning || "").substring(0, 400)
+                justificacionDetallada: String(order.technicalJustification?.detailedReasoning || "").substring(0, 250)
               }
             });
-            return { orderId: order.id, result: semanticResult };
+            classifications.push({ orderId: order.id, result: semanticResult });
           } catch (e) {
-            console.error(`Error classifying order ${order.id}:`, e);
-            return { orderId: order.id, result: null };
+            classifications.push({ orderId: order.id, result: null });
           }
-        });
+        }
 
-        const classifications = await Promise.all(classificationPromises);
-
-        // 2. Persistencia en Firestore mediante Batch
         const batch = writeBatch(db!);
         classifications.forEach(({ orderId, result }) => {
           if (result) {
@@ -347,7 +343,6 @@ export default function AnalysisPage() {
         });
         await batch.commit();
 
-        // 3. Preparación de datos enriquecidos para Inteligencia de Grupo
         const chunkForBulk = chunk.map(o => {
           const classif = classifications.find(c => c.orderId === o.id)?.result;
           return {
@@ -357,7 +352,7 @@ export default function AnalysisPage() {
             impactoNeto: o.impactoNeto,
             disciplina_normalizada: classif?.disciplina_normalizada || o.disciplina_normalizada,
             causa_raiz_normalizada: classif?.causa_raiz_normalizada || o.causa_raiz_normalizada,
-            descripcion: String(o.descripcion || "").substring(0, 400), 
+            descripcion: String(o.descripcion || "").substring(0, 250), 
             isSigned: o.isSigned,
             fechaSolicitud: o.fechaSolicitud
           };
@@ -373,9 +368,11 @@ export default function AnalysisPage() {
 
           setProcessedCount(prev => prev + chunk.length);
           setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
-          await new Promise(r => setTimeout(r, 500)); // Throttle para evitar saturar el backend
+          
+          // Throttling adaptativo para evitar ráfagas de red
+          await new Promise(r => setTimeout(r, 800)); 
         } catch (chunkError) {
-          console.error(`Fallo en bloque de inteligencia ${i / AI_BATCH_SIZE}:`, chunkError);
+          console.error(`Error en lote:`, chunkError);
         }
       }
 
@@ -391,9 +388,9 @@ export default function AnalysisPage() {
         confidenceScore: lastConfidence
       });
 
-      toast({ title: "Procesamiento y Clasificación Completos" });
+      toast({ title: "Procesamiento Completo" });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Fallo Crítico en IA", description: "La conexión se interrumpió o excedió el tiempo límite. Intente con un lote más pequeño." });
+      toast({ variant: "destructive", title: "Error de Servidor", description: "La conexión tardó demasiado. Intente con menos registros." });
       setShowBulkAiDialog(false);
     } finally {
       setIsBulkAiProcessing(false);
@@ -426,7 +423,7 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6 space-y-6">
-          {/* Panel de Estadísticas Superiores */}
+          {/* Panel de Estadísticas */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
@@ -731,8 +728,7 @@ export default function AnalysisPage() {
           </Card>
         </main>
 
-        {/* DIÁLOGOS DE CONFIRMACIÓN Y PROCESAMIENTO */}
-
+        {/* Diálogos */}
         <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
           <DialogContent className="max-w-3xl rounded-3xl border-none shadow-2xl p-0 overflow-hidden bg-white">
             <header className="bg-slate-900 text-white p-6 flex justify-between items-center">
@@ -759,7 +755,7 @@ export default function AnalysisPage() {
                   </div>
                   <div className="space-y-2">
                     <h3 className="text-lg font-bold text-slate-800 uppercase tracking-widest">Orquestando Lotes Forenses...</h3>
-                    <p className="text-xs text-slate-400">Gemini está clasificando y detectando patrones en bloques de {AI_BATCH_SIZE}.</p>
+                    <p className="text-xs text-slate-400">Procesando en bloques de {AI_BATCH_SIZE} para mayor estabilidad.</p>
                   </div>
                   <div className="max-w-xs mx-auto space-y-2">
                     <div className="flex justify-between text-[10px] font-black text-primary">
