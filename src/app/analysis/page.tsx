@@ -38,7 +38,9 @@ import {
   Zap,
   Layers,
   BarChart3,
-  X
+  X,
+  Lock,
+  Flag
 } from 'lucide-react';
 import {
   Table,
@@ -83,6 +85,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { executeDeletion, DeletionMode } from '@/lib/deletion-service';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const DISCIPLINAS_CATALOGO = ["Eléctrica", "Civil", "Estructura Metálica", "HVAC", "Legal/Permisos", "Prototipos", "Contra Incendio", "Indefinida"];
 const CAUSAS_CATALOGO = ["Error Diseño", "Cambio Prototipo", "Omisión Contratista", "Requerimiento Autoridad", "Interferencia Constructiva", "Otros"];
@@ -195,7 +198,7 @@ export default function AnalysisPage() {
     if (!db || !user || selectedIds.length === 0) return;
     setIsAuditing(true);
     try {
-      const batchSize = 400; // Firestore limit safe
+      const batchSize = 400;
       const totalToAudit = selectedIds.length;
       
       for (let i = 0; i < totalToAudit; i += batchSize) {
@@ -214,7 +217,6 @@ export default function AnalysisPage() {
         await batch.commit();
       }
 
-      // Log the audit action for compliance
       const logId = `log_audit_${Date.now()}`;
       await setDoc(doc(db, 'audit_logs', logId), {
         id: logId,
@@ -225,14 +227,14 @@ export default function AnalysisPage() {
         details: {
           count: totalToAudit,
           totalImpact: selectedImpact,
-          orderIds: selectedIds.slice(0, 100) // Log sample IDs
+          orderIds: selectedIds.slice(0, 100)
         }
       });
 
       toast({ title: "Auditoría Masiva Exitosa", description: `Se han validado ${totalToAudit} registros oficialmente.` });
       setSelectedIds([]);
       setShowAuditConfirm(false);
-      setShowBulkAiDialog(false); // Close AI dialog if audit was triggered from there
+      setShowBulkAiDialog(false);
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error en Auditoría", description: error.message });
     } finally {
@@ -254,7 +256,6 @@ export default function AnalysisPage() {
     setAnalysisStep('Iniciando Inteligencia Forense...');
 
     try {
-      // Reducción del tamaño de bloque para evitar timeouts (batchSize: 30)
       const BATCH_SIZE = 30; 
       const chunks = [];
       for (let i = 0; i < selectedOrders.length; i += BATCH_SIZE) {
@@ -265,7 +266,6 @@ export default function AnalysisPage() {
       for (let i = 0; i < chunks.length; i++) {
         setAnalysisStep(`Procesando bloque ${i + 1} de ${chunks.length}...`);
         
-        // Truncamiento preventivo de descripciones para reducir carga de payload
         const sanitizedOrders = chunks[i].map(o => ({
           id: o.id,
           projectId: String(o.projectId || "N/A"),
@@ -273,7 +273,7 @@ export default function AnalysisPage() {
           impactoNeto: Number(o.impactoNeto || 0),
           disciplina_normalizada: o.disciplina_normalizada,
           causa_raiz_normalizada: o.causa_raiz_normalizada,
-          descripcion: String(o.descripcion || o.description || "").substring(0, 400), // Truncar a 400 chars
+          descripcion: String(o.descripcion || o.description || "").substring(0, 400),
           isSigned: o.isSigned,
           fechaSolicitud: o.fechaSolicitud
         }));
@@ -285,24 +285,21 @@ export default function AnalysisPage() {
         results.push(result);
         setAnalysisProgress(Math.round(((i + 1) / chunks.length) * 100));
         
-        // Pequeño delay para no saturar el canal de peticiones
         if (i < chunks.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      // Merge results logic
       const mergedResult: BulkIntelligenceOutput = {
         executiveSummary: results.length > 1 ? `Análisis consolidado de ${selectedOrders.length} registros en ${results.length} lotes. ` + results[0].executiveSummary : results[0].executiveSummary,
         totalImpactFormatted: formatAmount(selectedImpact),
         commonPatterns: Array.from(new Set(results.flatMap(r => r.commonPatterns))),
         recurrenceAnalysis: results.map(r => r.recurrenceAnalysis).join('\n\n'),
         anomaliesDetected: results.flatMap(r => r.anomaliesDetected),
-        disciplineImpact: [], // Recalculated below
+        disciplineImpact: [], 
         recommendations: Array.from(new Set(results.flatMap(r => r.recommendations))),
         isEligibleForBulkAudit: results.every(r => r.isEligibleForBulkAudit),
         confidenceScore: results.reduce((acc, r) => acc + r.confidenceScore, 0) / results.length
       };
 
-      // Recalculate discipline impact across all batches
       const disciplineMap = new Map<string, number>();
       selectedOrders.forEach(o => {
         const d = o.disciplina_normalizada || 'Indefinida';
@@ -319,7 +316,7 @@ export default function AnalysisPage() {
       setAnalysisStep('Análisis Masivo Finalizado.');
     } catch (error: any) {
       console.error("Error en análisis masivo:", error);
-      toast({ variant: "destructive", title: "Error Análisis Masivo", description: "La petición ha excedido el tiempo de espera o el volumen de datos es muy alto. Intente con un lote más pequeño." });
+      toast({ variant: "destructive", title: "Error Análisis Masivo", description: "Fallo estructural." });
       setShowBulkAiDialog(false);
     } finally {
       setIsBulkAnalyzing(false);
@@ -352,7 +349,7 @@ export default function AnalysisPage() {
     try {
       const report = await generateTraceabilityReport({ orderData: order });
       setReportResult(report);
-      toast({ title: "Informe Generado", description: "El análisis forense está listo." });
+      toast({ title: "Informe Generado", description: "Análisis forense profundo disponible." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error de Informe", description: error.message });
     } finally {
@@ -365,15 +362,16 @@ export default function AnalysisPage() {
     setIsAnalyzing(order.id);
     try {
       const result = await analyzeOrderSemantically({
-        descripcion: order.descripcion || order.description || "",
+        descripcion: order.technicalJustification?.detailedReasoning || order.descripcion || "",
         monto: order.impactoNeto || 0
       });
       updateDocumentNonBlocking(doc(db, 'orders', order.id), {
         ...result,
         classification_status: 'auto',
-        classified_at: new Date().toISOString()
+        classified_at: new Date().toISOString(),
+        needs_review: result.confidence_score < 0.7
       });
-      toast({ title: "Re-análisis Exitoso", description: "La clasificación ha sido actualizada por Gemini." });
+      toast({ title: "Re-análisis Exitoso", description: "Clasificación actualizada por Gemini." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error IA", description: error.message });
     } finally {
@@ -563,15 +561,18 @@ export default function AnalysisPage() {
                             ) : (
                               <Badge variant="destructive" className="text-[8px] uppercase font-black h-4 px-1.5 w-fit"><ShieldAlert className="h-2 w-2 mr-1" /> Sin Firma</Badge>
                             )}
-                            <Badge variant="outline" className="text-[8px] uppercase h-4 px-1.5 bg-slate-100 text-slate-500 border-none w-fit">
-                              {order.dataSource === 'PDF_ORIGINAL' ? <FileText className="h-2 w-2 mr-1" /> : <Database className="h-2 w-2 mr-1" />}
+                            <Badge variant="outline" className="text-[8px] uppercase h-4 px-1.5 bg-slate-100 text-slate-500 border-none w-fit font-bold">
+                              {order.dataSource === 'PDF_ENRICHED' ? <Lock className="h-2 w-2 mr-1 text-primary" /> : <Database className="h-2 w-2 mr-1" />}
                               {order.dataSource?.replace('_ORIGINAL', '') || 'EXCEL'}
                             </Badge>
                           </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col">
-                            <span className="font-bold text-primary text-sm">{order.projectId}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-black text-primary text-sm">{order.projectId}</span>
+                              {order.envelopeId && <Badge variant="outline" className="text-[7px] font-black border-slate-200">DocuSign OK</Badge>}
+                            </div>
                             <span className="text-[9px] text-muted-foreground uppercase truncate max-w-[150px] font-medium">{order.projectName}</span>
                           </div>
                         </TableCell>
@@ -613,8 +614,11 @@ export default function AnalysisPage() {
                               <DialogContent className="w-[95vw] md:max-w-6xl max-h-[95vh] overflow-hidden flex flex-col p-0 shadow-2xl rounded-3xl border-none">
                                 <header className="bg-slate-900 text-white p-5 shrink-0 flex items-center justify-between">
                                   <div className="space-y-0.5">
-                                    <Badge className="bg-white/10 text-white border-white/20 uppercase text-[8px] font-black">Auditoría Walmart Forensic</Badge>
-                                    <DialogTitle className="text-xl font-headline font-bold uppercase tracking-tight">Trazabilidad: {order.projectId}</DialogTitle>
+                                    <div className="flex items-center gap-2">
+                                      <Badge className="bg-white/10 text-white border-white/20 uppercase text-[8px] font-black">Walmart Forensic Platform</Badge>
+                                      {order.envelopeId && <Badge className="bg-accent text-slate-900 border-none uppercase text-[8px] font-black"><Lock className="h-2 w-2 mr-1" /> DocuSign Verified</Badge>}
+                                    </div>
+                                    <DialogTitle className="text-xl font-headline font-bold uppercase tracking-tight">Expediente: {order.projectId}</DialogTitle>
                                     <DialogDescription className="text-slate-400 text-[10px]">{order.projectName}</DialogDescription>
                                   </div>
                                   <div className="flex gap-2">
@@ -633,7 +637,7 @@ export default function AnalysisPage() {
                                         className="bg-primary hover:bg-primary/90 h-8 text-[9px] font-black uppercase px-4 rounded-xl shadow-lg border-none"
                                       >
                                         {isGeneratingReport ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <BrainCircuit className="h-3 w-3 mr-2" />} 
-                                        Generar Informe Forense
+                                        Generar Reporte 360
                                       </Button>
                                     )}
                                   </div>
@@ -644,16 +648,16 @@ export default function AnalysisPage() {
                                     <div className="p-8 space-y-8 max-w-5xl mx-auto animate-in fade-in duration-500 pb-24">
                                       <div className="grid md:grid-cols-3 gap-6">
                                         <Card className="p-5 border-none shadow-sm bg-white rounded-2xl">
-                                          <p className="text-[9px] font-black text-slate-400 uppercase mb-2">Resumen Ejecutivo</p>
-                                          <p className="text-xs font-medium text-slate-700 leading-relaxed">{reportResult.executiveSummary.overview}</p>
-                                          <div className="mt-4 flex items-center justify-between">
-                                            <Badge variant="outline" className="bg-rose-50 text-rose-700 border-none text-[10px]">Riesgo: {reportResult.executiveSummary.currentRisk}</Badge>
+                                          <p className="text-[9px] font-black text-slate-400 uppercase mb-2">Diagnóstico Ejecutivo</p>
+                                          <p className="text-xs font-medium text-slate-700 leading-relaxed italic">"{reportResult.executiveSummary.overview}"</p>
+                                          <div className="mt-4 flex items-center justify-between pt-4 border-t">
+                                            <Badge variant="outline" className="bg-rose-50 text-rose-700 border-none text-[10px] font-black">RIESGO: {reportResult.executiveSummary.currentRisk}</Badge>
                                             <span className="text-[10px] font-black text-slate-800">{reportResult.executiveSummary.economicImpact}</span>
                                           </div>
                                         </Card>
                                         <Card className="md:col-span-2 p-5 border-none shadow-sm bg-slate-900 text-white relative overflow-hidden rounded-2xl">
                                           <History className="absolute -bottom-2 -right-2 h-20 w-20 opacity-5" />
-                                          <h4 className="text-[9px] font-black uppercase text-slate-400 mb-4 flex items-center gap-2"><Clock className="h-4 w-4 text-accent" /> Línea de Tiempo Forense</h4>
+                                          <h4 className="text-[9px] font-black uppercase text-slate-400 mb-4 flex items-center gap-2"><Clock className="h-4 w-4 text-accent" /> Línea de Vida Forense</h4>
                                           <div className="space-y-4">
                                             {reportResult.forensicTimeline.map((event, idx) => (
                                               <div key={idx} className="flex gap-4 relative">
@@ -661,7 +665,7 @@ export default function AnalysisPage() {
                                                 <div className="h-3 w-3 rounded-full bg-accent mt-1 shrink-0 shadow-[0_0_10px_rgba(255,143,0,0.5)]" />
                                                 <div className="flex-1 text-[10px]">
                                                   <div className="flex justify-between font-bold">
-                                                    <span>{event.event}</span>
+                                                    <span className="uppercase">{event.event}</span>
                                                     <span className="text-accent">{event.date}</span>
                                                   </div>
                                                   <p className="opacity-60 text-[9px] mt-0.5">{event.evidence}</p>
@@ -671,62 +675,122 @@ export default function AnalysisPage() {
                                           </div>
                                         </Card>
                                       </div>
-                                      <div className="grid md:grid-cols-2 gap-6 pb-12">
-                                        <section className="space-y-4">
-                                          <h4 className="text-[10px] font-black uppercase text-primary tracking-widest flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> Recomendaciones IA</h4>
-                                          <div className="space-y-3">
-                                            {reportResult.recommendations.map((rec, i) => (
-                                              <Card key={i} className="p-4 border-none bg-white shadow-sm rounded-xl">
-                                                <div className="flex justify-between mb-2">
-                                                  <Badge variant="outline" className="text-[8px] font-black uppercase">{rec.type}</Badge>
-                                                  <Badge className={`text-[8px] font-black uppercase ${rec.priority === 'Alta' ? 'bg-rose-500' : 'bg-amber-500'}`}>{rec.priority}</Badge>
-                                                </div>
-                                                <p className="text-xs font-bold text-slate-800 mb-1">{rec.action}</p>
-                                                <p className="text-[10px] text-slate-500">Responsable: <span className="font-bold text-primary">{rec.owner}</span></p>
-                                              </Card>
-                                            ))}
-                                          </div>
-                                        </section>
-                                        <section className="space-y-4">
-                                          <h4 className="text-[10px] font-black uppercase text-primary tracking-widest flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Análisis de Riesgo</h4>
-                                          <Card className="p-5 border-none bg-white shadow-sm rounded-2xl space-y-6">
-                                            <div className="grid grid-cols-2 gap-4">
-                                              {Object.entries(reportResult.riskIndex).map(([key, val]) => (
-                                                <div key={key} className="space-y-1">
-                                                  <p className="text-[8px] font-black text-slate-400 uppercase">{key}</p>
-                                                  <div className="flex items-center gap-2">
-                                                    <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden">
-                                                      <div className={`h-full ${val > 70 ? 'bg-rose-500' : 'bg-emerald-500'}`} style={{ width: `${val}%` }} />
-                                                    </div>
-                                                    <span className="text-[10px] font-bold">{val}%</span>
+                                      
+                                      <Tabs defaultValue="context" className="space-y-6">
+                                        <TabsList className="bg-white border rounded-xl p-1 h-10 shadow-sm">
+                                          <TabsTrigger value="context" className="text-[9px] font-black uppercase">Análisis & Riesgo</TabsTrigger>
+                                          <TabsTrigger value="justification" className="text-[9px] font-black uppercase">Justificación Técnica</TabsTrigger>
+                                          <TabsTrigger value="historical" className="text-[9px] font-black uppercase">Bitácora Histórica</TabsTrigger>
+                                        </TabsList>
+
+                                        <TabsContent value="context" className="grid md:grid-cols-2 gap-6 pb-12 outline-none">
+                                          <section className="space-y-4">
+                                            <h4 className="text-[10px] font-black uppercase text-primary tracking-widest flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> Mitigaciones Sugeridas</h4>
+                                            <div className="space-y-3">
+                                              {reportResult.recommendations.map((rec, i) => (
+                                                <Card key={i} className="p-4 border-none bg-white shadow-sm rounded-xl">
+                                                  <div className="flex justify-between mb-2">
+                                                    <Badge variant="outline" className="text-[8px] font-black uppercase">{rec.type}</Badge>
+                                                    <Badge className={`text-[8px] font-black uppercase ${rec.priority === 'Alta' ? 'bg-rose-500' : 'bg-amber-500'}`}>{rec.priority}</Badge>
                                                   </div>
-                                                </div>
+                                                  <p className="text-xs font-bold text-slate-800 mb-1">{rec.action}</p>
+                                                  <p className="text-[10px] text-slate-500">Owner: <span className="font-bold text-primary">{rec.owner}</span></p>
+                                                </Card>
                                               ))}
                                             </div>
-                                            <Separator className="bg-slate-50" />
-                                            <div className="space-y-2">
-                                              <p className="text-[9px] font-black text-slate-400 uppercase">Patrones Recurrentes</p>
-                                              <p className="text-xs text-slate-700 italic leading-relaxed">{reportResult.deepAnalysis.recurrentPatterns}</p>
+                                          </section>
+                                          <section className="space-y-4">
+                                            <h4 className="text-[10px] font-black uppercase text-primary tracking-widest flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Índices de Exposición</h4>
+                                            <Card className="p-5 border-none bg-white shadow-sm rounded-2xl space-y-6">
+                                              <div className="grid grid-cols-2 gap-4">
+                                                {Object.entries(reportResult.riskIndex).map(([key, val]) => (
+                                                  <div key={key} className="space-y-1">
+                                                    <p className="text-[8px] font-black text-slate-400 uppercase">{key}</p>
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div className={`h-full ${val > 70 ? 'bg-rose-500' : 'bg-emerald-500'}`} style={{ width: `${val}%` }} />
+                                                      </div>
+                                                      <span className="text-[10px] font-bold">{val}%</span>
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                              <Separator className="bg-slate-50" />
+                                              <div className="space-y-2">
+                                                <p className="text-[9px] font-black text-slate-400 uppercase">Driver Sistémico</p>
+                                                <p className="text-xs text-slate-700 italic leading-relaxed">{reportResult.deepAnalysis.recurrentPatterns}</p>
+                                              </div>
+                                            </Card>
+                                          </section>
+                                        </TabsContent>
+
+                                        <TabsContent value="justification" className="outline-none">
+                                          <Card className="p-6 border-none shadow-sm bg-white rounded-3xl space-y-6">
+                                            <div className="flex items-center gap-2 mb-2">
+                                              <FileSearch className="h-5 w-5 text-primary" />
+                                              <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Sustento Técnico Institucional</h4>
+                                            </div>
+                                            <div className="space-y-4">
+                                              <div className="bg-slate-50 p-5 rounded-2xl">
+                                                <p className="text-[9px] font-black text-primary uppercase mb-2">Descripción del Cambio</p>
+                                                <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                                                  {order.technicalJustification?.detailedReasoning || order.descripcion || "Información en proceso de análisis semántico."}
+                                                </p>
+                                              </div>
+                                              {order.technicalJustification?.scope && (
+                                                <div className="bg-slate-50 p-5 rounded-2xl">
+                                                  <p className="text-[9px] font-black text-primary uppercase mb-2">Alcance Extraído (Pág. 5-6)</p>
+                                                  <p className="text-xs text-slate-700 leading-relaxed italic">{order.technicalJustification.scope}</p>
+                                                </div>
+                                              )}
                                             </div>
                                           </Card>
-                                        </section>
-                                      </div>
+                                        </TabsContent>
+
+                                        <TabsContent value="historical" className="outline-none">
+                                          <Card className="p-6 border-none shadow-sm bg-white rounded-3xl space-y-6">
+                                            <div className="flex items-center justify-between">
+                                              <div className="flex items-center gap-2">
+                                                <Database className="h-5 w-5 text-primary" />
+                                                <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Historial de Desviaciones (Pág. 7)</h4>
+                                              </div>
+                                              <Badge className="bg-primary/10 text-primary border-none text-[10px] font-black">TOTAL ACUMULADO: ${formatAmount(order.montoAcumulado || 0)}</Badge>
+                                            </div>
+                                            <div className="grid gap-3">
+                                              {order.historicalLog?.length > 0 ? order.historicalLog.map((h: any, i: number) => (
+                                                <div key={i} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-white hover:shadow-md transition-all">
+                                                  <div className="flex gap-4 items-center">
+                                                    <div className="h-10 w-10 bg-white rounded-xl flex items-center justify-center shadow-sm font-black text-[10px] text-primary">OT {h.orderNumber}</div>
+                                                    <div>
+                                                      <p className="text-xs font-bold text-slate-800 uppercase">{h.rootCause}</p>
+                                                      <p className="text-[10px] text-slate-400 font-bold uppercase">{h.date}</p>
+                                                    </div>
+                                                  </div>
+                                                  <span className="font-black text-slate-900 text-sm">${formatAmount(h.amount)}</span>
+                                                </div>
+                                              )) : (
+                                                <div className="text-center py-12 text-slate-300 italic text-xs">No se detectó bitácora histórica en el expediente actual.</div>
+                                              )}
+                                            </div>
+                                          </Card>
+                                        </TabsContent>
+                                      </Tabs>
                                     </div>
                                   ) : (
                                     <div className="p-6 space-y-6 max-w-4xl mx-auto pb-32">
                                       <div className="grid md:grid-cols-3 gap-4">
                                         <Card className={`p-4 border-none shadow-sm ${order.isSigned ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} rounded-2xl`}>
-                                          <p className="text-[8px] font-black uppercase mb-1">Estatus Documental</p>
+                                          <p className="text-[8px] font-black uppercase mb-1">Validación Documental</p>
                                           <div className="flex items-center gap-2">
                                             <Signature className="h-4 w-4" />
-                                            <span className="text-xs font-bold">{order.isSigned ? 'FIRMADO' : 'SIN FIRMA'}</span>
+                                            <span className="text-xs font-bold uppercase">{order.isSigned ? 'FIRMADO (DocuSign)' : 'SIN FIRMA ELECTRÓNICA'}</span>
                                           </div>
                                         </Card>
                                         <Card className="p-4 border-none shadow-sm bg-white rounded-2xl">
-                                          <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Completitud</p>
+                                          <p className="text-[8px] font-black text-slate-400 uppercase mb-1">ID de Sobre (Envelope)</p>
                                           <div className="flex items-center gap-2">
-                                            <Activity className="h-4 w-4 text-primary" />
-                                            <span className="text-xs font-bold text-slate-800">{order.ingestionCompleteness || 0}%</span>
+                                            <Lock className="h-4 w-4 text-primary" />
+                                            <span className="text-[10px] font-mono font-bold text-slate-800 truncate">{order.envelopeId || 'N/A'}</span>
                                           </div>
                                         </Card>
                                         <Card className="p-4 border-none shadow-sm bg-white rounded-2xl">
@@ -739,58 +803,47 @@ export default function AnalysisPage() {
                                       </div>
 
                                       <section className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
-                                        <h4 className="text-[9px] font-black uppercase text-primary tracking-widest flex items-center gap-1.5"><Clock className="h-4 w-4" /> Línea de Vida Forense</h4>
-                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
-                                          {['Detección', 'Solicitud', 'Aprobación', 'Ejecución', 'Cierre'].map((label, i) => (
-                                            <div key={label} className={`space-y-0.5 ${i > 0 ? 'border-l' : ''}`}>
-                                              <p className="text-[8px] font-black text-slate-400 uppercase">{label}</p>
-                                              <p className="text-[10px] font-bold text-slate-700">
-                                                {order[`fecha${label}`] || order[label.toLowerCase() + 'Date'] || '—'}
-                                              </p>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </section>
-
-                                      <section className="space-y-3">
-                                        <h4 className="text-[9px] font-black uppercase text-primary tracking-widest flex items-center gap-1.5"><FileText className="h-4 w-4" /> Evidencia OCR</h4>
-                                        <div className="space-y-2">
-                                          {order.pdfEvidenceFragments?.map((frag: any, i: number) => (
-                                            <Card key={i} className="p-3 border-none bg-primary/5 rounded-xl">
-                                              <div className="flex justify-between items-center mb-1">
-                                                <Badge variant="outline" className="text-[7px] uppercase font-bold">Sección: {frag.section}</Badge>
-                                                <span className="text-[7px] font-black text-slate-400">Pág. {frag.page}</span>
-                                              </div>
-                                              <p className="text-[10px] text-slate-700 italic">"{frag.text}"</p>
-                                            </Card>
-                                          ))}
+                                        <h4 className="text-[9px] font-black uppercase text-primary tracking-widest flex items-center gap-1.5"><Clock className="h-4 w-4" /> Atributos de Orden</h4>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                                          <div className="space-y-0.5 border-r">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase">No. Orden</p>
+                                            <p className="text-[10px] font-bold text-slate-700">{order.orderNumber || '—'}</p>
+                                          </div>
+                                          <div className="space-y-0.5 border-r">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase">Etapa</p>
+                                            <p className="text-[10px] font-bold text-slate-700 uppercase">{order.projectStage || '—'}</p>
+                                          </div>
+                                          <div className="space-y-0.5 border-r">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase">Tipo Ejecución</p>
+                                            <p className="text-[10px] font-bold text-slate-700 uppercase">{order.executionType || 'NORMAL'}</p>
+                                          </div>
+                                          <div className="space-y-0.5">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase">Área Emisora</p>
+                                            <p className="text-[10px] font-bold text-slate-700 uppercase">{order.issuingArea || 'DISEÑO'}</p>
+                                          </div>
                                         </div>
                                       </section>
 
                                       <div className="grid md:grid-cols-2 gap-4">
                                         <Card className="p-5 border-none bg-slate-900 text-white rounded-2xl relative shadow-xl overflow-hidden">
                                           <SearchCode className="absolute top-2 right-2 h-12 w-12 opacity-10" />
-                                          <h4 className="text-[8px] font-black uppercase text-slate-400 mb-3 flex items-center gap-1.5"><Sparkles className="h-3 w-3 text-accent" /> Razonamiento IA</h4>
-                                          <p className="text-[10px] font-medium leading-relaxed mb-4">{order.rationale_tecnico || "Análisis estructural basado en descriptores técnicos."}</p>
+                                          <h4 className="text-[8px] font-black uppercase text-slate-400 mb-3 flex items-center gap-1.5"><Sparkles className="h-3 w-3 text-accent" /> Diagnóstico Semántico IA</h4>
+                                          <p className="text-[10px] font-medium leading-relaxed mb-4 italic opacity-90">"{order.rationale_tecnico || "Analizando el ADN técnico de la desviación..."}"</p>
                                           <div className="flex flex-wrap gap-1">
-                                            {order.evidence_terms?.map((term: string) => <Badge key={term} className="bg-white/10 text-white border-none text-[8px] font-bold">{term}</Badge>)}
+                                            <Badge className="bg-accent text-slate-900 border-none text-[8px] font-black uppercase">{order.disciplina_normalizada}</Badge>
+                                            <Badge className="bg-white/10 text-white border-none text-[8px] font-bold">{order.causa_raiz_normalizada}</Badge>
                                           </div>
                                         </Card>
-                                        <Card className="p-5 border-none bg-white rounded-2xl border border-slate-100 shadow-sm">
-                                          <h4 className="text-[8px] font-black uppercase text-primary mb-3 flex items-center gap-1.5"><Microscope className="h-3 w-3" /> Log de Auditoría</h4>
-                                          <div className="space-y-2 text-[9px]">
-                                            <div className="flex justify-between border-b pb-1">
-                                              <span className="text-slate-400 uppercase font-bold">Confianza</span>
-                                              <span className="font-bold">{Math.round((order.confidence_score || 0) * 100)}%</span>
-                                            </div>
-                                            <div className="flex justify-between border-b pb-1">
-                                              <span className="text-slate-400 uppercase font-bold">ID Ingesta</span>
-                                              <span className="font-bold">#{order.id.slice(-6).toUpperCase()}</span>
-                                            </div>
-                                            <div className="flex justify-between border-b pb-1">
-                                              <span className="text-slate-400 uppercase font-bold">Status Audit</span>
-                                              <span className="font-bold uppercase text-emerald-600">{order.classification_status || 'AUTO'}</span>
-                                            </div>
+                                        <Card className="p-5 border-none bg-white rounded-2xl border border-slate-100 shadow-sm space-y-4">
+                                          <h4 className="text-[8px] font-black uppercase text-rose-500 mb-3 flex items-center gap-1.5"><Flag className="h-3 w-3" /> Control de Riesgos</h4>
+                                          <div className="space-y-2">
+                                            {order.redFlags?.length > 0 ? order.redFlags.map((flag: string, i: number) => (
+                                              <div key={i} className="flex items-center gap-2 text-[9px] font-bold text-rose-600 bg-rose-50 p-2 rounded-lg">
+                                                <AlertTriangle className="h-3 w-3" /> {flag}
+                                              </div>
+                                            )) : (
+                                              <div className="text-center py-4 text-slate-300 italic text-[9px]">Sin alertas registradas en el expediente.</div>
+                                            )}
                                           </div>
                                         </Card>
                                       </div>

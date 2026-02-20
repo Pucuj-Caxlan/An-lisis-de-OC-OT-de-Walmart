@@ -7,51 +7,50 @@
       "properties": {
         "id": { "type": "string" },
         "importBatchId": { "type": "string" },
+        "envelopeId": { "type": "string", "description": "DocuSign Envelope ID" },
+        "orderNumber": { "type": "string" },
         "projectId": { "type": "string" },
         "projectName": { "type": "string" },
-        "type": { "type": "string", "enum": ["OT", "OCR", "OCI"] },
+        "type": { "type": "string" },
         "format": { "type": "string" },
         "causaRaiz": { "type": "string" },
         "descripcion": { "type": "string" },
         "impactoNeto": { "type": "number" },
+        "montoAcumulado": { "type": "number" },
         "fechaSolicitud": { "type": "string", "format": "date-time" },
-        "fechaDeteccion": { "type": "string", "format": "date-time" },
-        "fechaAprobacion": { "type": "string", "format": "date-time" },
-        "fechaEjecucion": { "type": "string", "format": "date-time" },
-        "fechaCierre": { "type": "string", "format": "date-time" },
-        "pdfEvidenceFragments": { 
-          "type": "array", 
-          "items": { 
+        "isSigned": { "type": "boolean" },
+        "executionType": { "type": "string" },
+        "issuingArea": { "type": "string" },
+        "projectStage": { "type": "string" },
+        "technicalJustification": {
+          "type": "object",
+          "properties": {
+            "detailedReasoning": { "type": "string" },
+            "scope": { "type": "string" }
+          }
+        },
+        "redFlags": { "type": "array", "items": { "type": "string" } },
+        "historicalLog": {
+          "type": "array",
+          "items": {
             "type": "object",
             "properties": {
-              "text": { "type": "string" },
-              "page": { "type": "string" },
-              "section": { "type": "string" }
+              "orderNumber": { "type": "string" },
+              "amount": { "type": "number" },
+              "rootCause": { "type": "string" },
+              "date": { "type": "string" }
             }
-          } 
+          }
         },
-        "isSigned": { "type": "boolean" },
         "disciplina_normalizada": { "type": "string" },
         "causa_raiz_normalizada": { "type": "string" },
-        "subcausa_normalizada": { "type": "string" },
-        "detalle_nivel_3": { "type": "string" },
         "confidence_score": { "type": "number" },
-        "evidence_terms": { "type": "array", "items": { "type": "string" } },
-        "descripcion_original": { "type": "string" },
         "rationale_tecnico": { "type": "string" },
-        "ai_model_version": { "type": "string" },
         "classified_at": { "type": "string", "format": "date-time" },
         "needs_review": { "type": "boolean" },
         "classification_status": { "type": "string", "enum": ["auto", "reviewed", "overridden"] },
-        "logica_clasificacion": {
-          "type": "object",
-          "properties": {
-            "terminos_detectados": { "type": "array", "items": { "type": "string" } },
-            "mapa_taxonomia": { "type": "string" },
-            "criterio_aplicado": { "type": "string" },
-            "posibles_ambiguedades": { "type": "string" }
-          }
-        }
+        "dataSource": { "type": "string" },
+        "ingestionCompleteness": { "type": "number" }
       },
       "required": ["projectId", "impactoNeto"]
     },
@@ -82,63 +81,15 @@
         "timestamp": { "type": "string", "format": "date-time" },
         "details": { "type": "object" }
       }
-    },
-    "TaxonomyDiscipline": {
-      "title": "Taxonomy Discipline",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "synonyms": { "type": "array", "items": { "type": "string" } },
-        "keywords": { "type": "array", "items": { "type": "string" } },
-        "active": { "type": "boolean" }
-      }
-    },
-    "TaxonomyRootCause": {
-      "title": "Taxonomy Root Cause",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "discipline_default": { "type": "string" },
-        "synonyms": { "type": "array", "items": { "type": "string" } },
-        "active": { "type": "boolean" }
-      }
-    },
-    "ClassificationOverride": {
-      "title": "Classification Override",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "ocot_id": { "type": "string" },
-        "old_values": { "type": "object" },
-        "new_values": { "type": "object" },
-        "changed_by": { "type": "string" },
-        "changed_at": { "type": "string", "format": "date-time" },
-        "reason": { "type": "string" }
-      }
-    },
-    "AggregateStats": {
-      "title": "Aggregate Stats",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "count": { "type": "number" },
-        "total_impact": { "type": "number" },
-        "last_updated": { "type": "string", "format": "date-time" }
-      }
     }
   },
   "auth": {
     "providers": ["password", "anonymous"]
   },
   "firestore": {
-    "/orders/{orderId}": { "schema": "Order", "description": "Normalized records with semantic AI enrichment" },
+    "/orders/{orderId}": { "schema": "Order", "description": "Enriched records with DocuSign and historical context" },
     "/deletion_jobs/{jobId}": { "schema": "DeletionJob", "description": "Tracking for batch deletion processes" },
     "/audit_logs/{logId}": { "schema": "AuditLog", "description": "Audit trails for critical actions" },
-    "/taxonomy_disciplines/{id}": { "schema": "TaxonomyDiscipline", "description": "Master list of disciplines" },
-    "/taxonomy_rootcauses/{id}": { "schema": "TaxonomyRootCause", "description": "Master list of root causes" },
-    "/classification_overrides/{id}": { "schema": "ClassificationOverride", "description": "Audit log of human overrides" },
-    "/aggregates/{scope}/disciplines_stats/{id}": { "schema": "AggregateStats", "description": "Real-time discipline analytics" }
+    "/audits/{auditId}": { "schema": "AuditLog", "description": "Scan history" }
   }
 }
