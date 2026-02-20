@@ -42,10 +42,7 @@
             "causaRaizReal": { "type": "string" },
             "confidence": { "type": "number" },
             "summary": { "type": "array", "items": { "type": "string" } },
-            "preventiveChecks": { "type": "array", "items": { "type": "string" } },
-            "priorityScore": { "type": "number" },
-            "priorityCategory": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] },
-            "prioritizationReasoning": { "type": "string" }
+            "preventiveChecks": { "type": "array", "items": { "type": "string" } }
           }
         }
       },
@@ -61,8 +58,7 @@
         "driversDetected": { "type": "array", "items": { "type": "string" } },
         "recurrenceReasoning": { "type": "string" },
         "recommendedActions": {
-          "type": "array",
-          "items": {
+          "array": {
             "type": "object",
             "properties": {
               "action": { "type": "string" },

@@ -89,17 +89,11 @@ export default function VpDashboard() {
   const [selectedYear, setSelectedYear] = useState<number | 'all'>(currentYear);
   const [mounted, setMounted] = useState(false);
   const [drilldownConcept, setDrilldownConcept] = useState<string | null>(null);
-  const [isGeneratingIntelligence, setIsGeneratingIntelligence] = useState(false);
-  const [activeIntelligence, setActiveIntelligence] = useState<RootCauseIntelligenceOutput | null>(null);
   
   const [filters, setFilters] = useState({
-    type: 'all',
     format: 'all',
-    planType: 'all',
-    coordinator: 'all',
     projectName: '',
-    discipline: 'all',
-    priority: 'all'
+    discipline: 'all'
   });
 
   useEffect(() => {
@@ -138,14 +132,13 @@ export default function VpDashboard() {
     return rawOrders.filter(o => {
       const orderYear = getOrderYear(o);
       const yearMatch = selectedYear === 'all' || orderYear === selectedYear;
-      const priorityMatch = filters.priority === 'all' || o.semanticAnalysis?.priorityCategory === filters.priority;
       const disciplineMatch = filters.discipline === 'all' || o.semanticAnalysis?.especialidadImpactada === filters.discipline;
       const searchStr = filters.projectName.toLowerCase();
       const oPid = String(o.projectId || "").toLowerCase();
       const oPName = String(o.projectName || "").toLowerCase();
       const searchMatch = !searchStr || oPid.includes(searchStr) || oPName.includes(searchStr);
       
-      return yearMatch && priorityMatch && disciplineMatch && searchMatch;
+      return yearMatch && disciplineMatch && searchMatch;
     });
   }, [rawOrders, selectedYear, filters]);
 
@@ -153,7 +146,6 @@ export default function VpDashboard() {
     const impactValues = filteredData.map(o => o.impactoNeto || 0);
     const totalImpact = impactValues.reduce((acc, curr) => acc + curr, 0);
     const count = filteredData.length;
-    const p0Count = filteredData.filter(o => o.semanticAnalysis?.priorityCategory === 'P0').length;
 
     const causes = filteredData.reduce((acc: any, curr) => {
       const cause = curr.semanticAnalysis?.causaRaizReal || curr.causaRaiz || 'No definida';
@@ -175,7 +167,7 @@ export default function VpDashboard() {
       };
     });
 
-    return { totalImpact, count, p0Count, paretoData };
+    return { totalImpact, count, paretoData };
   }, [filteredData]);
 
   return (
@@ -201,7 +193,7 @@ export default function VpDashboard() {
         </header>
 
         <main className="p-6 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card className="border-none shadow-md bg-white border-l-4 border-l-primary overflow-hidden">
               <CardContent className="pt-6">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Auditado</p>
@@ -210,50 +202,22 @@ export default function VpDashboard() {
               </CardContent>
             </Card>
 
-            <Card className="border-none shadow-md bg-white border-l-4 border-l-rose-500">
-              <CardContent className="pt-6">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Foco de Atención (P0)</p>
-                <h2 className="text-2xl font-headline font-bold text-rose-600">{metrics.p0Count} CRÍTICOS</h2>
-                <p className="text-[9px] text-slate-500 mt-2 font-medium">Inmediata intervención requerida</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-none shadow-md bg-slate-800 text-white md:col-span-2">
+            <Card className="border-none shadow-md bg-slate-800 text-white">
               <CardContent className="pt-6 flex justify-between items-center">
                 <div className="space-y-1">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Estrategia 80/20 (Economía de Enfoque)</p>
-                  <p className="text-xs text-slate-400">Priorizando las causas P0/P1 se controla el 80% del impacto.</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Estrategia 80/20</p>
+                  <p className="text-xs text-slate-400">Identificación de causas raíz críticas por impacto económico.</p>
                 </div>
-                <div className="flex gap-2">
-                  <div className="bg-white/10 p-2 rounded-lg text-center min-w-[100px] border border-white/5">
-                    <p className="text-[8px] font-bold text-slate-400 uppercase">Impacto P0</p>
-                    <p className="text-sm font-black text-rose-400">{formatCurrency(filteredData.filter(o => o.semanticAnalysis?.priorityCategory === 'P0').reduce((a,c)=>a+(c.impactoNeto||0),0))}</p>
-                  </div>
+                <div className="bg-white/10 p-2 rounded-lg text-center min-w-[100px] border border-white/5">
+                  <p className="text-[8px] font-bold text-slate-400 uppercase">Impacto Pareto</p>
+                  <p className="text-sm font-black text-emerald-400">80% Control</p>
                 </div>
               </CardContent>
             </Card>
           </div>
 
           <Card className="border-none shadow-sm bg-white p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                <Filter className="h-4 w-4" /> Filtros Ejecutivos
-              </h3>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Flag className="h-3 w-3" /> Prioridad</label>
-                <Select value={filters.priority} onValueChange={(v) => setFilters(f => ({...f, priority: v}))}>
-                  <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todas" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas</SelectItem>
-                    <SelectItem value="P0">P0 - Crítico</SelectItem>
-                    <SelectItem value="P1">P1 - Alto</SelectItem>
-                    <SelectItem value="P2">P2 - Medio</SelectItem>
-                    <SelectItem value="P3">P3 - Bajo</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
                 <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><BrainCircuit className="h-3 w-3" /> Disciplina</label>
                 <Select value={filters.discipline} onValueChange={(v) => setFilters(f => ({...f, discipline: v}))}>
@@ -278,69 +242,26 @@ export default function VpDashboard() {
             </div>
           </Card>
 
-          <Tabs defaultValue="pareto" className="w-full">
-            <TabsList className="bg-slate-100 p-1 mb-6 rounded-xl border">
-              <TabsTrigger value="pareto" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <Activity className="h-4 w-4" /> Pareto 80/20 Impacto
-              </TabsTrigger>
-              <TabsTrigger value="prioritization" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <ShieldCheck className="h-4 w-4" /> Priorización Estratégica
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="pareto">
-               <Card className="border-none shadow-md bg-white">
-                  <CardHeader className="border-b bg-slate-50/50">
-                    <CardTitle className="text-sm font-black uppercase text-primary tracking-widest flex items-center gap-2">
-                      <TrendingUp className="h-5 w-5" /> Curva de Pareto: Causa Raíz vs Impacto Acumulado
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="h-[450px] pt-10">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={metrics.paretoData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 'bold' }} height={70} />
-                        <YAxis yAxisId="left" tick={{ fontSize: 9 }} tickFormatter={(v) => `$${Math.round(v/1000000)}M`} />
-                        <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 9 }} />
-                        <Tooltip />
-                        <Bar yAxisId="left" dataKey="impact" fill="#2962FF" radius={[4, 4, 0, 0]} />
-                        <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" stroke="#FF8F00" strokeWidth={3} />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-            </TabsContent>
-
-            <TabsContent value="prioritization">
-               <div className="grid gap-4">
-                  {filteredData.sort((a,b) => (b.semanticAnalysis?.priorityScore || 0) - (a.semanticAnalysis?.priorityScore || 0)).slice(0, 10).map((order, i) => (
-                    <Card key={i} className={`border-none shadow-sm bg-white overflow-hidden border-l-4 ${order.semanticAnalysis?.priorityCategory === 'P0' ? 'border-l-rose-500' : 'border-l-amber-500'}`}>
-                       <CardContent className="p-4 flex items-center justify-between">
-                          <div className="flex gap-4 items-center">
-                             <div className="text-center bg-slate-50 p-2 rounded-lg border min-w-[60px]">
-                                <p className="text-[10px] font-black text-slate-400 uppercase">Score</p>
-                                <p className="text-lg font-black text-slate-800">{order.semanticAnalysis?.priorityScore || 0}</p>
-                             </div>
-                             <div>
-                                <h4 className="font-bold text-slate-800">{order.projectName} ({order.projectId})</h4>
-                                <p className="text-xs text-slate-500 italic max-w-md truncate">{order.semanticAnalysis?.prioritizationReasoning || order.standardizedDescription}</p>
-                             </div>
-                          </div>
-                          <div className="flex items-center gap-4">
-                             <Badge className={order.semanticAnalysis?.priorityCategory === 'P0' ? 'bg-rose-600' : 'bg-amber-500'}>
-                                {order.semanticAnalysis?.priorityCategory}
-                             </Badge>
-                             <div className="text-right">
-                                <p className="text-xs font-black text-slate-800">{formatCurrency(order.impactoNeto || 0)}</p>
-                                <p className="text-[10px] text-slate-400 uppercase">{order.semanticAnalysis?.tipoError}</p>
-                             </div>
-                          </div>
-                       </CardContent>
-                    </Card>
-                  ))}
-               </div>
-            </TabsContent>
-          </Tabs>
+          <Card className="border-none shadow-md bg-white">
+            <CardHeader className="border-b bg-slate-50/50">
+              <CardTitle className="text-sm font-black uppercase text-primary tracking-widest flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" /> Curva de Pareto: Causa Raíz vs Impacto Acumulado
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[450px] pt-10">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={metrics.paretoData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 'bold' }} height={70} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 9 }} tickFormatter={(v) => `$${Math.round(v/1000000)}M`} />
+                  <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 9 }} />
+                  <Tooltip />
+                  <Bar yAxisId="left" dataKey="impact" fill="#2962FF" radius={[4, 4, 0, 0]} />
+                  <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" stroke="#FF8F00" strokeWidth={3} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
         </main>
       </SidebarInset>
     </div>
