@@ -74,7 +74,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from '@/checkbox';
+import { Checkbox } from '@/components/ui/checkbox';
 import { executeDeletion, DeletionMode } from '@/lib/deletion-service';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
@@ -367,7 +367,6 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6 space-y-6">
-          {/* Summary Panel */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="border-none shadow-sm bg-white overflow-hidden">
               <CardContent className="p-4 flex items-center justify-between">
@@ -749,11 +748,11 @@ export default function AnalysisPage() {
               <div className="bg-rose-50 p-4 rounded-xl border border-rose-100">
                 <p className="text-xs text-rose-800">Para confirmar, escriba **BORRAR** en el campo de abajo:</p>
               </div>
-              <Input 
+              <input 
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value.toUpperCase())}
                 placeholder="Escriba BORRAR..."
-                className="font-black tracking-widest text-center h-12 rounded-xl border-rose-200 focus-visible:ring-rose-500"
+                className="flex h-12 w-full rounded-xl border border-rose-200 bg-background px-3 py-2 text-center text-sm font-black tracking-widest ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
             <DialogFooter className="gap-2 sm:gap-0">
