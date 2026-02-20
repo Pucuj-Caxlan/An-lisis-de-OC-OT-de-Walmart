@@ -82,7 +82,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const MAX_BULK_AI_RECORDS = 300;
-const AI_BATCH_SIZE = 10; 
+const AI_BATCH_SIZE = 5; // Reducido de 10 a 5 para mayor estabilidad de red y evitar 'Failed to fetch'
 
 type AuditStatus = 'all' | 'pending' | 'audited' | 'review' | 'manual';
 
@@ -232,6 +232,21 @@ export default function AnalysisPage() {
         });
       });
       await batch.commit();
+      
+      // Registrar Audit Log
+      const auditLogId = `log_${Date.now()}`;
+      await setDoc(doc(db, 'audit_logs', auditLogId), {
+        id: auditLogId,
+        action: 'bulk_audit_validate',
+        userId: user.uid,
+        userEmail: user.email,
+        timestamp: new Date().toISOString(),
+        details: {
+          count: selectedIds.length,
+          totalAmount: selectedTotalAmount
+        }
+      });
+
       toast({ title: "Auditoría Masiva Completada", description: `${selectedIds.length} registros validados.` });
       setSelectedIds([]);
       setShowBulkAiDialog(false);
@@ -290,14 +305,14 @@ export default function AnalysisPage() {
       for (let i = 0; i < selectedOrders.length; i += AI_BATCH_SIZE) {
         const chunk = selectedOrders.slice(i, i + AI_BATCH_SIZE);
         
-        // 1. Clasificación Semántica Individual por Lote (Parallel Execution)
+        // 1. Clasificación Semántica Individual por Lote (Parallel Execution - Safer batch size)
         const classificationPromises = chunk.map(async (order) => {
           try {
             const semanticResult = await analyzeOrderSemantically({
-              descripcion: order.descripcion || "",
+              descripcion: String(order.descripcion || "").substring(0, 400), // Truncado para estabilidad de payload
               monto: order.impactoNeto,
               contexto: {
-                justificacionDetallada: order.technicalJustification?.detailedReasoning
+                justificacionDetallada: String(order.technicalJustification?.detailedReasoning || "").substring(0, 400)
               }
             });
             return { orderId: order.id, result: semanticResult };
@@ -358,7 +373,7 @@ export default function AnalysisPage() {
 
           setProcessedCount(prev => prev + chunk.length);
           setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise(r => setTimeout(r, 500)); // Throttle para evitar saturar el backend
         } catch (chunkError) {
           console.error(`Fallo en bloque de inteligencia ${i / AI_BATCH_SIZE}:`, chunkError);
         }
@@ -378,7 +393,7 @@ export default function AnalysisPage() {
 
       toast({ title: "Procesamiento y Clasificación Completos" });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Fallo Crítico en IA", description: e.message });
+      toast({ variant: "destructive", title: "Fallo Crítico en IA", description: "La conexión se interrumpió o excedió el tiempo límite. Intente con un lote más pequeño." });
       setShowBulkAiDialog(false);
     } finally {
       setIsBulkAiProcessing(false);

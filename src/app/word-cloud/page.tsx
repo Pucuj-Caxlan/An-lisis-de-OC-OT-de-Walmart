@@ -60,8 +60,8 @@ export default function WordCloudPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    // Limitamos a 300 para estabilidad del payload hacia la IA
-    return query(collection(db, 'orders'), limit(300));
+    // Limitamos a 100 para estabilidad del payload y evitar Failed to fetch
+    return query(collection(db, 'orders'), limit(100));
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -78,18 +78,21 @@ export default function WordCloudPage() {
   }, [orders, filters]);
 
   const runAnalysis = async () => {
-    if (filteredOrders.length === 0) return;
+    if (filteredOrders.length === 0) {
+      toast({ variant: "destructive", title: "Sin datos", description: "No hay registros para analizar con los filtros actuales." });
+      return;
+    }
     setIsAnalyzing(true);
     setCloudData(null);
     
     try {
-      // Optimizamos el payload: solo enviamos lo necesario y truncamos descripciones
+      // Optimizamos el payload: solo enviamos lo necesario y truncamos descripciones a 300 chars
       const simplifiedOrders = filteredOrders.map(o => ({
         id: o.id,
         impactoNeto: o.impactoNeto || 0,
         disciplina_normalizada: o.disciplina_normalizada || 'Indefinida',
         causa_raiz_normalizada: o.causa_raiz_normalizada || o.causaRaiz || 'Sin definir',
-        descripcion: String(o.descripcion || "").substring(0, 300), // Truncado preventivo
+        descripcion: String(o.descripcion || "").substring(0, 300),
         standardizedDescription: o.standardizedDescription,
         fechaSolicitud: o.fechaSolicitud
       }));
@@ -102,7 +105,7 @@ export default function WordCloudPage() {
       toast({ 
         variant: "destructive", 
         title: "Error de IA", 
-        description: "La petición excedió el límite de tiempo o datos. Intente filtrar por un periodo más corto." 
+        description: "La petición excedió el límite de tiempo. Intente filtrar por un periodo más corto o con menos registros." 
       });
     } finally {
       setIsAnalyzing(false);
