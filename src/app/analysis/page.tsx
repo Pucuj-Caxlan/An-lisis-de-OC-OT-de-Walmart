@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -24,7 +23,8 @@ import {
   X,
   Trash2,
   ShieldCheck,
-  Loader2
+  Loader2,
+  Microscope
 } from 'lucide-react';
 import {
   Table,
@@ -209,7 +209,7 @@ export default function AnalysisPage() {
         const safeDisciplineId = result.disciplina_normalizada.replace(/\//g, '-');
         const aggregateRef = doc(db, 'aggregates', 'global', 'disciplines_stats', safeDisciplineId);
         
-        setDocumentNonBlocking(aggregateRef, {
+        setDoc(aggregateRef, {
           count: increment(1),
           total_impact: increment(order.impactoNeto || 0),
           last_updated: new Date().toISOString()
