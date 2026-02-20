@@ -47,7 +47,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from '@/components/ui/input';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 type WordConcept = {
   text: string;
@@ -86,7 +85,6 @@ export default function WordCloudPage() {
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
-  // Intentar cargar análisis previo guardado al cambiar filtros
   const snapshotId = useMemo(() => {
     const filterKey = JSON.stringify(filters).replace(/[^a-zA-Z0-9]/g, '_');
     return `cloud_snapshot_${filterKey}`;
@@ -95,11 +93,15 @@ export default function WordCloudPage() {
   useEffect(() => {
     const loadSnapshot = async () => {
       if (!db || !snapshotId) return;
-      const snap = await getDoc(doc(db, 'word_cloud_snapshots', snapshotId));
-      if (snap.exists()) {
-        setCloudData(snap.data() as WordCloudOutput);
-      } else {
-        setCloudData(null);
+      try {
+        const snap = await getDoc(doc(db, 'word_cloud_snapshots', snapshotId));
+        if (snap.exists()) {
+          setCloudData(snap.data() as WordCloudOutput);
+        } else {
+          setCloudData(null);
+        }
+      } catch (e) {
+        console.error("Error loading snapshot:", e);
       }
     };
     loadSnapshot();
@@ -122,16 +124,8 @@ export default function WordCloudPage() {
     });
   }, [orders, filters]);
 
-  const stats = useMemo(() => {
-    if (!orders) return { total: 0, classified: 0, pending: 0 };
-    const total = orders.length;
-    const classified = orders.filter(o => o.classification_status === 'auto' || o.classification_status === 'reviewed').length;
-    return { total, classified, pending: total - classified };
-  }, [orders]);
-
-  // MODELO MATEMÁTICO: Cálculo de pesos local (Sin IA)
   const localCloudWeights = useMemo(() => {
-    const groups: Record<string, { impact: number; count: number; disc: string; causa: string; desc: string[] }> = {};
+    const groups: Record<string, { impact: number; count: number; disc: string; causa: string }> = {};
     let maxImpact = 0;
     let maxCount = 0;
 
@@ -140,17 +134,15 @@ export default function WordCloudPage() {
       const causa = o.causa_raiz_normalizada || o.causaRaiz || 'Sin definir';
       const key = `${disc}|${causa}`;
       
-      if (!groups[key]) groups[key] = { impact: 0, count: 0, disc, causa, desc: [] };
+      if (!groups[key]) groups[key] = { impact: 0, count: 0, disc, causa };
       groups[key].impact += (o.impactoNeto || 0);
       groups[key].count += 1;
-      if (o.descripcion && groups[key].desc.length < 3) groups[key].desc.push(String(o.descripcion).substring(0, 100));
       
       if (groups[key].impact > maxImpact) maxImpact = groups[key].impact;
       if (groups[key].count > maxCount) maxCount = groups[key].count;
     });
 
     return Object.values(groups).map(g => {
-      // Ponderación: 70% Impacto Económico, 30% Frecuencia
       const impactNorm = maxImpact > 0 ? g.impact / maxImpact : 0;
       const countNorm = maxCount > 0 ? g.count / maxCount : 0;
       const weight = (impactNorm * 70) + (countNorm * 30);
@@ -162,7 +154,7 @@ export default function WordCloudPage() {
         frequency: g.count,
         sentiment: g.impact > (maxImpact * 0.5) ? 'Crítico' : g.impact > (maxImpact * 0.2) ? 'Riesgo' : 'Estable',
         category: 'Causa Raíz',
-        trend: 'Calculado desde DB'
+        trend: 'DB Analytics'
       } as WordConcept;
     }).sort((a, b) => b.impact - a.impact);
   }, [filteredOrders]);
@@ -173,13 +165,16 @@ export default function WordCloudPage() {
       return;
     }
 
-    if (!forceIA && localCloudWeights.length > 0) {
-      // Generar vista instantánea basada solo en DB
+    const totalImpact = filteredOrders.reduce((a, b) => a + (b.impactoNeto || 0), 0);
+    const top5Impact = localCloudWeights.slice(0, 5).reduce((a, b) => a + b.impact, 0);
+    const concentration = totalImpact > 0 ? Math.round((top5Impact / totalImpact) * 100) : 0;
+
+    if (!forceIA) {
       setCloudData({
         concepts: localCloudWeights,
         executiveDiagnosis: "Análisis generado instantáneamente desde la base estructurada. Presione 'Refinar con IA' para un diagnóstico estratégico profundo.",
         coreProblem: localCloudWeights[0]?.text || "Indefinido",
-        concentrationPercentage: Math.round((localCloudWeights.slice(0, 5).reduce((a, b) => a + b.impact, 0) / (localCloudWeights.reduce((a, b) => a + b.impact, 0) || 1)) * 100),
+        concentrationPercentage: concentration,
         strategicRecommendations: ["Validar registros pendientes de clasificación para mejorar precisión."]
       });
       return;
@@ -187,34 +182,48 @@ export default function WordCloudPage() {
 
     setIsAnalyzing(true);
     try {
-      const groups = localCloudWeights.map(w => ({
+      // Enviar solo el Top 30 para evitar saturación y asegurar diagnóstico de alta calidad (80/20)
+      const topGroupsForIA = localCloudWeights.slice(0, 30).map(w => ({
         disciplina: w.text,
         causa: w.text,
         impactoTotal: w.impact,
-        frecuencia: w.frequency,
-        descripcionesMuestra: "Muestra estructurada en DB"
+        frecuencia: w.frequency
       }));
 
-      const result = await analyzeWordCloud({ groups });
-      setCloudData(result);
+      const result = await analyzeWordCloud({ 
+        groups: topGroupsForIA,
+        totalImpact,
+        totalOrders: filteredOrders.length
+      });
 
-      // Persistir en Firebase para evitar reprocesamiento
+      const finalData: WordCloudOutput = {
+        ...result,
+        concepts: localCloudWeights, // Mantenemos el 100% de los conceptos para la visualización
+        concentrationPercentage: result.concentrationPercentage || concentration
+      };
+
+      setCloudData(finalData);
+
       if (db) {
         await setDoc(doc(db, 'word_cloud_snapshots', snapshotId), {
-          ...result,
+          ...finalData,
           id: snapshotId,
           generatedAt: new Date().toISOString(),
           filters,
           stats: {
             sampleSize: filteredOrders.length,
-            totalImpact: filteredOrders.reduce((a, b) => a + (b.impactoNeto || 0), 0)
+            totalImpact
           }
         });
       }
 
-      toast({ title: "Análisis Persistido", description: "Resultado guardado para acceso inmediato." });
+      toast({ title: "Análisis Estratégico Completo" });
     } catch (error: any) {
-      toast({ variant: "destructive", title: "Error de Servidor", description: "La IA está saturada. Intente más tarde." });
+      toast({ 
+        variant: "destructive", 
+        title: "Error de Conexión", 
+        description: "La IA experimentó un timeout. El resumen es demasiado complejo." 
+      });
     } finally {
       setIsAnalyzing(false);
     }
@@ -272,7 +281,6 @@ export default function WordCloudPage() {
               variant="outline"
               className="border-primary/20 text-primary hover:bg-primary/5 rounded-xl h-10 px-6 font-bold"
             >
-              {isAnalyzing ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4" />}
               Vista Instantánea (DB)
             </Button>
             <Button 
@@ -420,7 +428,7 @@ export default function WordCloudPage() {
                     <RefreshCcw className="h-12 w-12 animate-spin opacity-40" />
                     <div className="text-center space-y-1">
                       <p className="text-xs font-black uppercase tracking-[0.2em]">Ejecutando Motor Forense...</p>
-                      <p className="text-[10px] text-slate-400 uppercase font-bold italic">Analizando coherencia en {filteredOrders.length} registros</p>
+                      <p className="text-[10px] text-slate-400 uppercase font-bold italic">Analizando patrones 80/20 en {filteredOrders.length} registros</p>
                     </div>
                   </div>
                 ) : !cloudData ? (
@@ -435,7 +443,7 @@ export default function WordCloudPage() {
                     </div>
                   </div>
                 ) : (
-                  cloudData.concepts.map((word, i) => (
+                  cloudData.concepts?.map((word, i) => (
                     <button
                       key={i}
                       onClick={() => setSelectedConcept(word)}
