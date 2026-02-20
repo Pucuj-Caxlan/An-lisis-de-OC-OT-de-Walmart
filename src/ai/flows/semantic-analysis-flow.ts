@@ -5,6 +5,7 @@
  * 
  * Realiza una disección técnica de los registros para identificar causa raíz real,
  * subcausas específicas (MEP), tipos de error y alertas forenses.
+ * Ahora incluye Priorización Estratégica P0-P3.
  */
 
 import {ai} from '@/ai/genkit';
@@ -32,6 +33,9 @@ const SemanticAnalysisOutputSchema = z.object({
   summary: z.array(z.string()).describe("Hallazgos clave de la auditoría semántica."),
   preventiveChecks: z.array(z.string()).describe("Acciones para evitar este tipo de desviaciones en el futuro."),
   standardizedDescription: z.string().describe("Descripción en formato oficial: [QUÉ] / [POR QUÉ] / [RIESGO]."),
+  priorityScore: z.number().describe("Score de prioridad (0-100) basado en impacto, riesgo y recurrencia."),
+  priorityCategory: z.enum(['P0', 'P1', 'P2', 'P3']).describe("Categoría de atención: P0 (Crítico), P1 (Alto), P2 (Monitoreo), P3 (Higiene)."),
+  prioritizationReasoning: z.string().describe("Breve justificación del porqué de esta prioridad."),
   auditAlerts: z.array(z.object({
     type: z.string(),
     message: z.string(),
@@ -44,29 +48,29 @@ const semanticPrompt = ai.definePrompt({
   name: 'semanticPrompt',
   input: {schema: SemanticAnalysisInputSchema},
   output: {schema: SemanticAnalysisOutputSchema},
-  prompt: `Eres un Auditor Forense Senior de Construcción para Walmart International. Tu objetivo es normalizar y auditar registros de Órdenes de Cambio (OC/OT) con foco en drivers técnicos.
+  prompt: `Eres un Auditor Forense Senior de Construcción para Walmart International. Tu objetivo es normalizar, auditar y PRIORIZAR registros de Órdenes de Cambio (OC/OT).
 
 CONTEXTO DEL REGISTRO:
 - Proyecto: {{{projectName}}} (PID: {{{projectId}}})
-- Formato: {{{format}}}
 - Descripción Original: {{{descripcion}}}
 - Causa Declarada: {{{causaDeclarada}}}
 - Impacto Financiero: MXN {{{montoTotal}}}
 - Documento Firmado: {{#if isSigned}} SÍ {{else}} NO {{/if}}
 
-INSTRUCCIONES DE AUDITORÍA MEP (Mechanical, Electrical, Plumbing):
-1. IDENTIFICACIÓN DE DRIVERS:
-   - Si es ELÉCTRICO: Busca si el driver es "Suministro GNFR", "Tableros", "UPS", "Canalizaciones", "Subestación", "Luminarias" o "UVIE".
-   - Si es CIVIL: Busca si es "Terracerías", "Cimentación", "Estructura Metálica", "Pisos", "Acabados".
-2. CLASIFICACIÓN DEL ERROR:
-   - Omisión: No estaba en el proyecto original.
-   - Interferencia: Choque entre especialidades (ej. ducto vs trabe).
-   - Especificación Incorrecta: El material o capacidad no es el adecuado.
-   - Cambio Normativo/Prototipo: Instrucción corporativa o legal nueva.
-3. VERDAD TÉCNICA: Ignora la "Causa Declarada" si la "Descripción Original" sugiere algo distinto.
-4. NORMALIZACIÓN: Genera una 'Descripción Estandarizada' [QUÉ] / [POR QUÉ] / [RIESGO].
+INSTRUCCIONES DE PRIORIZACIÓN (ECONOMÍA DE ENFOQUE):
+Determina qué incidencias merecen inversión de tiempo del VP usando estas reglas:
+1. P0 (CRÍTICO - Score 85-100): Alto impacto financiero (>1M MXN) Y (Falta de firmas O Riesgo UVIE/Regulatorio O Afectación a ruta crítica).
+2. P1 (ALTO - Score 60-84): Alto impacto financiero O Patrón recurrente de omisión en diseño.
+3. P2 (MEDIO - Score 30-59): Interferencias menores, cambios de prototipo con impacto moderado.
+4. P3 (BAJO - Score 0-29): "Higiene" administrativa, ajustes menores sin riesgo operacional.
 
-Manten un tono técnico, preciso y ejecutivo.`,
+INSTRUCCIONES MEP:
+1. IDENTIFICACIÓN DE DRIVERS:
+   - Eléctrico: Tableros, UPS, Subestación, Luminarias, UVIE.
+   - Civil: Terracerías, Cimentación, Estructura, Pisos.
+2. CLASIFICACIÓN DEL ERROR: Omisión, Interferencia, Especificación Incorrecta, Cambio Normativo/Prototipo.
+
+Genera un Priority Score numérico y una Categoría P0-P3. Justifica brevemente.`,
 });
 
 export async function analyzeOrderSemantically(input: SemanticAnalysisInput): Promise<SemanticAnalysisOutput> {
