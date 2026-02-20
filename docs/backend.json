@@ -57,6 +57,18 @@
       },
       "required": ["projectId", "impactoNeto"]
     },
+    "WordCloudSnapshot": {
+      "title": "Word Cloud Snapshot",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "filters": { "type": "object" },
+        "concepts": { "type": "array" },
+        "diagnosis": { "type": "object" },
+        "stats": { "type": "object" }
+      }
+    },
     "DeletionJob": {
       "title": "Deletion Job",
       "type": "object",
@@ -93,6 +105,7 @@
     "/orders/{orderId}": { "schema": "Order", "description": "Enriched records with DocuSign and historical context" },
     "/deletion_jobs/{jobId}": { "schema": "DeletionJob", "description": "Tracking for batch deletion processes" },
     "/audit_logs/{logId}": { "schema": "AuditLog", "description": "Audit trails for critical actions" },
-    "/audits/{auditId}": { "schema": "AuditLog", "description": "Scan history" }
+    "/audits/{auditId}": { "schema": "AuditLog", "description": "Scan history" },
+    "/word_cloud_snapshots/{snapshotId}": { "schema": "WordCloudSnapshot", "description": "Persisted 80/20 analysis results" }
   }
 }

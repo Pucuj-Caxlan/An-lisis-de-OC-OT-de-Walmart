@@ -28,6 +28,10 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
+    match /word_cloud_snapshots/{snapshotId} {
+      allow read, write: if isSignedIn();
+    }
+
     match /importBatches/{batchId} {
       allow read, write: if isSignedIn();
     }
