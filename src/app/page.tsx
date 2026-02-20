@@ -21,7 +21,11 @@ import {
   Layers,
   Search,
   X,
-  ArrowRight
+  ArrowRight,
+  PieChart as PieChartIcon,
+  Activity,
+  AlertTriangle,
+  Zap
 } from 'lucide-react';
 import {
   PieChart,
@@ -36,7 +40,8 @@ import {
   Tooltip,
   Legend,
   ComposedChart,
-  Line
+  Line,
+  Area
 } from 'recharts';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, query } from 'firebase/firestore';
@@ -83,7 +88,8 @@ export default function VpDashboard() {
     format: 'all',
     planType: 'all',
     coordinator: 'all',
-    projectName: ''
+    projectName: '',
+    discipline: 'all'
   });
 
   useEffect(() => {
@@ -131,23 +137,27 @@ export default function VpDashboard() {
   };
 
   const filterOptions = useMemo(() => {
-    if (!rawOrders) return { coordinators: [], formats: [], plans: [] };
+    if (!rawOrders) return { coordinators: [], formats: [], plans: [], disciplines: [] };
     
     const coordinators = new Set<string>();
     const formats = new Set<string>();
     const plans = new Set<string>();
+    const disciplines = new Set<string>();
     
     rawOrders.forEach(o => {
       if (o.coordinador) coordinators.add(o.coordinador);
       const fmt = o.format || o.projectInfo?.format;
       if (fmt) formats.add(fmt);
       if (o.plan) plans.add(o.plan);
+      const disc = o.semanticAnalysis?.especialidadImpactada;
+      if (disc) disciplines.add(disc);
     });
     
     return {
       coordinators: Array.from(coordinators).sort(),
       formats: Array.from(formats).sort(),
-      plans: Array.from(plans).sort()
+      plans: Array.from(plans).sort(),
+      disciplines: Array.from(disciplines).sort()
     };
   }, [rawOrders]);
 
@@ -174,27 +184,17 @@ export default function VpDashboard() {
       const oCoordinator = String(o.coordinador || "").toLowerCase();
       const coordinatorMatch = filters.coordinator === 'all' || oCoordinator.includes(filters.coordinator.toLowerCase());
       
+      const oDiscipline = String(o.semanticAnalysis?.especialidadImpactada || "Otros").toLowerCase();
+      const disciplineMatch = filters.discipline === 'all' || oDiscipline === filters.discipline.toLowerCase();
+      
       const searchStr = filters.projectName.toLowerCase();
       const oPid = String(o.projectId || o.projectInfo?.projectId || "").toLowerCase();
       const oPName = String(o.projectName || o.projectInfo?.projectName || "").toLowerCase();
       const searchMatch = !searchStr || oPid.includes(searchStr) || oPName.includes(searchStr);
       
-      return yearMatch && typeMatch && formatMatch && planMatch && coordinatorMatch && searchMatch;
+      return yearMatch && typeMatch && formatMatch && planMatch && coordinatorMatch && searchMatch && disciplineMatch;
     });
   }, [rawOrders, selectedYear, filters]);
-
-  const drilldownOrders = useMemo(() => {
-    if (!drilldownConcept) return [];
-    return filteredData.filter(o => {
-      const concept = o.semanticAnalysis?.conceptoNormalizado || o.descripcion?.split('/')[0] || 'Otros';
-      return concept === drilldownConcept;
-    });
-  }, [filteredData, drilldownConcept]);
-
-  const comparisonData = useMemo(() => {
-    if (!rawOrders || selectedYear === 'all') return null;
-    return rawOrders.filter(o => getOrderYear(o) === comparisonYear);
-  }, [rawOrders, comparisonYear]);
 
   const metrics = useMemo(() => {
     const impactValues = filteredData.map(o => o.impactoNeto || o.financialImpact?.netImpact || 0);
@@ -222,7 +222,20 @@ export default function VpDashboard() {
       acc[cause].impact += impact;
       return acc;
     }, {});
-    const topCauses = Object.values(causes).sort((a: any, b: any) => b.impact - a.impact).slice(0, 10);
+    
+    // Preparación de datos para PARETO
+    const sortedCauses = Object.values(causes).sort((a: any, b: any) => b.impact - a.impact);
+    let cumulativeSum = 0;
+    const paretoData = sortedCauses.map((c: any) => {
+      cumulativeSum += c.impact;
+      return {
+        ...c,
+        cumulativeImpact: cumulativeSum,
+        cumulativePercentage: totalImpact > 0 ? (cumulativeSum / totalImpact) * 100 : 0,
+        impactPercentage: totalImpact > 0 ? (c.impact / totalImpact) * 100 : 0,
+        averageImpact: c.count > 0 ? c.impact / c.count : 0
+      };
+    });
 
     const plans = filteredData.reduce((acc: any, curr) => {
       const plan = curr.plan || 'Otros';
@@ -237,18 +250,28 @@ export default function VpDashboard() {
       projectCount, 
       ocPerProjectRatio, 
       topConcepts, 
-      topCauses,
+      paretoData,
       planChartData
     };
   }, [filteredData]);
 
   const comparatives = useMemo(() => {
-    if (!comparisonData || selectedYear === 'all') return null;
+    if (!rawOrders || selectedYear === 'all') return null;
+    const comparisonData = rawOrders.filter(o => getOrderYear(o) === comparisonYear);
     const compTotal = comparisonData.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0);
     const delta = metrics.totalImpact - compTotal;
     const pct = compTotal > 0 ? ((metrics.totalImpact - compTotal) / compTotal) * 100 : 0;
     return { compTotal, delta, pct };
-  }, [metrics.totalImpact, comparisonData, selectedYear]);
+  }, [metrics.totalImpact, rawOrders, comparisonYear, selectedYear]);
+
+  const drilldownOrders = useMemo(() => {
+    if (!drilldownConcept) return [];
+    return filteredData.filter(o => {
+      const concept = o.semanticAnalysis?.conceptoNormalizado || o.descripcion?.split('/')[0] || 'Otros';
+      const cause = o.semanticAnalysis?.causaRaizReal || o.causaRaiz || 'No definida';
+      return concept === drilldownConcept || cause === drilldownConcept;
+    });
+  }, [filteredData, drilldownConcept]);
 
   const clearFilters = () => {
     setFilters({
@@ -256,11 +279,12 @@ export default function VpDashboard() {
       format: 'all',
       planType: 'all',
       coordinator: 'all',
-      projectName: ''
+      projectName: '',
+      discipline: 'all'
     });
   };
 
-  const hasActiveFilters = filters.type !== 'all' || filters.format !== 'all' || filters.planType !== 'all' || filters.coordinator !== 'all' || filters.projectName !== '';
+  const hasActiveFilters = filters.type !== 'all' || filters.format !== 'all' || filters.planType !== 'all' || filters.coordinator !== 'all' || filters.projectName !== '' || filters.discipline !== 'all';
 
   if (isLoading) {
     return (
@@ -374,13 +398,13 @@ export default function VpDashboard() {
                 </Button>
               )}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
               <div className="space-y-1.5">
-                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Layers className="h-3 w-3" /> Tipo Plan</label>
+                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Layers className="h-3 w-3" /> Plan</label>
                 <Select value={filters.planType} onValueChange={(v) => setFilters(f => ({...f, planType: v}))}>
                   <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos los Planes</SelectItem>
+                    <SelectItem value="all">Todos</SelectItem>
                     {filterOptions.plans.map(p => (
                       <SelectItem key={p} value={p}>{p}</SelectItem>
                     ))}
@@ -392,7 +416,7 @@ export default function VpDashboard() {
                 <Select value={filters.coordinator} onValueChange={(v) => setFilters(f => ({...f, coordinator: v}))}>
                   <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos los Coordinadores</SelectItem>
+                    <SelectItem value="all">Todos</SelectItem>
                     {filterOptions.coordinators.map(c => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
@@ -404,18 +428,30 @@ export default function VpDashboard() {
                 <Select value={filters.format} onValueChange={(v) => setFilters(f => ({...f, format: v}))}>
                   <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos los Formatos</SelectItem>
+                    <SelectItem value="all">Todos</SelectItem>
                     {filterOptions.formats.map(fmt => (
                       <SelectItem key={fmt} value={fmt}>{fmt}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><BrainCircuit className="h-3 w-3" /> Disciplina</label>
+                <Select value={filters.discipline} onValueChange={(v) => setFilters(f => ({...f, discipline: v}))}>
+                  <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-medium"><SelectValue placeholder="Todos" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    {filterOptions.disciplines.map(d => (
+                      <SelectItem key={d} value={d}>{d}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5 md:col-span-2">
-                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Search className="h-3 w-3" /> Buscar Proyecto / PID</label>
+                <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Search className="h-3 w-3" /> Buscar PID / Proyecto</label>
                 <div className="relative">
                   <Input 
-                    placeholder="Ej. Hacienda de Torreón o 126393..." 
+                    placeholder="Buscar..." 
                     className="h-9 bg-slate-50 border-none text-xs font-medium pl-8"
                     value={filters.projectName}
                     onChange={(e) => setFilters(f => ({...f, projectName: e.target.value}))}
@@ -426,118 +462,166 @@ export default function VpDashboard() {
             </div>
           </Card>
 
-          <Tabs defaultValue="recurrence" className="w-full">
+          <Tabs defaultValue="pareto" className="w-full">
             <TabsList className="bg-slate-100 p-1 mb-6 rounded-xl border">
-              <TabsTrigger value="recurrence" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <ListOrdered className="h-4 w-4" /> Recurrencia por Concepto
+              <TabsTrigger value="pareto" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                <Activity className="h-4 w-4" /> Pareto 80/20 Impacto
               </TabsTrigger>
-              <TabsTrigger value="rootcause" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <BrainCircuit className="h-4 w-4" /> Causas Raíz Reales
+              <TabsTrigger value="recurrence" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                <ListOrdered className="h-4 w-4" /> Recurrencia Concepto
               </TabsTrigger>
               <TabsTrigger value="distribution" className="gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <Layers className="h-4 w-4" /> Distribución Plan
+                <PieChartIcon className="h-4 w-4" /> Distribución Plan
               </TabsTrigger>
             </TabsList>
+
+            <TabsContent value="pareto">
+              <div className="grid lg:grid-cols-5 gap-6">
+                <Card className="lg:col-span-3 border-none shadow-md bg-white">
+                  <CardHeader className="border-b bg-slate-50/50">
+                    <CardTitle className="text-sm font-black uppercase text-primary tracking-widest flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5" /> Curva de Pareto: Causa Raíz vs Impacto Acumulado
+                    </CardTitle>
+                    <CardDescription>Visualización del 80% de las desviaciones financieras por causa normalizada.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-[450px] pt-10">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={metrics.paretoData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis 
+                          dataKey="name" 
+                          tick={{ fontSize: 9, fontWeight: 'bold', fill: '#64748b' }} 
+                          interval={0}
+                          angle={-15}
+                          textAnchor="end"
+                          height={70}
+                        />
+                        <YAxis 
+                          yAxisId="left" 
+                          tick={{ fontSize: 9, fill: '#2962FF' }} 
+                          tickFormatter={(v) => `$${Math.round(v/1000000)}M`} 
+                          label={{ value: 'Impacto ($)', angle: -90, position: 'insideLeft', fontSize: 10 }}
+                        />
+                        <YAxis 
+                          yAxisId="right" 
+                          orientation="right" 
+                          tick={{ fontSize: 9, fill: '#FF8F00' }} 
+                          tickFormatter={(v) => `${v}%`}
+                          domain={[0, 100]}
+                          label={{ value: '% Acumulado', angle: 90, position: 'insideRight', fontSize: 10 }}
+                        />
+                        <Tooltip 
+                          formatter={(value, name) => [
+                            name === 'Impacto Total' ? formatCurrency(value as number) : `${(value as number).toFixed(1)}%`,
+                            name
+                          ]}
+                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
+                        />
+                        <Bar yAxisId="left" dataKey="impact" name="Impacto Total" fill="#2962FF" radius={[4, 4, 0, 0]} barSize={40} />
+                        <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" name="% Acumulado" stroke="#FF8F00" strokeWidth={3} dot={{ fill: '#FF8F00', r: 4 }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                <div className="lg:col-span-2 space-y-4">
+                  <Card className="border-none shadow-md bg-white h-full flex flex-col">
+                    <CardHeader className="bg-slate-800 text-white rounded-t-xl shrink-0">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-accent" /> Ranking Pareto (Top 10)
+                        </CardTitle>
+                        <Badge variant="outline" className="text-[10px] border-white/20 text-white">80/20 Engine</Badge>
+                      </div>
+                    </CardHeader>
+                    <ScrollArea className="flex-1">
+                      <div className="p-0">
+                        {metrics.paretoData.slice(0, 10).map((item, i) => (
+                          <div 
+                            key={i} 
+                            className="p-4 border-b hover:bg-primary/5 transition-colors cursor-pointer group"
+                            onClick={() => setDrilldownConcept(item.name)}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10px] font-black text-slate-400">#0{i+1}</span>
+                              <Badge className={`${item.cumulativePercentage <= 80 ? 'bg-rose-500' : 'bg-slate-400'} text-[8px] uppercase font-bold px-2`}>
+                                {item.cumulativePercentage <= 80 ? 'Crítico (80%)' : 'Cola Larga'}
+                              </Badge>
+                            </div>
+                            <h4 className="text-sm font-bold text-slate-800 group-hover:text-primary mb-2 truncate">{item.name}</h4>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div className="flex flex-col">
+                                <span className="text-[9px] font-bold text-slate-400 uppercase">Impacto Total</span>
+                                <span className="text-xs font-black text-slate-900">{formatCurrency(item.impact)}</span>
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-[9px] font-bold text-slate-400 uppercase">Promedio</span>
+                                <span className="text-xs font-bold text-primary">{formatCurrency(item.averageImpact)}</span>
+                              </div>
+                              <div className="flex flex-col text-right">
+                                <span className="text-[9px] font-bold text-slate-400 uppercase">Recurrencia</span>
+                                <span className="text-xs font-black text-slate-900">{item.count} OCs</span>
+                              </div>
+                            </div>
+                            <div className="mt-3 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full ${item.cumulativePercentage <= 80 ? 'bg-primary' : 'bg-slate-300'}`} 
+                                style={{ width: `${item.impactPercentage}%` }} 
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </Card>
+                </div>
+              </div>
+            </TabsContent>
 
             <TabsContent value="recurrence">
               <Card className="border-none shadow-md overflow-hidden bg-white">
                 <CardHeader className="bg-slate-50/50 border-b">
                   <div className="flex items-center justify-between">
                     <div>
-                      <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Top 10 Recurrencia de Conceptos (Filtro Semántico)</CardTitle>
-                      <CardDescription>Identificación de desviaciones repetitivas. Haz clic en una fila para ver el detalle de los registros.</CardDescription>
+                      <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Recurrencia por Concepto (Filtro Semántico)</CardTitle>
+                      <CardDescription>Frecuencia de incidencias detectadas por el motor de IA.</CardDescription>
                     </div>
-                    <Badge variant="outline" className="bg-white">{filteredData.length} Órdenes mostradas</Badge>
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead className="bg-slate-50 text-slate-500 font-bold border-b">
-                        <tr>
-                          <th className="p-4 text-left">CONCEPTO NORMALIZADO (IA)</th>
-                          <th className="p-4 text-center">FRECUENCIA (Nº)</th>
-                          <th className="p-4 text-right">IMPORTE TOTAL</th>
-                          <th className="p-4 text-center">PESO FINANCIERO</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {metrics.topConcepts.length === 0 ? (
-                          <tr><td colSpan={4} className="p-10 text-center text-slate-400">Sin datos para este periodo o filtros seleccionados.</td></tr>
-                        ) : metrics.topConcepts.map((row: any, i) => (
-                          <tr 
-                            key={i} 
-                            className="hover:bg-primary/5 transition-colors group cursor-pointer"
-                            onClick={() => setDrilldownConcept(row.name)}
-                          >
-                            <td className="p-4 font-bold text-slate-700 group-hover:text-primary transition-colors flex items-center justify-between">
-                              {row.name}
-                              <ArrowRight className="h-3 w-3 opacity-0 group-hover:opacity-100 text-primary transition-opacity" />
-                            </td>
-                            <td className="p-4 text-center">
-                              <Badge className="bg-slate-100 text-slate-600 font-bold border-none">{row.count}</Badge>
-                            </td>
-                            <td className="p-4 text-right font-black text-slate-900">{formatCurrency(row.impact)}</td>
-                            <td className="p-4 w-48">
-                              <div className="flex items-center gap-3">
-                                <div className="h-2 flex-1 bg-slate-100 rounded-full overflow-hidden">
-                                  <div 
-                                    className="h-full bg-primary" 
-                                    style={{ width: `${metrics.totalImpact > 0 ? (row.impact / metrics.totalImpact) * 100 : 0}%` }}
-                                  />
-                                </div>
-                                <span className="text-[10px] font-bold text-slate-400">
-                                  {metrics.totalImpact > 0 ? ((row.impact / metrics.totalImpact) * 100).toFixed(1) : 0}%
-                                </span>
+                  <Table>
+                    <TableHeader className="bg-slate-50">
+                      <TableRow>
+                        <TableHead className="p-4">Concepto Normalizado</TableHead>
+                        <TableHead className="text-center">Frecuencia</TableHead>
+                        <TableHead className="text-right">Impacto Total</TableHead>
+                        <TableHead className="text-right">Peso %</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {metrics.topConcepts.map((row: any, i) => (
+                        <TableRow key={i} className="hover:bg-primary/5 cursor-pointer" onClick={() => setDrilldownConcept(row.name)}>
+                          <TableCell className="font-bold text-slate-700">{row.name}</TableCell>
+                          <TableCell className="text-center">
+                            <Badge className="bg-slate-100 text-slate-600 border-none font-bold">{row.count}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-black tabular-nums">{formatCurrency(row.impact)}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <span className="text-[10px] font-bold text-slate-400">
+                                {metrics.totalImpact > 0 ? ((row.impact / metrics.totalImpact) * 100).toFixed(1) : 0}%
+                              </span>
+                              <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-primary" style={{ width: `${metrics.totalImpact > 0 ? (row.impact / metrics.totalImpact) * 100 : 0}%` }} />
                               </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </CardContent>
               </Card>
-            </TabsContent>
-
-            <TabsContent value="rootcause">
-              <div className="grid md:grid-cols-2 gap-6">
-                <Card className="border-none shadow-md bg-white">
-                  <CardHeader className="border-b bg-slate-50/50">
-                    <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Top 10 Causa Raíz por Impacto</CardTitle>
-                  </CardHeader>
-                  <CardContent className="h-[400px] pt-8">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={metrics.topCauses} layout="vertical" margin={{ left: 20, right: 40 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
-                        <XAxis type="number" hide />
-                        <YAxis dataKey="name" type="category" width={140} tick={{ fontSize: 9, fontWeight: 'bold', fill: '#64748b' }} />
-                        <Tooltip cursor={{fill: 'rgba(41, 98, 255, 0.05)'}} formatter={(v) => formatCurrency(v as number)} />
-                        <Bar dataKey="impact" fill="#2962FF" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-none shadow-md bg-white">
-                  <CardHeader className="border-b bg-slate-50/50">
-                    <CardTitle className="text-sm font-black uppercase text-primary tracking-widest">Inferencia de Causa Raíz vs Frecuencia</CardTitle>
-                  </CardHeader>
-                  <CardContent className="h-[400px] pt-8">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={metrics.topCauses}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 'bold', fill: '#64748b' }} />
-                        <YAxis yAxisId="left" tick={{ fontSize: 9, fill: '#64748b' }} tickFormatter={(v) => `$${v/1000}k`} />
-                        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: '#64748b' }} />
-                        <Tooltip />
-                        <Bar yAxisId="left" dataKey="impact" fill="#2962FF" radius={[4, 4, 0, 0]} />
-                        <Line yAxisId="right" type="monotone" dataKey="count" stroke="#FF8F00" strokeWidth={3} dot={{ fill: '#FF8F00', r: 4 }} />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </div>
             </TabsContent>
 
             <TabsContent value="distribution">
@@ -595,10 +679,10 @@ export default function VpDashboard() {
                 </div>
                 <div>
                   <DialogTitle className="text-2xl font-headline font-bold text-slate-800 tracking-tight">
-                    Detalle de Recurrencia: {drilldownConcept}
+                    Auditoría Detallada: {drilldownConcept}
                   </DialogTitle>
                   <DialogDescription className="text-sm text-slate-500 font-medium">
-                    Auditoría de las {drilldownOrders.length} frecuencias detectadas para este concepto.
+                    Desglose de las {drilldownOrders.length} frecuencias para este hallazgo.
                   </DialogDescription>
                 </div>
               </div>
@@ -660,10 +744,10 @@ export default function VpDashboard() {
             </div>
 
             <div className="p-6 bg-slate-50 border-t shrink-0 flex items-center justify-between shadow-[0_-4px_10px_rgba(0,0,0,0.03)]">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Auditoría Semántica Consolidada VP</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Consolidado Pareto VP</p>
               <div className="flex items-center gap-6">
                 <div className="text-right">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Impacto Total Concepto</p>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Impacto Total Hallazgo</p>
                   <p className="text-xl font-black text-primary tabular-nums">
                     {formatCurrency(drilldownOrders.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0))}
                   </p>
