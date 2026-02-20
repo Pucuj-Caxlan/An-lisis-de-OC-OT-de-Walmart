@@ -3,8 +3,8 @@
 /**
  * @fileOverview Motor de Inteligencia Semántica Avanzada para Auditoría de Construcción.
  * 
- * Este flujo realiza una disección técnica de los registros de OC/OT para identificar
- * la causa raíz real, estandarizar descripciones y generar alertas de riesgo.
+ * Realiza una disección técnica de los registros para identificar causa raíz real,
+ * subcausas específicas (MEP), tipos de error y alertas forenses.
  */
 
 import {ai} from '@/ai/genkit';
@@ -23,8 +23,10 @@ const SemanticAnalysisInputSchema = z.object({
 export type SemanticAnalysisInput = z.infer<typeof SemanticAnalysisInputSchema>;
 
 const SemanticAnalysisOutputSchema = z.object({
-  conceptoNormalizado: z.string().describe("Categoría canónica del trabajo (ej. Sistema Eléctrico, Obra Civil)."),
+  conceptoNormalizado: z.string().describe("Categoría canónica del trabajo (ej. Ingeniería Eléctrica, Obra Civil)."),
   especialidadImpactada: z.enum(['Eléctrico', 'Civil', 'Estructuras', 'Ambiental', 'Permisos', 'GNFR', 'Arquitectura', 'Instalaciones', 'Otros']),
+  subCausa: z.string().describe("Subcategoría técnica específica (ej. Tableros, Transformador, UPS, Canalizaciones, Luminarias)."),
+  tipoError: z.enum(['Omisión', 'Interferencia', 'Especificación Incorrecta', 'Cambio Normativo', 'Cambio Prototipo', 'Otro']).describe("Clasificación del driver del error."),
   causaRaizReal: z.string().describe("Inferencia técnica de la causa real basada en la descripción."),
   confidence: z.number().describe("Nivel de certeza del análisis (0.0 a 1.0)."),
   summary: z.array(z.string()).describe("Hallazgos clave de la auditoría semántica."),
@@ -42,7 +44,7 @@ const semanticPrompt = ai.definePrompt({
   name: 'semanticPrompt',
   input: {schema: SemanticAnalysisInputSchema},
   output: {schema: SemanticAnalysisOutputSchema},
-  prompt: `Eres un Auditor Forense Senior de Construcción para Walmart International. Tu objetivo es normalizar y auditar registros de Órdenes de Cambio (OC/OT).
+  prompt: `Eres un Auditor Forense Senior de Construcción para Walmart International. Tu objetivo es normalizar y auditar registros de Órdenes de Cambio (OC/OT) con foco en drivers técnicos.
 
 CONTEXTO DEL REGISTRO:
 - Proyecto: {{{projectName}}} (PID: {{{projectId}}})
@@ -52,14 +54,17 @@ CONTEXTO DEL REGISTRO:
 - Impacto Financiero: MXN {{{montoTotal}}}
 - Documento Firmado: {{#if isSigned}} SÍ {{else}} NO {{/if}}
 
-INSTRUCCIONES DE AUDITORÍA:
-1. VERDAD TÉCNICA: Ignora la "Causa Declarada" si la "Descripción Original" sugiere algo distinto. Si la descripción menciona errores de diseño o planos, la Causa Raíz Real es "Omisión de Diseño", incluso si se declaró como "Regulatorio".
-2. NORMALIZACIÓN: Genera una 'Descripción Estandarizada' siguiendo estrictamente este formato:
-   [QUÉ]: (Breve descripción del trabajo) / [POR QUÉ]: (Causa técnica identificada) / [RIESGO]: (Impacto si no se realiza).
-3. DETECCIÓN DE ALERTAS:
-   - Severidad HIGH: Si el monto es > $50,000 MXN y NO está firmado.
-   - Severidad MED: Si hay discrepancia entre la Causa Declarada y la Real.
-   - Severidad LOW: Si faltan planos referenciados en la descripción.
+INSTRUCCIONES DE AUDITORÍA MEP (Mechanical, Electrical, Plumbing):
+1. IDENTIFICACIÓN DE DRIVERS:
+   - Si es ELÉCTRICO: Busca si el driver es "Suministro GNFR", "Tableros", "UPS", "Canalizaciones", "Subestación", "Luminarias" o "UVIE".
+   - Si es CIVIL: Busca si es "Terracerías", "Cimentación", "Estructura Metálica", "Pisos", "Acabados".
+2. CLASIFICACIÓN DEL ERROR:
+   - Omisión: No estaba en el proyecto original.
+   - Interferencia: Choque entre especialidades (ej. ducto vs trabe).
+   - Especificación Incorrecta: El material o capacidad no es el adecuado.
+   - Cambio Normativo/Prototipo: Instrucción corporativa o legal nueva.
+3. VERDAD TÉCNICA: Ignora la "Causa Declarada" si la "Descripción Original" sugiere algo distinto.
+4. NORMALIZACIÓN: Genera una 'Descripción Estandarizada' [QUÉ] / [POR QUÉ] / [RIESGO].
 
 Manten un tono técnico, preciso y ejecutivo.`,
 });

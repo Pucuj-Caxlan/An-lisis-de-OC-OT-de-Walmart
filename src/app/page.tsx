@@ -25,7 +25,9 @@ import {
   PieChart as PieChartIcon,
   Activity,
   AlertTriangle,
-  Zap
+  Zap,
+  Hammer,
+  ShieldAlert
 } from 'lucide-react';
 import {
   PieChart,
@@ -223,7 +225,6 @@ export default function VpDashboard() {
       return acc;
     }, {});
     
-    // Preparación de datos para PARETO
     const sortedCauses = Object.values(causes).sort((a: any, b: any) => b.impact - a.impact);
     let cumulativeSum = 0;
     const paretoData = sortedCauses.map((c: any) => {
@@ -272,6 +273,34 @@ export default function VpDashboard() {
       return concept === drilldownConcept || cause === drilldownConcept;
     });
   }, [filteredData, drilldownConcept]);
+
+  const drilldownAnalysis = useMemo(() => {
+    if (drilldownOrders.length === 0) return null;
+    
+    const subCauses = drilldownOrders.reduce((acc: any, o) => {
+      const sc = o.semanticAnalysis?.subCausa || 'Sin clasificar';
+      acc[sc] = (acc[sc] || 0) + (o.impactoNeto || 0);
+      return acc;
+    }, {});
+    
+    const errorTypes = drilldownOrders.reduce((acc: any, o) => {
+      const et = o.semanticAnalysis?.tipoError || 'Otro';
+      acc[et] = (acc[et] || 0) + 1;
+      return acc;
+    }, {});
+
+    const stageImpact = drilldownOrders.reduce((acc: any, o) => {
+      const st = o.etapaProyecto || o.projectStage || 'Desconocida';
+      acc[st] = (acc[st] || 0) + (o.impactoNeto || 0);
+      return acc;
+    }, {});
+
+    return {
+      subCauses: Object.entries(subCauses).map(([name, value]) => ({ name, value: value as number })).sort((a, b) => b.value - a.value).slice(0, 5),
+      errorTypes: Object.entries(errorTypes).map(([name, count]) => ({ name, count: count as number })),
+      stageImpact: Object.entries(stageImpact).map(([name, value]) => ({ name, value: value as number }))
+    };
+  }, [drilldownOrders]);
 
   const clearFilters = () => {
     setFilters({
@@ -671,89 +700,168 @@ export default function VpDashboard() {
         </main>
 
         <Dialog open={!!drilldownConcept} onOpenChange={(open) => !open && setDrilldownConcept(null)}>
-          <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col p-0 overflow-hidden bg-white shadow-2xl border-none">
+          <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col p-0 overflow-hidden bg-white shadow-2xl border-none">
             <DialogHeader className="p-6 bg-slate-50 border-b shrink-0">
-              <div className="flex items-center gap-4 mb-1">
-                <div className="p-3 bg-primary/10 rounded-2xl">
-                  <BrainCircuit className="h-7 w-7 text-primary" />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-primary/10 rounded-2xl">
+                    <BrainCircuit className="h-7 w-7 text-primary" />
+                  </div>
+                  <div>
+                    <DialogTitle className="text-2xl font-headline font-bold text-slate-800 tracking-tight">
+                      Deep Drill-down: {drilldownConcept}
+                    </DialogTitle>
+                    <Badge variant="outline" className="mt-1 text-primary border-primary/20 bg-primary/5 uppercase font-black text-[10px]">
+                      Análisis de Drivers Técnicos MEP
+                    </Badge>
+                  </div>
                 </div>
-                <div>
-                  <DialogTitle className="text-2xl font-headline font-bold text-slate-800 tracking-tight">
-                    Auditoría Detallada: {drilldownConcept}
-                  </DialogTitle>
-                  <DialogDescription className="text-sm text-slate-500 font-medium">
-                    Desglose de las {drilldownOrders.length} frecuencias para este hallazgo.
-                  </DialogDescription>
+                <div className="text-right">
+                  <p className="text-[10px] font-black text-slate-400 uppercase">Muestra Auditada</p>
+                  <p className="text-lg font-bold text-slate-800">{drilldownOrders.length} Eventos</p>
                 </div>
               </div>
             </DialogHeader>
             
             <div className="flex-1 min-h-0 relative">
               <ScrollArea className="h-full w-full">
-                <div className="p-6">
-                  <Table>
-                    <TableHeader className="bg-slate-50/50 sticky top-0 z-20">
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead className="w-[180px] font-black uppercase text-[10px] tracking-widest">PID / Proyecto</TableHead>
-                        <TableHead className="font-black uppercase text-[10px] tracking-widest">Coordinador</TableHead>
-                        <TableHead className="font-black uppercase text-[10px] tracking-widest">Causa Raíz Real</TableHead>
-                        <TableHead className="font-black uppercase text-[10px] tracking-widest">Descripción / Riesgo</TableHead>
-                        <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Impacto Neto</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {drilldownOrders.map((order) => (
-                        <TableRow key={order.id} className="hover:bg-primary/5 transition-colors group">
-                          <TableCell className="font-medium">
-                            <div className="flex flex-col">
-                              <span className="text-primary font-bold">{order.projectId || "S/P"}</span>
-                              <span className="text-[10px] text-muted-foreground uppercase truncate max-w-[150px]">
-                                {order.projectName || "Sin Nombre"}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs font-medium text-slate-600">
-                            {order.coordinador || "No asignado"}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-100 text-[9px] uppercase font-bold">
-                              {order.semanticAnalysis?.causaRaizReal || order.causaRaiz || "N/D"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="max-w-[250px] space-y-1">
-                              <p className="text-[11px] leading-relaxed text-slate-600 line-clamp-3 italic">
-                                {order.standardizedDescription || order.descripcion}
-                              </p>
-                              {order.semanticAnalysis?.especialidadImpactada && (
-                                <Badge variant="outline" className="text-[8px] h-4 py-0 uppercase border-slate-200">
-                                  {order.semanticAnalysis.especialidadImpactada}
-                                </Badge>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right font-black text-slate-900 tabular-nums">
-                            {formatCurrency(order.impactoNeto || order.financialImpact?.netImpact || 0)}
-                          </TableCell>
+                <div className="p-6 space-y-8">
+                  {/* Visualización de Drivers Subcausas y Errores */}
+                  <div className="grid md:grid-cols-3 gap-6">
+                    <Card className="md:col-span-2 border shadow-sm">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-xs font-black uppercase text-slate-400 flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-accent" /> Top 5 Subcausas (Monto Impacto)
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="h-[250px] pt-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={drilldownAnalysis?.subCauses} layout="vertical">
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                            <XAxis type="number" hide />
+                            <YAxis dataKey="name" type="category" width={150} tick={{ fontSize: 10, fontWeight: 'bold' }} />
+                            <Tooltip formatter={(v) => formatCurrency(v as number)} />
+                            <Bar dataKey="value" fill="#2962FF" radius={[0, 4, 4, 0]} barSize={20} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border shadow-sm">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-xs font-black uppercase text-slate-400 flex items-center gap-2">
+                          <ShieldAlert className="h-4 w-4 text-rose-500" /> Clasificación de Error
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="h-[250px] flex items-center justify-center pt-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={drilldownAnalysis?.errorTypes}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={5}
+                              dataKey="count"
+                            >
+                              {drilldownAnalysis?.errorTypes.map((_, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                            <Legend verticalAlign="bottom" height={36} iconSize={10} wrapperStyle={{ fontSize: '10px' }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <Separator />
+
+                  {/* Tabla de Registros Detallados */}
+                  <div className="space-y-4">
+                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <ListOrdered className="h-4 w-4" /> Detalle de Frecuencias e Inteligencia Forense
+                    </h3>
+                    <Table>
+                      <TableHeader className="bg-slate-50/50">
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead className="w-[180px] font-black uppercase text-[9px] tracking-widest">PID / Proyecto</TableHead>
+                          <TableHead className="font-black uppercase text-[9px] tracking-widest text-center">Driver Error</TableHead>
+                          <TableHead className="font-black uppercase text-[9px] tracking-widest">Subcausa Técnica</TableHead>
+                          <TableHead className="font-black uppercase text-[9px] tracking-widest">Estructura Semántica</TableHead>
+                          <TableHead className="text-right font-black uppercase text-[9px] tracking-widest">Impacto Neto</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {drilldownOrders.map((order) => (
+                          <TableRow key={order.id} className="hover:bg-primary/5 transition-colors group">
+                            <TableCell className="font-medium">
+                              <div className="flex flex-col">
+                                <span className="text-primary font-bold">{order.projectId || "S/P"}</span>
+                                <span className="text-[10px] text-muted-foreground uppercase truncate max-w-[150px]">
+                                  {order.projectName || "Sin Nombre"}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="outline" className={`text-[8px] uppercase font-black ${
+                                order.semanticAnalysis?.tipoError === 'Omisión' ? 'border-rose-200 text-rose-600 bg-rose-50' : 
+                                order.semanticAnalysis?.tipoError === 'Interferencia' ? 'border-amber-200 text-amber-600 bg-amber-50' : 
+                                'border-slate-200 text-slate-600'
+                              }`}>
+                                {order.semanticAnalysis?.tipoError || "Otro"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className="text-[10px] font-bold text-slate-800">{order.semanticAnalysis?.subCausa || "Sin clasificar"}</span>
+                                <span className="text-[9px] text-slate-400 uppercase">{order.proveedor || "Contratista N/D"}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="max-w-[300px] space-y-1">
+                                <p className="text-[10px] leading-relaxed text-slate-600 italic">
+                                  {order.standardizedDescription || order.descripcion}
+                                </p>
+                                <div className="flex gap-1">
+                                  <Badge variant="secondary" className="text-[8px] h-4 px-1.5 uppercase bg-slate-100 border-none">
+                                    {order.etapaProyecto || "Construcción"}
+                                  </Badge>
+                                  {order.isSigned && (
+                                    <Badge variant="secondary" className="text-[8px] h-4 px-1.5 uppercase bg-emerald-50 text-emerald-600 border-none">Firmado</Badge>
+                                  )}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right font-black text-slate-900 tabular-nums">
+                              {formatCurrency(order.impactoNeto || order.financialImpact?.netImpact || 0)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
               </ScrollArea>
             </div>
 
             <div className="p-6 bg-slate-50 border-t shrink-0 flex items-center justify-between shadow-[0_-4px_10px_rgba(0,0,0,0.03)]">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Consolidado Pareto VP</p>
               <div className="flex items-center gap-6">
-                <div className="text-right">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Impacto Total Hallazgo</p>
-                  <p className="text-xl font-black text-primary tabular-nums">
-                    {formatCurrency(drilldownOrders.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0))}
-                  </p>
-                </div>
-                <Button size="lg" className="h-11 px-8 shadow-md" onClick={() => setDrilldownConcept(null)}>Cerrar Detalle</Button>
+                 <div className="flex flex-col">
+                    <span className="text-[9px] font-black text-slate-400 uppercase">Impacto Total Auditado</span>
+                    <span className="text-2xl font-black text-primary tabular-nums">
+                      {formatCurrency(drilldownOrders.reduce((acc, curr) => acc + (curr.impactoNeto || curr.financialImpact?.netImpact || 0), 0))}
+                    </span>
+                 </div>
+                 <Separator orientation="vertical" className="h-10" />
+                 <div className="flex flex-col">
+                    <span className="text-[9px] font-black text-slate-400 uppercase">Eficiencia Pareto</span>
+                    <span className="text-xs font-bold text-slate-800">Causa Raíz Crítica (Top Drivers)</span>
+                 </div>
               </div>
+              <Button size="lg" className="h-11 px-8 shadow-md" onClick={() => setDrilldownConcept(null)}>Cerrar Auditoría Deep</Button>
             </div>
           </DialogContent>
         </Dialog>

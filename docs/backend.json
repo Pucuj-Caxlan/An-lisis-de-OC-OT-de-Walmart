@@ -37,6 +37,8 @@
           "properties": {
             "conceptoNormalizado": { "type": "string" },
             "especialidadImpactada": { "type": "string" },
+            "subCausa": { "type": "string" },
+            "tipoError": { "type": "string", "enum": ["Omisión", "Interferencia", "Especificación Incorrecta", "Cambio Normativo", "Cambio Prototipo", "Otro"] },
             "causaRaizReal": { "type": "string" },
             "confidence": { "type": "number" },
             "summary": { "type": "array", "items": { "type": "string" } },
