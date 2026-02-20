@@ -36,7 +36,10 @@ import {
   History,
   CalendarDays,
   MapPin,
-  ExternalLink
+  ExternalLink,
+  Signature,
+  Activity,
+  Database
 } from 'lucide-react';
 import {
   Table,
@@ -98,14 +101,12 @@ export default function AnalysisPage() {
   const [mounted, setMounted] = useState(false);
   const reportContainerRef = useRef<HTMLDivElement>(null);
   
-  // Selección y Borrado
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteMode, setDeleteMode] = useState<DeletionMode>('bulk');
 
-  // Estados para corrección manual
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState({
     disciplina: '',
@@ -133,7 +134,7 @@ export default function AnalysisPage() {
   };
 
   const formatDate = (dateStr?: string) => {
-    if (!dateStr || dateStr === 'Dato Faltante') return '—';
+    if (!dateStr || dateStr === 'Dato Faltante' || dateStr === '') return '—';
     try {
       const date = new Date(dateStr);
       if (isNaN(date.getTime())) return dateStr;
@@ -158,15 +159,6 @@ export default function AnalysisPage() {
       return matchesSearch && matchesStatus;
     }) || [];
   }, [orders, searchTerm, statusFilter]);
-
-  const totalSelectedImpact = useMemo(() => {
-    if (deleteMode === 'all') {
-      return filteredOrders.reduce((acc, curr) => acc + (curr.impactoNeto || 0), 0);
-    }
-    return filteredOrders
-      .filter(o => selectedIds.includes(o.id))
-      .reduce((acc, curr) => acc + (curr.impactoNeto || 0), 0);
-  }, [filteredOrders, selectedIds, deleteMode]);
 
   const handleToggleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -195,16 +187,13 @@ export default function AnalysisPage() {
       toast({ variant: "destructive", title: "Confirmación Inválida", description: "Escriba BORRAR para continuar." });
       return;
     }
-
     if (!db || !user) return;
     setIsDeleting(true);
     setShowDeleteConfirm(false);
-
     try {
       const idsToDelete = deleteMode === 'all' ? filteredOrders.map(o => o.id) : selectedIds;
       await executeDeletion(db, user, deleteMode, idsToDelete, { searchTerm, statusFilter });
-      
-      toast({ title: "Borrado Exitoso", description: `Se han eliminado los registros seleccionados.` });
+      toast({ title: "Borrado Exitoso", description: `Se han eliminado los registros.` });
       setSelectedIds([]);
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error al borrar", description: error.message });
@@ -224,37 +213,17 @@ export default function AnalysisPage() {
           causasVigentes: CAUSAS_CATALOGO
         }
       });
-
       if (db) {
-        const updateData = {
+        updateDocumentNonBlocking(doc(db, 'orders', order.id), {
           ...result,
           classification_status: 'auto',
           ai_model_version: 'gemini-2.5-flash-forensic',
           classified_at: new Date().toISOString()
-        };
-
-        updateDocumentNonBlocking(doc(db, 'orders', order.id), updateData);
-
-        const safeDisciplineId = result.disciplina_normalizada.replace(/\//g, '-');
-        const aggregateRef = doc(db, 'aggregates', 'global', 'disciplines_stats', safeDisciplineId);
-        
-        setDoc(aggregateRef, {
-          count: increment(1),
-          total_impact: increment(order.impactoNeto || 0),
-          last_updated: new Date().toISOString()
-        }, { merge: true });
+        });
       }
-
-      toast({
-        title: "Análisis Forense Finalizado",
-        description: `Clasificación: ${result.disciplina_normalizada} con trazabilidad explicable.`,
-      });
+      toast({ title: "Análisis Finalizado", description: `Clasificación: ${result.disciplina_normalizada}` });
     } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Fallo en Clasificación",
-        description: error.message || "No se pudo completar el análisis semántico.",
-      });
+      toast({ variant: "destructive", title: "Fallo en Clasificación", description: error.message });
     } finally {
       setIsAnalyzing(null);
     }
@@ -266,32 +235,10 @@ export default function AnalysisPage() {
     try {
       const report = await generateTraceabilityReport({ orderData: order });
       setReportResult(report);
-      toast({ title: "Informe Generado", description: "La trazabilidad semántica ha sido reconstruida exitosamente." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error de Informe", description: error.message });
     } finally {
       setIsGeneratingReport(false);
-    }
-  };
-
-  const handleDownloadReportPdf = async () => {
-    if (!reportContainerRef.current) return;
-    toast({ title: "Exportando PDF", description: "Preparando documento de alta fidelidad..." });
-    
-    try {
-      const element = reportContainerRef.current;
-      const canvas = await html2canvas(element, { scale: 2, useCORS: true });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgProps = pdf.getImageProperties(imgData);
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Informe_Forense_${reportResult?.header.projectId}_${reportResult?.header.orderId}.pdf`);
-      toast({ title: "Descarga Completa", description: "El informe corporativo ha sido guardado." });
-    } catch (error) {
-      toast({ variant: "destructive", title: "Error al descargar", description: "No se pudo generar el archivo PDF." });
     }
   };
 
@@ -302,10 +249,7 @@ export default function AnalysisPage() {
       needs_review: false,
       classified_at: new Date().toISOString()
     });
-    toast({
-      title: "Auditoría Validada",
-      description: `La clasificación para ${order.projectId} ha sido confirmada correctamente.`,
-    });
+    toast({ title: "Auditoría Validada" });
   };
 
   const handleStartEditing = (order: any) => {
@@ -328,10 +272,7 @@ export default function AnalysisPage() {
       classified_at: new Date().toISOString()
     });
     setIsEditing(false);
-    toast({
-      title: "Corrección Guardada",
-      description: "Se ha aplicado el override manual exitosamente.",
-    });
+    toast({ title: "Corrección Guardada" });
   };
 
   return (
@@ -343,27 +284,10 @@ export default function AnalysisPage() {
             <SidebarTrigger />
             <div className="flex items-center gap-2">
               <Microscope className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">Clasificación & Trazabilidad Forense</h1>
+              <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">Auditoría & Trazabilidad</h1>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {selectedIds.length > 0 && (
-              <div className="flex items-center gap-2 animate-in slide-in-from-right-5">
-                <Badge variant="secondary" className="bg-rose-50 text-rose-600 border-rose-100">
-                  {selectedIds.length} seleccionados
-                </Badge>
-                <Button 
-                  variant="destructive" 
-                  size="sm" 
-                  className="h-8 gap-2 bg-rose-600"
-                  onClick={() => handleOpenDelete('bulk')}
-                  disabled={isDeleting}
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Borrar Lote
-                </Button>
-              </div>
-            )}
-
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
               <Input
@@ -373,26 +297,14 @@ export default function AnalysisPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2 h-9">
-                  <Filter className="h-4 w-4" />
-                  {statusFilter.toUpperCase()}
-                </Button>
+                <Button variant="outline" size="sm" className="gap-2 h-9"><Filter className="h-4 w-4" /> FILTRO</Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => setStatusFilter('all')}>Todos</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatusFilter('processed')}>Automatizados</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatusFilter('review')}>Requiere Revisión</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatusFilter('pending')}>Pendientes</DropdownMenuItem>
-                <Separator />
-                <DropdownMenuItem 
-                  className="text-rose-600 font-bold gap-2"
-                  onClick={() => handleOpenDelete('all')}
-                >
-                  <Trash2 className="h-4 w-4" /> Borrar todo (Filtro)
-                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter('processed')}>Auditados</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter('review')}>Revisión Pendiente</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -404,17 +316,12 @@ export default function AnalysisPage() {
               <Table>
                 <TableHeader className="bg-slate-50/50">
                   <TableRow>
-                    <TableHead className="w-[40px]">
-                      <Checkbox 
-                        checked={selectedIds.length === filteredOrders.length && filteredOrders.length > 0}
-                        onCheckedChange={handleToggleSelectAll}
-                      />
-                    </TableHead>
-                    <TableHead>Estado IA</TableHead>
-                    <TableHead>PID / Proyecto</TableHead>
-                    <TableHead>Clasificación Forense</TableHead>
-                    <TableHead>Confianza</TableHead>
-                    <TableHead className="text-right">Monto Neto</TableHead>
+                    <TableHead className="w-[40px]"><Checkbox onCheckedChange={handleToggleSelectAll} /></TableHead>
+                    <TableHead>Estatus Doc</TableHead>
+                    <TableHead>PID / Origen</TableHead>
+                    <TableHead>Clasificación</TableHead>
+                    <TableHead>Integridad</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
                     <TableHead className="text-center">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -422,401 +329,183 @@ export default function AnalysisPage() {
                   {isLoading ? (
                     <TableRow><TableCell colSpan={7} className="text-center py-20"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
                   ) : filteredOrders.map((order) => (
-                    <TableRow key={order.id} className={`hover:bg-primary/5 group ${order.needs_review ? 'bg-rose-50/20' : ''} ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
+                    <TableRow key={order.id} className={`hover:bg-primary/5 group ${order.needs_review || !order.isSigned ? 'bg-rose-50/20' : ''}`}>
+                      <TableCell><Checkbox checked={selectedIds.includes(order.id)} onCheckedChange={(checked) => handleToggleSelect(order.id, !!checked)} /></TableCell>
                       <TableCell>
-                        <Checkbox 
-                          checked={selectedIds.includes(order.id)}
-                          onCheckedChange={(checked) => handleToggleSelect(order.id, !!checked)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {order.disciplina_normalizada ? (
-                          order.needs_review ? (
-                            <Badge variant="outline" className="text-rose-500 border-rose-200 bg-rose-50 gap-1 uppercase text-[9px]">
-                              <AlertTriangle className="h-3 w-3" /> Revisión
-                            </Badge>
+                        <div className="flex flex-col gap-1">
+                          {order.isSigned ? (
+                            <Badge className="bg-emerald-500 text-[8px] uppercase h-4 px-1.5"><Signature className="h-2 w-2 mr-1" /> Firmado</Badge>
                           ) : (
-                            <Badge className="bg-emerald-500 gap-1 uppercase text-[9px]">
-                              <CheckCircle2 className="h-3 w-3" /> Auto
-                            </Badge>
-                          )
-                        ) : (
-                          <Badge variant="outline" className="text-slate-300 uppercase text-[9px]">Pendiente</Badge>
-                        )}
+                            <Badge variant="destructive" className="text-[8px] uppercase h-4 px-1.5"><ShieldAlert className="h-2 w-2 mr-1" /> Sin Firma</Badge>
+                          )}
+                          <Badge variant="outline" className="text-[8px] uppercase h-4 px-1.5 bg-slate-100 text-slate-500 border-none">
+                            {order.dataSource === 'PDF_ORIGINAL' ? <FileText className="h-2 w-2 mr-1" /> : <Database className="h-2 w-2 mr-1" />}
+                            {order.dataSource?.replace('_ORIGINAL', '') || 'MANUAL'}
+                          </Badge>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
-                          <span className="font-bold text-primary">{order.projectId || "S/P"}</span>
-                          <span className="text-[10px] text-muted-foreground uppercase truncate max-w-[150px]">{order.projectName || "Sin Nombre"}</span>
+                          <span className="font-bold text-primary">{order.projectId}</span>
+                          <span className="text-[9px] text-muted-foreground uppercase truncate max-w-[120px]">{order.projectName}</span>
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
                            <span className="font-bold text-slate-700">{order.disciplina_normalizada || "—"}</span>
-                           <span className="text-[9px] text-slate-400 uppercase font-medium">{order.causa_raiz_normalizada || ""}</span>
+                           <span className="text-[9px] text-slate-400 uppercase">{order.causa_raiz_normalizada}</span>
                         </div>
                       </TableCell>
                       <TableCell>
-                         {order.confidence_score ? (
-                           <div className="flex items-center gap-2">
-                             <div className="w-16 h-1 bg-slate-100 rounded-full overflow-hidden">
-                               <div 
-                                 className={`h-full ${order.confidence_score > 0.8 ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                                 style={{ width: `${order.confidence_score * 100}%` }}
-                               />
-                             </div>
-                             <span className="text-[10px] font-black text-slate-500">{Math.round(order.confidence_score * 100)}%</span>
+                         <div className="flex items-center gap-2">
+                           <div className="w-12 h-1 bg-slate-100 rounded-full">
+                             <div 
+                               className={`h-full rounded-full ${order.ingestionCompleteness > 80 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                               style={{ width: `${order.ingestionCompleteness || 0}%` }}
+                             />
                            </div>
-                         ) : "—"}
+                           <span className="text-[9px] font-black text-slate-500">{order.ingestionCompleteness || 0}%</span>
+                         </div>
                       </TableCell>
-                      <TableCell className="text-right font-black text-slate-800">
-                        ${formatAmount(order.impactoNeto || 0)}
-                      </TableCell>
+                      <TableCell className="text-right font-black text-slate-800">${formatAmount(order.impactoNeto || 0)}</TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1">
-                          {order.disciplina_normalizada ? (
-                            <Dialog onOpenChange={(open) => {
-                              if (!open) {
-                                setIsEditing(false);
-                                setReportResult(null);
-                              }
-                            }}>
-                              <DialogTrigger asChild>
-                                <Button variant="ghost" size="sm" className="text-primary gap-1 group-hover:bg-primary group-hover:text-white transition-all rounded-lg">
-                                  <FileSearch className="h-4 w-4" />
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="w-[95vw] md:max-w-6xl max-h-[95vh] overflow-hidden flex flex-col rounded-3xl p-0 shadow-2xl">
-                                <header className="bg-slate-900 text-white p-4 md:p-6 shrink-0 flex items-center justify-between">
-                                  <div className="space-y-0.5">
-                                    <Badge variant="outline" className="bg-white/10 text-white border-white/20 uppercase text-[8px] font-black tracking-widest">
-                                      Analítica Forense Walmart
-                                    </Badge>
-                                    <DialogTitle className="text-xl md:text-2xl font-headline font-bold leading-tight">
-                                      Trazabilidad: {order.projectId}
-                                    </DialogTitle>
-                                    <DialogDescription className="text-slate-400 text-xs font-medium">
-                                      {order.projectName} | ID Interno: {order.id}
-                                    </DialogDescription>
+                          <Dialog onOpenChange={(open) => { if (!open) { setIsEditing(false); setReportResult(null); } }}>
+                            <DialogTrigger asChild>
+                              <Button variant="ghost" size="sm" className="text-primary hover:bg-primary/10 rounded-lg"><FileSearch className="h-4 w-4" /></Button>
+                            </DialogTrigger>
+                            <DialogContent className="w-[95vw] md:max-w-6xl max-h-[95vh] overflow-hidden flex flex-col p-0 shadow-2xl rounded-3xl">
+                              <header className="bg-slate-900 text-white p-5 shrink-0 flex items-center justify-between">
+                                <div className="space-y-0.5">
+                                  <Badge className="bg-white/10 text-white border-white/20 uppercase text-[8px] font-black">Auditoría Walmart Forensic</Badge>
+                                  <DialogTitle className="text-xl font-headline font-bold uppercase tracking-tight">Ficha de Trazabilidad: {order.projectId}</DialogTitle>
+                                  <DialogDescription className="text-slate-400 text-[10px]">{order.projectName} | Origen: {order.dataSource}</DialogDescription>
+                                </div>
+                                <div className="flex gap-2">
+                                  {!reportResult && <Button onClick={() => handleGenerateReport(order)} disabled={isGeneratingReport} className="bg-primary hover:bg-primary/90 h-8 text-[9px] font-black uppercase px-4 rounded-xl shadow-lg">{isGeneratingReport ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />} Generar Informe</Button>}
+                                </div>
+                              </header>
+
+                              <ScrollArea className="flex-1 bg-slate-50">
+                                <div className="p-6 space-y-6 max-w-4xl mx-auto pb-24">
+                                  {/* Cabecera de Integridad */}
+                                  <div className="grid md:grid-cols-3 gap-4">
+                                    <Card className={`p-4 border-none shadow-sm ${order.isSigned ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                                      <p className="text-[8px] font-black uppercase mb-1">Estatus Documental</p>
+                                      <div className="flex items-center gap-2">
+                                        <Signature className="h-4 w-4" />
+                                        <span className="text-xs font-bold">{order.isSigned ? 'FIRMADO Y VALIDADO' : 'COPIA NO FIRMADA'}</span>
+                                      </div>
+                                    </Card>
+                                    <Card className="p-4 border-none shadow-sm bg-white">
+                                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Completitud de Ingesta</p>
+                                      <div className="flex items-center gap-2">
+                                        <Activity className="h-4 w-4 text-primary" />
+                                        <span className="text-xs font-bold text-slate-800">{order.ingestionCompleteness}% de Campos Críticos</span>
+                                      </div>
+                                    </Card>
+                                    <Card className="p-4 border-none shadow-sm bg-white">
+                                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Impacto Financiero</p>
+                                      <div className="flex items-center gap-2">
+                                        <Target className="h-4 w-4 text-primary" />
+                                        <span className="text-xs font-bold text-slate-800">${formatAmount(order.impactoNeto)} MXN</span>
+                                      </div>
+                                    </Card>
                                   </div>
-                                  <div className="flex gap-2">
-                                    {!reportResult && (
-                                      <Button 
-                                        onClick={() => handleGenerateReport(order)} 
-                                        disabled={isGeneratingReport}
-                                        className="bg-primary hover:bg-primary/90 gap-1.5 font-black uppercase text-[9px] tracking-widest h-9 px-3 md:px-5 rounded-xl shadow-lg shadow-primary/20"
-                                      >
-                                        {isGeneratingReport ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                                        {isGeneratingReport ? "Generando..." : "Informe Forense"}
-                                      </Button>
-                                    )}
-                                    {reportResult && (
-                                      <Button 
-                                        variant="outline" 
-                                        onClick={handleDownloadReportPdf}
-                                        className="bg-white/10 text-white border-white/20 hover:bg-white/20 gap-1.5 font-black uppercase text-[9px] tracking-widest h-9 px-3 md:px-5 rounded-xl"
-                                      >
-                                        <FileDown className="h-3.5 w-3.5" /> Exportar PDF
-                                      </Button>
-                                    )}
-                                  </div>
-                                </header>
 
-                                <ScrollArea className="flex-1 bg-slate-50">
-                                  {reportResult ? (
-                                    <div ref={reportContainerRef} className="p-6 md:p-8 space-y-8 bg-white min-h-screen max-w-[900px] mx-auto shadow-2xl my-4 rounded-2xl border pb-24">
-                                      <section className="space-y-4">
-                                        <div className="flex justify-between items-start border-b-2 border-slate-900 pb-3">
-                                          <div>
-                                            <h4 className="text-xl font-black text-slate-900 uppercase">{reportResult.header.title}</h4>
-                                            <p className="text-[10px] text-slate-500 font-bold">FOLIO: {reportResult.header.orderId} | ESTATUS: {reportResult.header.status}</p>
-                                          </div>
-                                          <Badge variant={reportResult.executiveSummary.currentRisk === 'P0' ? 'destructive' : 'default'} className="uppercase text-[10px]">
-                                            Prioridad {reportResult.executiveSummary.currentRisk}
-                                          </Badge>
+                                  <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                                    <h4 className="text-[9px] font-black uppercase text-primary tracking-widest mb-4 flex items-center gap-1.5"><Clock className="h-4 w-4" /> Línea de Vida Forense</h4>
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
+                                      {['Detección', 'Solicitud', 'Aprobación', 'Ejecución', 'Cierre'].map((label, i) => (
+                                        <div key={label} className={`space-y-0.5 ${i > 0 ? 'border-l' : ''}`}>
+                                          <p className="text-[8px] font-black text-slate-400 uppercase">{label}</p>
+                                          <p className="text-[10px] font-bold text-slate-700">
+                                            {formatDate(order[`fecha${label}`] || order[label.toLowerCase() + 'Date'])}
+                                          </p>
                                         </div>
-                                        
-                                        <div className="grid md:grid-cols-3 gap-6">
-                                          <div className="md:col-span-2 space-y-3">
-                                            <p className="text-[9px] font-black text-primary uppercase tracking-widest">Resumen Ejecutivo</p>
-                                            <p className="text-xs text-slate-700 leading-relaxed font-medium">{reportResult.executiveSummary.overview}</p>
-                                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 italic text-[11px] text-slate-600">
-                                              Impacto Estimado: {reportResult.executiveSummary.economicImpact}
-                                            </div>
-                                          </div>
-                                          <div className="bg-slate-900 p-4 rounded-2xl text-white">
-                                            <p className="text-[8px] font-black text-slate-400 uppercase mb-2">Riesgo Semántico</p>
-                                            <div className="space-y-3">
-                                              {Object.entries(reportResult.riskIndex).map(([key, val]) => (
-                                                <div key={key} className="space-y-1">
-                                                  <div className="flex justify-between text-[9px] uppercase font-bold">
-                                                    <span>{key}</span>
-                                                    <span>{val}%</span>
-                                                  </div>
-                                                  <Progress value={val} className="h-1 bg-white/10" />
-                                                </div>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </section>
-
-                                      <Separator />
-
-                                      <section className="space-y-4">
-                                        <h4 className="text-[9px] font-black text-primary uppercase tracking-widest flex items-center gap-1.5">
-                                          <Clock className="h-3.5 w-3.5" /> Línea de Tiempo Forense
-                                        </h4>
-                                        <div className="space-y-0 relative">
-                                          <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-slate-100" />
-                                          {reportResult.forensicTimeline.map((item, i) => (
-                                            <div key={i} className="flex gap-4 pb-6 relative group">
-                                              <div className="h-3.5 w-3.5 rounded-full bg-white border-2 border-primary z-10 shrink-0 group-hover:scale-110 transition-transform" />
-                                              <div className="space-y-0.5">
-                                                <p className="text-[9px] font-black text-slate-400 uppercase">{item.date}</p>
-                                                <p className="text-xs font-bold text-slate-800">{item.event}</p>
-                                                <p className="text-[9px] text-slate-500 italic">{item.evidence}</p>
-                                                {item.gapDays && item.gapDays > 0 && (
-                                                  <Badge variant="secondary" className="bg-slate-100 text-[8px] font-black text-slate-500 uppercase mt-1">
-                                                    Brecha: {item.gapDays} días
-                                                  </Badge>
-                                                )}
-                                              </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </section>
+                                      ))}
                                     </div>
-                                  ) : (
-                                    <div className="p-4 md:p-6 space-y-6 pb-24">
-                                      {/* Cronología y Fechas Clave */}
-                                      <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                                        <h4 className="text-[9px] font-black uppercase text-primary tracking-[0.15em] mb-4 flex items-center gap-1.5">
-                                          <CalendarDays className="h-4 w-4" /> Línea de Vida de la Incidencia
-                                        </h4>
-                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                                          <div className="space-y-0.5 text-center">
-                                            <p className="text-[8px] font-black text-slate-400 uppercase">Detección</p>
-                                            <p className="text-xs font-bold text-slate-700">{formatDate(order.fechaDeteccion)}</p>
-                                          </div>
-                                          <div className="space-y-0.5 text-center border-l border-slate-100">
-                                            <p className="text-[8px] font-black text-slate-400 uppercase">Solicitud</p>
-                                            <p className="text-xs font-bold text-primary">{formatDate(order.fechaSolicitud)}</p>
-                                          </div>
-                                          <div className="space-y-0.5 text-center border-l border-slate-100">
-                                            <p className="text-[8px] font-black text-slate-400 uppercase">Aprobación</p>
-                                            <p className="text-xs font-bold text-slate-700">{formatDate(order.fechaAprobacion)}</p>
-                                          </div>
-                                          <div className="space-y-0.5 text-center border-l border-slate-100">
-                                            <p className="text-[8px] font-black text-slate-400 uppercase">Ejecución</p>
-                                            <p className="text-xs font-bold text-slate-700">{formatDate(order.fechaEjecucion)}</p>
-                                          </div>
-                                          <div className="space-y-0.5 text-center border-l border-slate-100">
-                                            <p className="text-[8px] font-black text-slate-400 uppercase">Cierre</p>
-                                            <p className="text-xs font-bold text-slate-700">{formatDate(order.fechaCierre)}</p>
-                                          </div>
-                                        </div>
-                                      </section>
+                                  </section>
 
-                                      {/* Evidencia Documental (Fragments) */}
-                                      {order.pdfEvidenceFragments && order.pdfEvidenceFragments.length > 0 && (
-                                        <section className="space-y-3">
-                                          <h4 className="text-[9px] font-black uppercase text-primary tracking-[0.15em] flex items-center gap-1.5">
-                                            <FileText className="h-4 w-4" /> Evidencia Documental (OCR Forensic)
-                                          </h4>
-                                          <div className="grid gap-3">
-                                            {order.pdfEvidenceFragments.map((frag: any, i: number) => (
-                                              <Card key={i} className="p-4 border-none bg-primary/5 rounded-xl relative group hover:bg-primary/10 transition-all">
-                                                <div className="flex justify-between items-start mb-2">
-                                                  <Badge variant="outline" className="text-[8px] uppercase font-bold text-primary/60 border-primary/10">
-                                                    <MapPin className="h-3 w-3 mr-1" /> Sección: {frag.section}
-                                                  </Badge>
-                                                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Pág. {frag.page}</span>
-                                                </div>
-                                                <p className="text-[11px] text-slate-700 font-medium leading-relaxed italic border-l-2 border-primary/20 pl-3">
-                                                  "{frag.text}"
-                                                </p>
-                                              </Card>
-                                            ))}
+                                  <section className="space-y-3">
+                                    <h4 className="text-[9px] font-black uppercase text-primary tracking-widest flex items-center gap-1.5"><FileText className="h-4 w-4" /> Evidencia Documental (OCR Forensic)</h4>
+                                    <div className="grid gap-2">
+                                      {order.pdfEvidenceFragments?.map((frag: any, i: number) => (
+                                        <Card key={i} className="p-3 border-none bg-primary/5 rounded-xl hover:bg-primary/10 transition-all group">
+                                          <div className="flex justify-between items-center mb-1">
+                                            <Badge variant="outline" className="text-[7px] uppercase font-bold text-primary/60">Sección: {frag.section}</Badge>
+                                            <span className="text-[7px] font-black text-slate-400 uppercase">Pág. {frag.page}</span>
                                           </div>
-                                        </section>
+                                          <p className="text-[10px] text-slate-700 italic font-medium leading-relaxed">"{frag.text}"</p>
+                                        </Card>
+                                      ))}
+                                      {(!order.pdfEvidenceFragments || order.pdfEvidenceFragments.length === 0) && (
+                                        <div className="text-center py-4 bg-slate-50 border border-dashed rounded-xl">
+                                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sin evidencia documental mapeada</p>
+                                        </div>
                                       )}
+                                    </div>
+                                  </section>
 
-                                      <section>
-                                        <h4 className="text-[9px] font-black uppercase text-slate-400 tracking-[0.15em] mb-2 flex items-center gap-1.5">
-                                          <BookOpenCheck className="h-3.5 w-3.5 text-primary" /> Descripción Original
-                                        </h4>
-                                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 italic text-slate-700 text-[11px] leading-relaxed">
-                                          "{order.descripcion_original || order.descripcion}"
-                                        </div>
-                                      </section>
-
-                                      <div className="grid md:grid-cols-2 gap-5">
-                                        <Card className="p-5 border-none bg-slate-900 text-white rounded-2xl shadow-xl overflow-hidden relative">
-                                          <div className="absolute top-0 right-0 p-3 opacity-10">
-                                            <Fingerprint className="h-16 w-16" />
-                                          </div>
-                                          <h4 className="text-[8px] font-black uppercase text-slate-400 mb-4 flex items-center gap-1.5">
-                                            <SearchCode className="h-3.5 w-3.5 text-accent" /> Razonamiento Forense Gemini
-                                          </h4>
-                                          <p className="text-[11px] font-medium leading-relaxed mb-6">
-                                            {order.rationale_tecnico || "Análisis automatizado basado en taxonomía MEP."}
-                                          </p>
-                                          <div className="space-y-3">
-                                            <div>
-                                              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2">Términos de Evidencia</p>
-                                              <div className="flex flex-wrap gap-1.5">
-                                                {order.evidence_terms?.map((term: string, i: number) => (
-                                                  <Badge key={i} variant="secondary" className="bg-white/10 text-white border-none text-[8px] font-bold px-2 py-0.5">
-                                                    {term}
-                                                  </Badge>
-                                                ))}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </Card>
-
-                                        <Card className="p-5 border-none bg-white rounded-2xl shadow-sm border border-slate-100">
-                                          <h4 className="text-[8px] font-black uppercase text-primary mb-4 flex items-center gap-1.5 tracking-widest">
-                                            <Microscope className="h-3.5 w-3.5" /> Lógica de Clasificación
-                                          </h4>
-                                          <div className="space-y-4">
-                                            <div className="space-y-0.5">
-                                              <p className="text-[8px] font-black text-slate-400 uppercase">Criterio Aplicado</p>
-                                              <p className="text-[11px] font-bold text-slate-800">{order.logica_clasificacion?.criterio_aplicado || "Inferencia Semántica"}</p>
-                                            </div>
-                                            <div className="space-y-0.5">
-                                              <p className="text-[8px] font-black text-slate-400 uppercase">Taxonomía Nivel 3</p>
-                                              <p className="text-[11px] font-bold text-slate-800">{order.detalle_nivel_3 || "No determinado"}</p>
-                                            </div>
-                                            <Separator className="bg-slate-50" />
-                                            <div className="space-y-1">
-                                              <p className="text-[8px] font-black text-slate-400 uppercase flex items-center gap-1">
-                                                <AlertTriangle className="h-3 w-3 text-rose-500" /> Ambigüedades
-                                              </p>
-                                              <p className="text-[10px] text-slate-500 italic leading-relaxed">
-                                                {order.logica_clasificacion?.posibles_ambiguedades || "Ninguna detectada."}
-                                              </p>
-                                            </div>
-                                          </div>
-                                        </Card>
+                                  <div className="grid md:grid-cols-2 gap-4">
+                                    <Card className="p-5 border-none bg-slate-900 text-white rounded-2xl relative shadow-xl overflow-hidden">
+                                      <Fingerprint className="absolute top-2 right-2 h-12 w-12 opacity-10" />
+                                      <h4 className="text-[8px] font-black uppercase text-slate-400 mb-3 flex items-center gap-1.5"><SearchCode className="h-3 w-3 text-accent" /> Razonamiento Forense Gemini</h4>
+                                      <p className="text-[11px] font-medium leading-relaxed mb-4">{order.rationale_tecnico || "Análisis automatizado basado en contexto estructural."}</p>
+                                      <div className="flex flex-wrap gap-1">
+                                        {order.evidence_terms?.map((term: string) => <Badge key={term} className="bg-white/10 text-white border-none text-[8px] font-bold">{term}</Badge>)}
                                       </div>
+                                    </Card>
 
-                                      <div className="flex flex-col md:flex-row items-center justify-between pt-6 gap-4 border-t mt-2">
-                                        <div className="flex items-center gap-5">
-                                          <div className="text-center">
-                                            <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Confianza</p>
-                                            <span className={`text-xl font-headline font-bold ${order.confidence_score > 0.8 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                              {Math.round(order.confidence_score * 100)}%
-                                            </span>
-                                          </div>
-                                          <Separator orientation="vertical" className="h-10" />
-                                          <div className="text-center">
-                                            <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Impacto</p>
-                                            <span className="text-lg font-headline font-bold text-slate-800">${formatAmount(order.impactoNeto || 0)}</span>
-                                          </div>
+                                    <Card className="p-5 border-none bg-white rounded-2xl border border-slate-100 shadow-sm">
+                                      <h4 className="text-[8px] font-black uppercase text-primary mb-3 flex items-center gap-1.5"><Microscope className="h-3 w-3" /> Log de Procesamiento</h4>
+                                      <div className="space-y-3 text-[10px]">
+                                        <div className="flex justify-between border-b pb-1">
+                                          <span className="text-slate-400 uppercase font-bold">Confianza IA</span>
+                                          <span className="font-bold text-slate-800">{Math.round(order.confidence_score * 100)}%</span>
                                         </div>
-                                        <div className="flex gap-2 w-full md:w-auto">
-                                          <Button variant="outline" onClick={() => handleStartEditing(order)} className="flex-1 md:flex-none rounded-lg px-5 h-10 text-[9px] font-black uppercase tracking-widest border-2">
-                                            Corregir
-                                          </Button>
-                                          <Button onClick={() => handleValidateAudit(order)} className="flex-1 md:flex-none rounded-lg px-6 h-10 text-[9px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
-                                            Validar
-                                          </Button>
+                                        <div className="flex justify-between border-b pb-1">
+                                          <span className="text-slate-400 uppercase font-bold">ID Ingesta</span>
+                                          <span className="font-bold text-slate-800">#{order.id.slice(-8).toUpperCase()}</span>
                                         </div>
+                                        <div className="flex justify-between border-b pb-1">
+                                          <span className="text-slate-400 uppercase font-bold">Fecha de Audit</span>
+                                          <span className="font-bold text-slate-800">{formatDate(order.processedAt || order.classified_at)}</span>
+                                        </div>
+                                      </div>
+                                    </Card>
+                                  </div>
+
+                                  <div className="flex items-center justify-between pt-6 border-t mt-4">
+                                    <div className="flex items-center gap-4">
+                                      <div className="text-center">
+                                        <p className="text-[7px] font-black text-slate-400 uppercase">Audit Status</p>
+                                        <Badge variant={order.needs_review ? "destructive" : "default"} className="text-[9px] uppercase">{order.classification_status || 'AUTO'}</Badge>
                                       </div>
                                     </div>
-                                  )}
-                                </ScrollArea>
-
-                                {isEditing && (
-                                  <div className="absolute inset-0 bg-white z-20 p-6 md:p-8 animate-in slide-in-from-bottom-10 overflow-y-auto">
-                                    <div className="max-w-4xl mx-auto space-y-8 pb-20">
-                                      <div className="flex justify-between items-center">
-                                        <h3 className="text-xl font-headline font-bold text-slate-900">Sobreescritura Manual</h3>
-                                        <Button variant="ghost" size="icon" onClick={() => setIsEditing(false)} className="rounded-full">
-                                          <X className="h-5 w-5" />
-                                        </Button>
-                                      </div>
-                                      <div className="grid md:grid-cols-2 gap-8">
-                                        <div className="space-y-4">
-                                          <div className="space-y-1.5">
-                                            <Label className="text-[9px] font-black uppercase text-slate-400">Disciplina Técnica</Label>
-                                            <Select value={editValues.disciplina} onValueChange={(v) => setEditValues({...editValues, disciplina: v})}>
-                                              <SelectTrigger className="h-10 rounded-xl text-xs font-bold">
-                                                <SelectValue placeholder="Seleccionar Disciplina" />
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                {DISCIPLINAS_CATALOGO.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                                              </SelectContent>
-                                            </Select>
-                                          </div>
-                                          <div className="space-y-1.5">
-                                            <Label className="text-[9px] font-black uppercase text-slate-400">Causa Raíz</Label>
-                                            <Select value={editValues.causa} onValueChange={(v) => setEditValues({...editValues, causa: v})}>
-                                              <SelectTrigger className="h-10 rounded-xl text-xs font-bold">
-                                                <SelectValue placeholder="Seleccionar Causa" />
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                {CAUSAS_CATALOGO.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                                              </SelectContent>
-                                            </Select>
-                                          </div>
-                                          <div className="space-y-1.5">
-                                            <Label className="text-[9px] font-black uppercase text-slate-400">Subcausa / Detalle</Label>
-                                            <Input 
-                                              value={editValues.subcausa} 
-                                              onChange={(e) => setEditValues({...editValues, subcausa: e.target.value})}
-                                              className="h-10 rounded-xl font-bold text-xs"
-                                              placeholder="Especifique el detalle técnico..."
-                                            />
-                                          </div>
-                                        </div>
-                                        <div className="bg-slate-50 p-6 rounded-2xl border border-dashed border-slate-200">
-                                          <h4 className="text-[9px] font-black uppercase text-slate-400 mb-4 flex items-center gap-1.5">
-                                            <ShieldAlert className="h-3.5 w-3.5" /> Notas de Gobernanza
-                                          </h4>
-                                          <p className="text-xs text-slate-500 leading-relaxed italic mb-4">
-                                            "Al aplicar una corrección manual, el registro se marcará como **'Overridden'**. La IA aprenderá de esta decisión."
-                                          </p>
-                                          <div className="flex items-center gap-1.5 text-rose-500">
-                                            <AlertTriangle className="h-3.5 w-3.5" />
-                                            <span className="text-[9px] font-black uppercase tracking-widest">Esta acción es permanente</span>
-                                          </div>
-                                        </div>
-                                      </div>
-                                      <div className="flex justify-end gap-3 pt-8 border-t">
-                                        <Button variant="ghost" onClick={() => setIsEditing(false)} className="rounded-lg px-8 h-10 text-[9px] font-black uppercase tracking-widest border-2">
-                                          Descartar
-                                        </Button>
-                                        <Button onClick={() => handleSaveManualOverride(order.id)} className="rounded-lg px-10 h-10 text-[9px] font-black uppercase tracking-widest shadow-xl shadow-primary/20 bg-primary">
-                                          <Save className="h-3.5 w-3.5 mr-1.5" /> Aplicar Cambio
-                                        </Button>
-                                      </div>
+                                    <div className="flex gap-2">
+                                      <Button variant="outline" onClick={() => handleStartEditing(order)} className="rounded-xl px-6 h-9 text-[9px] font-black uppercase border-2 tracking-widest">Corregir</Button>
+                                      <Button onClick={() => handleValidateAudit(order)} className="rounded-xl px-8 h-9 text-[9px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">Validar</Button>
                                     </div>
                                   </div>
-                                )}
-                              </DialogContent>
-                            </Dialog>
-                          ) : (
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              onClick={() => processSingleOrder(order)} 
-                              disabled={isAnalyzing === order.id}
-                              className="text-primary hover:bg-primary/10 rounded-lg"
-                            >
-                              {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                            </Button>
-                          )}
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="text-slate-400 hover:text-rose-600 rounded-lg"
-                            onClick={() => { setSelectedIds([order.id]); handleOpenDelete('single'); }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                                </div>
+                              </ScrollArea>
+
+                              {isEditing && (
+                                <div className="absolute inset-0 bg-white z-20 p-8 animate-in slide-in-from-bottom-5">
+                                  <div className="max-w-2xl mx-auto space-y-6">
+                                    <h3 className="text-xl font-headline font-bold text-slate-900 flex items-center gap-3"><ShieldAlert className="h-6 w-6 text-rose-500" /> Override de Clasificación</h3>
+                                    <div className="space-y-4">
+                                      <div className="space-y-1.5"><Label className="text-[9px] font-black uppercase text-slate-400">Disciplina</Label><Select value={editValues.disciplina} onValueChange={(v) => setEditValues({...editValues, disciplina: v})}><SelectTrigger className="h-10 rounded-xl font-bold text-xs"><SelectValue placeholder="Disciplina" /></SelectTrigger><SelectContent>{DISCIPLINAS_CATALOGO.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent></Select></div>
+                                      <div className="space-y-1.5"><Label className="text-[9px] font-black uppercase text-slate-400">Causa Raíz</Label><Select value={editValues.causa} onValueChange={(v) => setEditValues({...editValues, causa: v})}><SelectTrigger className="h-10 rounded-xl font-bold text-xs"><SelectValue placeholder="Causa" /></SelectTrigger><SelectContent>{CAUSAS_CATALOGO.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div>
+                                    </div>
+                                    <div className="flex justify-end gap-3 pt-6 border-t mt-8"><Button variant="ghost" onClick={() => setIsEditing(false)} className="rounded-xl px-8 uppercase text-[9px] font-black">Cancelar</Button><Button onClick={() => handleSaveManualOverride(order.id)} className="rounded-xl px-10 uppercase text-[9px] font-black bg-primary">Guardar Override</Button></div>
+                                  </div>
+                                </div>
+                              )}
+                            </DialogContent>
+                          </Dialog>
+                          <Button variant="ghost" size="sm" className="text-rose-600 hover:bg-rose-50 rounded-lg" onClick={() => { setSelectedIds([order.id]); handleOpenDelete('single'); }}><Trash2 className="h-4 w-4" /></Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -826,61 +515,6 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
         </main>
-
-        {/* Modal de Confirmación de Borrado */}
-        <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-          <DialogContent className="max-w-md rounded-3xl p-8">
-            <DialogHeader>
-              <DialogTitle className="text-2xl font-headline font-bold text-slate-900 flex items-center gap-3">
-                <ShieldAlert className="h-8 w-8 text-rose-600" /> Confirmación Forense
-              </DialogTitle>
-              <DialogDescription className="pt-4 text-slate-600">
-                Está a punto de realizar una eliminación definitiva de <strong>{deleteMode === 'all' ? filteredOrders.length : selectedIds.length}</strong> registros. 
-                Esta acción es irreversible y quedará registrada en los audit logs del sistema.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100 space-y-3 my-4">
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-rose-900 uppercase">Impacto Financiero Eliminado:</span>
-                <span className="font-black text-rose-700">${formatAmount(totalSelectedImpact)}</span>
-              </div>
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-rose-900 uppercase">Acción:</span>
-                <Badge variant="outline" className="text-rose-600 border-rose-200 uppercase text-[9px]">
-                  {deleteMode === 'all' ? 'Limpieza por Filtro' : 'Borrado por Lote'}
-                </Badge>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
-                Escriba "BORRAR" para confirmar
-              </Label>
-              <Input 
-                value={deleteConfirmText}
-                onChange={(e) => setDeleteConfirmText(e.target.value.toUpperCase())}
-                placeholder="Escriba aquí..."
-                className="h-12 rounded-xl text-center font-black tracking-[0.3em] uppercase"
-              />
-            </div>
-
-            <DialogFooter className="gap-2 pt-6">
-              <Button variant="ghost" onClick={() => setShowDeleteConfirm(false)} className="rounded-xl px-6 h-11 text-[10px] font-black uppercase tracking-widest">
-                Cancelar
-              </Button>
-              <Button 
-                variant="destructive" 
-                onClick={processDelete} 
-                disabled={deleteConfirmText !== 'BORRAR' || isDeleting}
-                className="rounded-xl px-8 h-11 text-[10px] font-black uppercase tracking-widest bg-rose-600 shadow-lg shadow-rose-200"
-              >
-                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
-                Confirmar Borrado
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </SidebarInset>
     </div>
   );
