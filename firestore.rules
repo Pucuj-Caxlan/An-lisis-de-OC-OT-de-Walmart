@@ -26,5 +26,28 @@ service cloud.firestore {
       allow get: if isSignedIn() && isOwner(userId);
       allow create, update, delete: if isSignedIn() && isOwner(userId);
     }
+
+    match /taxonomy_disciplines/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /taxonomy_rootcauses/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /classification_overrides/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /aggregates/{scope}/disciplines_stats/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Regla comodín para subcolecciones de agregados si fuera necesario
+    match /aggregates/{document=**} {
+      allow read, write: if isSignedIn();
+    }
   }
 }
