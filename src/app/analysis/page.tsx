@@ -32,7 +32,11 @@ import {
   Download,
   ShieldQuestion,
   Target,
-  FileDown
+  FileDown,
+  History,
+  CalendarDays,
+  MapPin,
+  ExternalLink
 } from 'lucide-react';
 import {
   Table,
@@ -126,6 +130,17 @@ export default function AnalysisPage() {
       minimumFractionDigits: 2, 
       maximumFractionDigits: 2 
     }).format(amount);
+  };
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr || dateStr === 'Dato Faltante') return '—';
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr;
+      return date.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
   };
 
   const filteredOrders = useMemo(() => {
@@ -384,20 +399,6 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6">
-          {isDeleting && (
-            <div className="mb-6 animate-in fade-in slide-in-from-top-4">
-              <Card className="border-rose-200 bg-rose-50/50 shadow-sm">
-                <CardContent className="p-4 flex items-center gap-4">
-                  <Loader2 className="h-5 w-5 animate-spin text-rose-600" />
-                  <div className="flex-1 space-y-1">
-                    <p className="text-xs font-black text-rose-900 uppercase">Eliminando registros en la nube...</p>
-                    <Progress value={50} className="h-1.5 bg-rose-100" />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
           <Card className="border-none shadow-sm overflow-hidden bg-white rounded-2xl">
             <CardContent className="p-0">
               <Table>
@@ -485,7 +486,7 @@ export default function AnalysisPage() {
                                   <FileSearch className="h-4 w-4" />
                                 </Button>
                               </DialogTrigger>
-                              <DialogContent className="w-[95vw] md:max-w-5xl max-h-[95vh] overflow-hidden flex flex-col rounded-3xl p-0 shadow-2xl">
+                              <DialogContent className="w-[95vw] md:max-w-6xl max-h-[95vh] overflow-hidden flex flex-col rounded-3xl p-0 shadow-2xl">
                                 <header className="bg-slate-900 text-white p-6 md:p-8 shrink-0 flex items-center justify-between">
                                   <div className="space-y-1">
                                     <Badge variant="outline" className="bg-white/10 text-white border-white/20 uppercase text-[9px] font-black tracking-widest">
@@ -524,7 +525,7 @@ export default function AnalysisPage() {
                                 <ScrollArea className="flex-1 bg-slate-50">
                                   {reportResult ? (
                                     <div ref={reportContainerRef} className="p-6 md:p-10 space-y-12 bg-white min-h-screen max-w-[900px] mx-auto shadow-2xl my-4 md:my-8 rounded-2xl border pb-24">
-                                      {/* Informe Foresne UI */}
+                                      {/* Contenido del Reporte PDF ya existente */}
                                       <section className="space-y-6">
                                         <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4">
                                           <div>
@@ -586,54 +587,65 @@ export default function AnalysisPage() {
                                           ))}
                                         </div>
                                       </section>
-
-                                      <section className="space-y-6">
-                                        <h4 className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
-                                          <Target className="h-4 w-4" /> Inteligencia Sistémica
+                                    </div>
+                                  ) : (
+                                    <div className="p-6 md:p-10 space-y-10 pb-24">
+                                      {/* Cronología y Fechas Clave */}
+                                      <section className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
+                                        <h4 className="text-[10px] font-black uppercase text-primary tracking-[0.2em] mb-6 flex items-center gap-2">
+                                          <CalendarDays className="h-5 w-5" /> Línea de Vida de la Incidencia
                                         </h4>
-                                        <div className="grid md:grid-cols-2 gap-6">
-                                          <Card className="p-6 border-none bg-slate-50 rounded-2xl">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-3">Patrones Recurrentes</p>
-                                            <p className="text-xs text-slate-700 leading-relaxed font-medium">{reportResult.deepAnalysis.recurrentPatterns}</p>
-                                          </Card>
-                                          <Card className="p-6 border-none bg-slate-50 rounded-2xl">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-3">Acciones Recomendadas</p>
-                                            <div className="space-y-3">
-                                              {reportResult.recommendations.map((rec, i) => (
-                                                <div key={i} className="flex gap-3 items-start">
-                                                  <ArrowRight className="h-3 w-3 text-primary mt-1 shrink-0" />
-                                                  <div className="space-y-0.5">
-                                                    <p className="text-[10px] font-black text-slate-800 uppercase leading-none">{rec.action}</p>
-                                                    <p className="text-[9px] text-slate-400 font-bold uppercase">{rec.owner} | {rec.type}</p>
-                                                  </div>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          </Card>
+                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
+                                          <div className="space-y-1 text-center">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase">Detección</p>
+                                            <p className="text-sm font-bold text-slate-700">{formatDate(order.fechaDeteccion)}</p>
+                                          </div>
+                                          <div className="space-y-1 text-center border-l border-slate-100">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase">Solicitud</p>
+                                            <p className="text-sm font-bold text-primary">{formatDate(order.fechaSolicitud)}</p>
+                                          </div>
+                                          <div className="space-y-1 text-center border-l border-slate-100">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase">Aprobación</p>
+                                            <p className="text-sm font-bold text-slate-700">{formatDate(order.fechaAprobacion)}</p>
+                                          </div>
+                                          <div className="space-y-1 text-center border-l border-slate-100">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase">Ejecución</p>
+                                            <p className="text-sm font-bold text-slate-700">{formatDate(order.fechaEjecucion)}</p>
+                                          </div>
+                                          <div className="space-y-1 text-center border-l border-slate-100">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase">Cierre</p>
+                                            <p className="text-sm font-bold text-slate-700">{formatDate(order.fechaCierre)}</p>
+                                          </div>
                                         </div>
                                       </section>
 
-                                      {reportResult.missingData.length > 0 && (
-                                        <section className="bg-rose-50 p-6 rounded-2xl border border-rose-100">
-                                          <h4 className="text-[10px] font-black text-rose-600 uppercase tracking-widest flex items-center gap-2 mb-4">
-                                            <ShieldQuestion className="h-4 w-4" /> Brechas de Información Detectadas
+                                      {/* Evidencia Documental (Fragments) */}
+                                      {order.pdfEvidenceFragments && order.pdfEvidenceFragments.length > 0 && (
+                                        <section className="space-y-6">
+                                          <h4 className="text-[10px] font-black uppercase text-primary tracking-[0.2em] flex items-center gap-2">
+                                            <FileText className="h-5 w-5" /> Evidencia Documental (OCR Forensic)
                                           </h4>
-                                          <div className="space-y-4">
-                                            {reportResult.missingData.map((item, i) => (
-                                              <div key={i} className="flex justify-between items-center text-[10px] border-b border-rose-100 pb-2 last:border-0">
-                                                <span className="font-bold text-rose-900 uppercase">{item.field}</span>
-                                                <span className="text-rose-500 italic">{item.reason}</span>
-                                              </div>
+                                          <div className="grid gap-4">
+                                            {order.pdfEvidenceFragments.map((frag: any, i: number) => (
+                                              <Card key={i} className="p-6 border-none bg-primary/5 rounded-2xl relative group hover:bg-primary/10 transition-all">
+                                                <div className="flex justify-between items-start mb-3">
+                                                  <Badge variant="outline" className="text-[9px] uppercase font-bold text-primary/60 border-primary/10">
+                                                    <MapPin className="h-3 w-3 mr-1" /> Sección: {frag.section}
+                                                  </Badge>
+                                                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Página {frag.page}</span>
+                                                </div>
+                                                <p className="text-sm text-slate-700 font-medium leading-relaxed italic border-l-2 border-primary/20 pl-4">
+                                                  "{frag.text}"
+                                                </p>
+                                              </Card>
                                             ))}
                                           </div>
                                         </section>
                                       )}
-                                    </div>
-                                  ) : (
-                                    <div className="p-6 md:p-10 space-y-8 pb-24">
+
                                       <section>
                                         <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
-                                          <BookOpenCheck className="h-4 w-4 text-primary" /> Descripción Original
+                                          <BookOpenCheck className="h-4 w-4 text-primary" /> Descripción Original del Registro
                                         </h4>
                                         <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 italic text-slate-700 text-sm leading-relaxed">
                                           "{order.descripcion_original || order.descripcion}"
@@ -646,14 +658,14 @@ export default function AnalysisPage() {
                                             <Fingerprint className="h-24 w-24" />
                                           </div>
                                           <h4 className="text-[10px] font-black uppercase text-slate-400 mb-6 flex items-center gap-2">
-                                            <SearchCode className="h-4 w-4 text-accent" /> Razonamiento Forense
+                                            <SearchCode className="h-4 w-4 text-accent" /> Razonamiento Forense Gemini
                                           </h4>
                                           <p className="text-sm font-medium leading-relaxed mb-8">
                                             {order.rationale_tecnico || "Análisis automatizado basado en taxonomía MEP."}
                                           </p>
                                           <div className="space-y-4">
                                             <div>
-                                              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Evidencia Térmica</p>
+                                              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Términos de Evidencia</p>
                                               <div className="flex flex-wrap gap-2">
                                                 {order.evidence_terms?.map((term: string, i: number) => (
                                                   <Badge key={i} variant="secondary" className="bg-white/10 text-white border-none text-[9px] font-bold px-3 py-1">

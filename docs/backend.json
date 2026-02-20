@@ -15,6 +15,21 @@
         "descripcion": { "type": "string" },
         "impactoNeto": { "type": "number" },
         "fechaSolicitud": { "type": "string", "format": "date-time" },
+        "fechaDeteccion": { "type": "string", "format": "date-time" },
+        "fechaAprobacion": { "type": "string", "format": "date-time" },
+        "fechaEjecucion": { "type": "string", "format": "date-time" },
+        "fechaCierre": { "type": "string", "format": "date-time" },
+        "pdfEvidenceFragments": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" },
+              "page": { "type": "string" },
+              "section": { "type": "string" }
+            }
+          } 
+        },
         "isSigned": { "type": "boolean" },
         "disciplina_normalizada": { "type": "string" },
         "causa_raiz_normalizada": { "type": "string" },

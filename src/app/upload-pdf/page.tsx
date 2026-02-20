@@ -19,7 +19,8 @@ import {
   Info,
   Users,
   Signature,
-  Clock
+  Clock,
+  History
 } from 'lucide-react';
 import { extractPdfData, ExtractPdfDataOutput } from '@/ai/flows/extract-pdf-data-flow';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
@@ -71,16 +72,21 @@ export default function UploadPdfPage() {
         descripcion: extracted.extractedData.descriptionSection?.description || ""
       });
 
-      // Homologación de campos para compatibilidad total con Excel y Dashboard
+      // Homologación de campos para compatibilidad total
       const homogenizedData = {
         ...extracted.extractedData,
         projectId: extracted.extractedData.projectInfo?.projectId || "N/A",
         projectName: extracted.extractedData.projectInfo?.projectName || "N/A",
         format: extracted.extractedData.projectInfo?.format || "Otros",
-        impactoNeto: extracted.extractedData.financialImpact?.netImpact || 0,
+        impactoNeto: (extracted.extractedData as any).financialImpact?.netImpact || 0,
         causaRaiz: extracted.extractedData.projectInfo?.rootCauseDeclared || "Sin definir",
         descripcion: extracted.extractedData.descriptionSection?.description || "",
-        fechaSolicitud: extracted.extractedData.header?.requestDate || new Date().toISOString(),
+        fechaSolicitud: extracted.extractedData.dates?.requestDate || extracted.extractedData.header?.requestDate || new Date().toISOString(),
+        fechaDeteccion: extracted.extractedData.dates?.detectionDate || "",
+        fechaAprobacion: extracted.extractedData.dates?.approvalDate || "",
+        fechaEjecucion: extracted.extractedData.dates?.executionDate || "",
+        fechaCierre: extracted.extractedData.dates?.closingDate || "",
+        pdfEvidenceFragments: extracted.extractedData.evidenceFragments || [],
         isSigned: extracted.extractedData.isSigned || false,
         // Metadatos de IA
         semanticAnalysis: semantic,
@@ -90,7 +96,7 @@ export default function UploadPdfPage() {
 
       setResults({ ...extracted, extractedData: homogenizedData as any });
 
-      // 3. Lógica de Vinculación (PID + Número de Orden)
+      // 3. Lógica de Vinculación
       const projectId = extracted.extractedData.projectInfo?.projectId;
       const orderNumber = extracted.extractedData.header?.orderNumber;
       
@@ -119,25 +125,15 @@ export default function UploadPdfPage() {
         }
       }
       
-      toast({ title: "Documento Normalizado", description: "Se han homologado los campos del PDF con la base de datos central." });
+      toast({ title: "Documento Normalizado", description: "Se han homologado las fechas y evidencia del PDF." });
 
     } catch (error: any) {
       console.error(error);
-      const isQuotaError = error.message?.includes('429') || error.message?.toLowerCase().includes('quota');
-      if (isQuotaError) {
-        setMatchStatus('RETRY');
-        toast({ 
-          variant: "destructive", 
-          title: "Límite de IA alcanzado", 
-          description: "La cuota gratuita de Gemini se ha agotado. Espere unos segundos e intente de nuevo." 
-        });
-      } else {
-        toast({ 
-          variant: "destructive", 
-          title: "Error de Ingesta", 
-          description: error.message || "Fallo técnico al normalizar el documento." 
-        });
-      }
+      toast({ 
+        variant: "destructive", 
+        title: "Error de Ingesta", 
+        description: error.message || "Fallo técnico al normalizar el documento." 
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -161,17 +157,11 @@ export default function UploadPdfPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div 
-                  className={`border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer group ${matchStatus === 'RETRY' ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:border-primary/50 hover:bg-primary/5'}`}
+                  className={`border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer group border-slate-200 hover:border-primary/50 hover:bg-primary/5`}
                   onClick={() => !isProcessing && document.getElementById('pdf-upload')?.click()}
                 >
-                  {matchStatus === 'RETRY' ? (
-                    <Clock className="h-10 w-10 text-amber-500 mx-auto mb-3 animate-pulse" />
-                  ) : (
-                    <Upload className="h-10 w-10 text-primary mx-auto mb-3" />
-                  )}
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest">
-                    {matchStatus === 'RETRY' ? 'Esperar Cuota' : 'Cargar PDF'}
-                  </p>
+                  <Upload className="h-10 w-10 text-primary mx-auto mb-3" />
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Cargar PDF</p>
                   <Input id="pdf-upload" type="file" className="hidden" accept=".pdf" onChange={handleFileUpload} />
                 </div>
                 
@@ -190,92 +180,77 @@ export default function UploadPdfPage() {
 
             <div className="md:col-span-3 space-y-6">
               {results?.extractedData ? (
-                <Card className="border-none shadow-sm overflow-hidden border-t-4 border-t-primary bg-white">
-                  <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-3">
-                        <CardTitle className="text-xl font-headline">{results.extractedData.header?.type || "Orden"}</CardTitle>
-                        <Badge variant={results.extractedData.isSigned ? "default" : "destructive"} className="gap-1 uppercase text-[10px]">
-                          <Signature className="h-3 w-3" /> {results.extractedData.isSigned ? "Firmado" : "Sin Firma"}
-                        </Badge>
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-5">
+                  <Card className="border-none shadow-sm overflow-hidden border-t-4 border-t-primary bg-white">
+                    <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-3">
+                          <CardTitle className="text-xl font-headline">{(results.extractedData.header as any)?.type || "Orden"}</CardTitle>
+                          <Badge variant={results.extractedData.isSigned ? "default" : "destructive"} className="gap-1 uppercase text-[10px]">
+                            <Signature className="h-3 w-3" /> {results.extractedData.isSigned ? "Firmado" : "Sin Firma"}
+                          </Badge>
+                        </div>
+                        <CardDescription>
+                          PID: <span className="font-bold text-slate-900">{results.extractedData.projectId}</span> | 
+                          Orden: <span className="font-bold text-slate-900">{(results.extractedData.header as any)?.orderNumber}</span>
+                        </CardDescription>
                       </div>
-                      <CardDescription>
-                        PID: <span className="font-bold text-slate-900">{results.extractedData.projectId}</span> | 
-                        Orden: <span className="font-bold text-slate-900">{results.extractedData.header?.orderNumber}</span>
-                      </CardDescription>
-                    </div>
-                    <Badge variant="outline" className={`h-8 px-4 uppercase font-black text-[10px] ${matchStatus === 'MATCHED' ? 'text-emerald-600 border-emerald-200 bg-emerald-50' : 'text-primary border-primary/30'}`}>
-                      {matchStatus === 'MATCHED' ? 'Sincronizado' : 'Nuevo Registro'}
-                    </Badge>
-                  </CardHeader>
-                  
-                  <CardContent className="pt-8 space-y-8">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
-                        <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impacto Homologado</p>
-                        <p className="text-lg font-bold text-primary">{formatCurrency(results.extractedData.impactoNeto)}</p>
-                      </div>
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
-                        <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Monto Acumulado</p>
-                        <p className="text-lg font-bold text-slate-800">{formatCurrency(results.extractedData.financialImpact?.accumulatedAmount || 0)}</p>
-                      </div>
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
-                        <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Anticorrupción</p>
-                        <div className="flex items-center gap-2">
-                          {results.extractedData.antiCorruption?.appendixF ? <ShieldCheck className="h-5 w-5 text-emerald-500" /> : <ShieldAlert className="h-5 w-5 text-rose-500" />}
-                          <span className="text-xs font-bold uppercase">{results.extractedData.antiCorruption?.appendixF ? 'Apéndice F OK' : 'Pendiente'}</span>
+                      <Badge variant="outline" className={`h-8 px-4 uppercase font-black text-[10px] ${matchStatus === 'MATCHED' ? 'text-emerald-600 border-emerald-200 bg-emerald-50' : 'text-primary border-primary/30'}`}>
+                        {matchStatus === 'MATCHED' ? 'Sincronizado' : 'Nuevo Registro'}
+                      </Badge>
+                    </CardHeader>
+                    
+                    <CardContent className="pt-8 space-y-8">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm text-center">
+                          <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Detección</p>
+                          <p className="text-xs font-bold text-slate-600">{(results.extractedData as any).fechaDeteccion || "—"}</p>
+                        </div>
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm text-center">
+                          <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Solicitud</p>
+                          <p className="text-xs font-bold text-primary">{(results.extractedData as any).fechaSolicitud || "—"}</p>
+                        </div>
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm text-center">
+                          <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Aprobación</p>
+                          <p className="text-xs font-bold text-slate-600">{(results.extractedData as any).fechaAprobacion || "—"}</p>
+                        </div>
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm text-center">
+                          <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Ejecución</p>
+                          <p className="text-xs font-bold text-slate-600">{(results.extractedData as any).fechaEjecucion || "—"}</p>
+                        </div>
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm text-center">
+                          <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Monto Neto</p>
+                          <p className="text-xs font-bold text-primary">{formatCurrency((results.extractedData as any).impactoNeto || 0)}</p>
                         </div>
                       </div>
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
-                        <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Verificación Firma</p>
-                        <div className="flex items-center gap-2">
-                          {results.extractedData.isSigned ? <CheckCircle2 className="h-5 w-5 text-emerald-500" /> : <AlertTriangle className="h-5 w-5 text-amber-500" />}
-                          <span className="text-xs font-bold uppercase">{results.extractedData.isSigned ? 'Validada' : 'No Detectada'}</span>
-                        </div>
-                      </div>
-                    </div>
 
-                    <div className="bg-primary/5 p-6 rounded-2xl border border-primary/10">
-                      <h4 className="text-xs font-black uppercase text-primary mb-4 flex items-center gap-2 tracking-widest">
-                        <BrainCircuit className="h-5 w-5" /> Análisis Semántico Forense
-                      </h4>
-                      <div className="grid md:grid-cols-3 gap-6">
-                        <div className="md:col-span-2 space-y-4">
-                          <p className="text-sm text-slate-700 leading-relaxed italic border-l-4 border-primary/30 pl-4">
-                            "{results.extractedData.standardizedDescription || "Descripción no disponible"}"
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-[10px] uppercase font-bold">
-                              Causa Raíz Real: {results.extractedData.semanticAnalysis?.causa_raiz_normalizada}
-                            </Badge>
-                            <Badge variant="secondary" className="bg-primary/10 text-primary text-[10px] uppercase font-bold">
-                              Especialidad: {results.extractedData.semanticAnalysis?.disciplina_normalizada}
-                            </Badge>
-                          </div>
-                        </div>
-                        <div className="space-y-3">
-                          {results.extractedData.semanticAnalysis?.needs_review && (
-                             <div className="flex gap-3 p-3 rounded-xl border bg-amber-50 border-amber-100">
-                               <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-                               <div className="text-[10px]">
-                                 <p className="font-bold text-slate-800">Revisión Requerida</p>
-                                 <p className="text-slate-600 leading-tight">La IA tiene dudas sobre la clasificación semántica.</p>
-                               </div>
-                             </div>
-                          )}
+                      <div className="bg-primary/5 p-6 rounded-2xl border border-primary/10">
+                        <h4 className="text-xs font-black uppercase text-primary mb-4 flex items-center gap-2 tracking-widest">
+                          <History className="h-5 w-5" /> Evidencia Documental (PDF Fragments)
+                        </h4>
+                        <div className="grid gap-3">
+                          {(results.extractedData as any).pdfEvidenceFragments?.map((frag: any, i: number) => (
+                            <div key={i} className="bg-white p-4 rounded-xl border border-primary/5 text-xs">
+                              <div className="flex justify-between mb-2">
+                                <Badge variant="outline" className="text-[8px] uppercase font-bold text-primary/60 border-primary/10">Sección: {frag.section}</Badge>
+                                <span className="text-[8px] font-black text-slate-400 uppercase">Pág. {frag.page}</span>
+                              </div>
+                              <p className="text-slate-700 italic font-medium">"{frag.text}"</p>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                </div>
               ) : (
                 <div className="h-[500px] border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-muted-foreground bg-white/50 space-y-4">
                   <div className="bg-slate-100 p-6 rounded-full">
                     <FileText className="h-16 w-16 opacity-20" />
                   </div>
                   <div className="text-center max-w-sm px-6">
-                    <p className="text-lg font-bold text-slate-400 uppercase tracking-tighter">Normalización PDF en tiempo real</p>
-                    <p className="text-xs mt-1">Sube un formato oficial (OC/OT) para homologar automáticamente sus campos financieros y de auditoría con el Dashboard VP.</p>
+                    <p className="text-lg font-bold text-slate-400 uppercase tracking-tighter">Normalización PDF & Trazabilidad Temporal</p>
+                    <p className="text-xs mt-1">Sube un formato oficial para reconstruir la línea de tiempo y extraer fragmentos de evidencia textual de forma automática.</p>
                   </div>
                 </div>
               )}

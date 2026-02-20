@@ -1,9 +1,10 @@
+
 'use server';
 /**
  * @fileOverview Extractor de datos de ultra-precisión para formatos oficiales de OC/OT de Walmart.
  * 
- * Captura la anatomía completa del documento: Información General, Descripción, 
- * Áreas a cargo, Anticorrupción, Impacto Financiero y Firmas de Autorización.
+ * Captura la anatomía completa del documento, con especial énfasis en la línea de tiempo
+ * y fragmentos de evidencia textual para trazabilidad forense.
  */
 
 import {ai} from '@/ai/genkit';
@@ -18,11 +19,18 @@ const ExtractPdfDataOutputSchema = z.object({
   extractedData: z.object({
     envelopeId: z.string().optional().describe("ID de sobre de DocuSign si está presente."),
     header: z.object({
-      type: z.string().describe("Tipo de Orden (Trabajo/Cambio/Informativa/Rediseño)."),
+      type: z.string().describe("Tipo de Orden (Trabajo/Cambio/Informativa/Rediseño/Rediseño)."),
       orderNumber: z.string().describe("No. de Orden."),
       issuingArea: z.string().describe("Área emisora."),
       projectStage: z.string().describe("Etapa del proyecto (ej. En construcción)."),
       requestDate: z.string().describe("Fecha de solicitud.")
+    }),
+    dates: z.object({
+      detectionDate: z.string().optional().describe("Fecha en que se detectó la necesidad del cambio."),
+      requestDate: z.string().describe("Fecha oficial de la solicitud."),
+      approvalDate: z.string().optional().describe("Fecha de aprobación final."),
+      executionDate: z.string().optional().describe("Fecha programada o real de ejecución."),
+      closingDate: z.string().optional().describe("Fecha de cierre administrativo.")
     }),
     projectInfo: z.object({
       det: z.string().describe("Detalle (Det)."),
@@ -35,36 +43,14 @@ const ExtractPdfDataOutputSchema = z.object({
       rootCauseDeclared: z.string().describe("Causa Raíz declarada en el formato."),
       executionType: z.string().describe("Tipo de ejecución (Normal/Urgente).")
     }),
-    orderClassification: z.object({
-      isOriginal: z.boolean(),
-      isComplementary: z.boolean(),
-      originalOrderRef: z.string().optional().describe("No. de la orden original referenciada.")
-    }),
+    evidenceFragments: z.array(z.object({
+      text: z.string().describe("Texto exacto extraído del documento."),
+      page: z.string().describe("Página donde se encuentra el fragmento."),
+      section: z.string().describe("Sección o recuadro del formato (ej. Descripción, Anticorrupción, Firmas).")
+    })).describe("Fragmentos clave que sustentan la trazabilidad forense."),
     descriptionSection: z.object({
       description: z.string().describe("Texto íntegro de '¿Qué se realizará?'."),
       modifications: z.string().optional().describe("Planos o Documentos a Modificar.")
-    }),
-    associates: z.array(z.object({
-      area: z.string(),
-      name: z.string(),
-      timestamp: z.string().optional(),
-      hasSignature: z.boolean().describe("Detección visual de firma o sello digital.")
-    })).describe("Sección ÁREAS INCLUIDAS EN LA ORDEN / ASOCIADO A CARGO."),
-    antiCorruption: z.object({
-      appendixF: z.boolean().describe("Incluye Apéndice F (SÍ/NO)."),
-      isDonation: z.boolean().optional(),
-      isVoluntary: z.boolean().optional(),
-      isImprovement: z.boolean().optional(),
-      redFlagsChecked: z.boolean().describe("Detección visual del check en el recuadro de Red Flags.")
-    }),
-    financialImpact: z.object({
-      netImpact: z.number().describe("Monto del Impacto Neto de esta solicitud."),
-      accumulatedAmount: z.number().describe("Monto Acumulado total informado."),
-      originalImpactAmount: z.number().optional(),
-      complementaryImpacts: z.array(z.number()).optional(),
-      deliveryDateBefore: z.string().optional().describe("Fecha G.O. / Entrega antes del cambio."),
-      impactDaysDesign: z.string().optional(),
-      impactDaysExecution: z.string().optional()
     }),
     authorizations: z.array(z.object({
       cargo: z.string(),
@@ -84,14 +70,13 @@ const extractPdfPrompt = ai.definePrompt({
   input: {schema: ExtractPdfDataInputSchema},
   output: {schema: ExtractPdfDataOutputSchema},
   prompt: `Eres un Auditor Senior de Desarrollo Inmobiliario en Walmart especializado en Control de Cambios. 
-Tu tarea es analizar el PDF adjunto y extraer CADA CAMPO con precisión técnica.
+Tu tarea es analizar el PDF adjunto y extraer CADA CAMPO con precisión técnica, construyendo la línea de tiempo y extrayendo evidencia textual.
 
 REGLAS DE ORO:
-1. IDENTIFICACIÓN: El Folio/PID (ej. 124634-000) y el No. de Orden son obligatorios.
-2. ANTICORRUPCIÓN: Observa cuidadosamente el recuadro de 'Red Flags' al final del formato. Si tiene una 'X', un 'check' o una marca visual, marca 'redFlagsChecked' como true. Haz lo mismo para 'Apéndice F'.
-3. FIRMAS: Analiza las secciones de 'Asociado a Cargo' y 'Límites de Autorización'. Si detectas trazos de firmas manuscritas o sellos de DocuSign (como el ID de sobre en la parte superior), marca 'hasSignature' para ese registro y setea 'isSigned' en true.
-4. FINANZAS: Extrae el 'Impacto Neto' y el 'Monto Acumulado'. Si el formato indica montos de órdenes complementarias, lístalos.
-5. DESCRIPCIÓN: Captura la descripción completa. Si menciona planos específicos (ej. Plano de acometida), regístralo en 'modifications'.
+1. LÍNEA DE TIEMPO: Busca fechas de detección, solicitud, aprobación y ejecución. Si no son explícitas, infiérelas de los sellos o firmas.
+2. EVIDENCIA TEXTUAL: Extrae fragmentos exactos que justifiquen la causa raíz. Si dice "Se requiere por cambio en normativa de CFE", ese es un fragmento de evidencia clave.
+3. FIRMAS Y SELLOS: Busca el ID de sobre de DocuSign y las firmas manuscritas.
+4. FINANZAS: Extrae montos netos y acumulados.
 
 DOCUMENTO: {{media url=pdfDataUri}}`,
 });
