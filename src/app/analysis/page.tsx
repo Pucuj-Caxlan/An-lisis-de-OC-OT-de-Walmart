@@ -164,7 +164,7 @@ export default function AnalysisPage() {
   };
 
   const handleSingleSemanticAnalysis = async (order: any) => {
-    if (!db) return;
+    if (!db || !user) return;
     setIsAnalyzing(order.id);
     try {
       const result = await analyzeOrderSemantically({
@@ -179,11 +179,16 @@ export default function AnalysisPage() {
       updateDocumentNonBlocking(orderRef, {
         disciplina_normalizada: result.disciplina_normalizada,
         causa_raiz_normalizada: result.causa_raiz_normalizada,
+        subcausa_normalizada: result.subcausa_normalizada,
         semanticAnalysis: result,
         structural_quality_score: 95,
         reliability_level: 'HIGH',
         rationale_tecnico: result.rationale_tecnico,
-        needs_review: result.needs_review
+        needs_review: result.needs_review,
+        classification_status: 'auto',
+        classified_at: new Date().toISOString(),
+        classified_by: user.uid,
+        model_version: 'gemini-2.5-flash'
       });
 
       toast({ 
@@ -283,20 +288,68 @@ export default function AnalysisPage() {
       let lastConfidence = 0;
 
       for (let i = 0; i < selectedOrders.length; i += AI_BATCH_SIZE) {
-        const chunk = selectedOrders.slice(i, i + AI_BATCH_SIZE).map(o => ({
-          id: o.id,
-          projectId: o.projectId,
-          projectName: o.projectName,
-          impactoNeto: o.impactoNeto,
-          disciplina_normalizada: o.disciplina_normalizada,
-          causa_raiz_normalizada: o.causa_raiz_normalizada,
-          descripcion: String(o.descripcion || "").substring(0, 300), 
-          isSigned: o.isSigned,
-          fechaSolicitud: o.fechaSolicitud
-        }));
+        const chunk = selectedOrders.slice(i, i + AI_BATCH_SIZE);
+        
+        // 1. Clasificación Semántica Individual por Lote (Parallel Execution)
+        const classificationPromises = chunk.map(async (order) => {
+          try {
+            const semanticResult = await analyzeOrderSemantically({
+              descripcion: order.descripcion || "",
+              monto: order.impactoNeto,
+              contexto: {
+                justificacionDetallada: order.technicalJustification?.detailedReasoning
+              }
+            });
+            return { orderId: order.id, result: semanticResult };
+          } catch (e) {
+            console.error(`Error classifying order ${order.id}:`, e);
+            return { orderId: order.id, result: null };
+          }
+        });
+
+        const classifications = await Promise.all(classificationPromises);
+
+        // 2. Persistencia en Firestore mediante Batch
+        const batch = writeBatch(db!);
+        classifications.forEach(({ orderId, result }) => {
+          if (result) {
+            const ref = doc(db!, 'orders', orderId);
+            batch.update(ref, {
+              disciplina_normalizada: result.disciplina_normalizada,
+              causa_raiz_normalizada: result.causa_raiz_normalizada,
+              subcausa_normalizada: result.subcausa_normalizada,
+              semanticAnalysis: result,
+              structural_quality_score: 95,
+              reliability_level: 'HIGH',
+              rationale_tecnico: result.rationale_tecnico,
+              needs_review: result.needs_review,
+              classification_status: 'auto',
+              classified_at: new Date().toISOString(),
+              classified_by: user?.uid,
+              model_version: 'gemini-2.5-flash'
+            });
+          }
+        });
+        await batch.commit();
+
+        // 3. Preparación de datos enriquecidos para Inteligencia de Grupo
+        const chunkForBulk = chunk.map(o => {
+          const classif = classifications.find(c => c.orderId === o.id)?.result;
+          return {
+            id: o.id,
+            projectId: o.projectId,
+            projectName: o.projectName,
+            impactoNeto: o.impactoNeto,
+            disciplina_normalizada: classif?.disciplina_normalizada || o.disciplina_normalizada,
+            causa_raiz_normalizada: classif?.causa_raiz_normalizada || o.causa_raiz_normalizada,
+            descripcion: String(o.descripcion || "").substring(0, 400), 
+            isSigned: o.isSigned,
+            fechaSolicitud: o.fechaSolicitud
+          };
+        });
 
         try {
-          const chunkResult = await analyzeBulkOrders({ orders: chunk });
+          const chunkResult = await analyzeBulkOrders({ orders: chunkForBulk });
           allAnomalies = [...allAnomalies, ...(chunkResult.anomaliesDetected || [])];
           allPatterns = Array.from(new Set([...allPatterns, ...(chunkResult.commonPatterns || [])]));
           allRecommendations = Array.from(new Set([...allRecommendations, ...(chunkResult.recommendations || [])]));
@@ -305,9 +358,9 @@ export default function AnalysisPage() {
 
           setProcessedCount(prev => prev + chunk.length);
           setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
-          await new Promise(r => setTimeout(r, 400));
+          await new Promise(r => setTimeout(r, 500));
         } catch (chunkError) {
-          console.error(`Fallo en bloque ${i / AI_BATCH_SIZE}:`, chunkError);
+          console.error(`Fallo en bloque de inteligencia ${i / AI_BATCH_SIZE}:`, chunkError);
         }
       }
 
@@ -315,7 +368,7 @@ export default function AnalysisPage() {
         executiveSummary: finalSummary,
         totalImpactFormatted: formatAmount(selectedTotalAmount),
         commonPatterns: allPatterns.slice(0, 8),
-        recurrenceAnalysis: "Análisis consolidado ejecutado.",
+        recurrenceAnalysis: "Análisis semántico consolidado y guardado en base.",
         anomaliesDetected: allAnomalies.slice(0, 10),
         disciplineImpact: [], 
         recommendations: allRecommendations.slice(0, 6),
@@ -323,7 +376,7 @@ export default function AnalysisPage() {
         confidenceScore: lastConfidence
       });
 
-      toast({ title: "Análisis Masivo Finalizado" });
+      toast({ title: "Procesamiento y Clasificación Completos" });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Fallo Crítico en IA", description: e.message });
       setShowBulkAiDialog(false);
@@ -399,9 +452,11 @@ export default function AnalysisPage() {
                 <Button 
                   onClick={handleBulkAiAnalysis}
                   variant="outline" 
+                  disabled={isBulkAiProcessing}
                   className="bg-white/10 border-white/20 text-white hover:bg-white/20 gap-2 h-10 px-6 rounded-xl"
                 >
-                  <Sparkles className="h-4 w-4" /> Análisis Masivo IA
+                  {isBulkAiProcessing ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  Procesar y Clasificar IA
                 </Button>
                 <Button 
                   onClick={handleBulkAudit}
@@ -479,7 +534,7 @@ export default function AnalysisPage() {
                     <TableCell>
                       <div className="flex flex-col">
                          <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
-                         <span className="text-[9px] text-slate-400 uppercase font-bold">{order.causa_raiz_normalizada}</span>
+                         <span className="text-[9px] text-slate-400 uppercase font-bold">{order.causa_raiz_normalizada || order.causaRaiz}</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-center">
@@ -689,7 +744,7 @@ export default function AnalysisPage() {
                   </div>
                   <div className="space-y-2">
                     <h3 className="text-lg font-bold text-slate-800 uppercase tracking-widest">Orquestando Lotes Forenses...</h3>
-                    <p className="text-xs text-slate-400">Gemini está identificando patrones de riesgo en bloques de {AI_BATCH_SIZE}.</p>
+                    <p className="text-xs text-slate-400">Gemini está clasificando y detectando patrones en bloques de {AI_BATCH_SIZE}.</p>
                   </div>
                   <div className="max-w-xs mx-auto space-y-2">
                     <div className="flex justify-between text-[10px] font-black text-primary">
