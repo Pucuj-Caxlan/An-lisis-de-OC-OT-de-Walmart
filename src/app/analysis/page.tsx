@@ -105,7 +105,6 @@ export default function AnalysisPage() {
   
   // Estados de Paginación
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageStack, setPageStack] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
   const [totalInDb, setTotalInDb] = useState<number | null>(null);
 
   // Estados de Selección y Procesamiento Masivo
@@ -125,7 +124,7 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Fetch total count once
+  // SSOT: Fetch real total count once
   useEffect(() => {
     if (!db) return;
     const fetchTotal = async () => {
@@ -138,48 +137,42 @@ export default function AnalysisPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    // Note: For full server-side filtering on thousands of records with pagination,
-    // we would need specific Firestore indexes. For this MVP we load a larger sample
-    // and paginate locally or use filters that match indexes.
-    const baseQuery = query(
+    // Align with SSOT: Load full dataset up to 10k for accurate filtering/counting
+    return query(
       collection(db, 'orders'), 
       orderBy('projectId', 'desc'),
-      limit(PAGE_SIZE * 4) // Load a buffer for filtering/pagination
+      limit(10000)
     );
-
-    return baseQuery;
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
-  // Dynamic counts based on loaded buffer (representative sample)
+  // Robust calculation over the entire loaded dataset
   const classificationCounts = useMemo(() => {
     if (!orders) return { classified: 0, not_classified: 0, needs_review: 0, low_confidence: 0 };
     return {
       classified: orders.filter(o => o.classification_status === 'auto' || o.classification_status === 'reviewed').length,
-      not_classified: orders.filter(o => !o.classification_status).length,
+      not_classified: orders.filter(o => !o.classification_status || o.classification_status === 'pending').length,
       needs_review: orders.filter(o => o.needs_review === true).length,
       low_confidence: orders.filter(o => o.confidence_score && o.confidence_score < 0.6).length,
     };
   }, [orders]);
 
   const stats = useMemo(() => {
-    if (!orders) return { total: totalInDb || 0, audited: 0, coverage: 0 };
     const total = totalInDb || 0;
-    const classified = orders.filter(o => o.classification_status === 'auto' || o.classification_status === 'reviewed').length;
-    // Extrapolating coverage from buffer for UI visualization
-    const coverage = orders.length > 0 ? (classified / orders.length) * 100 : 0;
+    const classified = classificationCounts.classified;
+    const coverage = total > 0 ? (classified / total) * 100 : 0;
     return { total, audited: classified, coverage };
-  }, [orders, totalInDb]);
+  }, [totalInDb, classificationCounts]);
 
   const formatAmount = (amount: number) => {
     if (!mounted) return "0.00";
     return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
   };
 
-  const filteredOrders = useMemo(() => {
+  const filteredOrdersFull = useMemo(() => {
     if (!orders) return [];
-    let result = orders.filter(o => {
+    return orders.filter(o => {
       const searchStr = searchTerm.toLowerCase();
       const pid = String(o.projectId || "").toLowerCase();
       const projectName = String(o.projectName || "").toLowerCase();
@@ -188,17 +181,18 @@ export default function AnalysisPage() {
       const isClassified = o.classification_status === 'auto' || o.classification_status === 'reviewed';
       const matchesAi = aiFilter === 'all' || 
         (aiFilter === 'classified' && isClassified) ||
-        (aiFilter === 'not_classified' && !o.classification_status) ||
+        (aiFilter === 'not_classified' && (!o.classification_status || o.classification_status === 'pending')) ||
         (aiFilter === 'needs_review' && o.needs_review === true) ||
         (aiFilter === 'low_confidence' && o.confidence_score < 0.6);
 
       return matchesSearch && matchesAi;
     });
+  }, [orders, searchTerm, aiFilter]);
 
-    // Handle pagination on the filtered result
+  const pagedOrders = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
-    return result.slice(start, start + PAGE_SIZE);
-  }, [orders, searchTerm, aiFilter, currentPage]);
+    return filteredOrdersFull.slice(start, start + PAGE_SIZE);
+  }, [filteredOrdersFull, currentPage]);
 
   const selectedTotalAmount = useMemo(() => {
     return orders
@@ -207,10 +201,10 @@ export default function AnalysisPage() {
   }, [orders, selectedIds]);
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === filteredOrders.length) {
+    if (selectedIds.length === pagedOrders.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(filteredOrders.map(o => o.id));
+      setSelectedIds(pagedOrders.map(o => o.id));
     }
   };
 
@@ -219,7 +213,7 @@ export default function AnalysisPage() {
   };
 
   const handleNextPage = () => {
-    if (currentPage * PAGE_SIZE < (orders?.length || 0)) {
+    if (currentPage * PAGE_SIZE < filteredOrdersFull.length) {
       setCurrentPage(prev => prev + 1);
       setSelectedIds([]);
     }
@@ -343,7 +337,7 @@ export default function AnalysisPage() {
 
   const handleBulkAiAnalysis = async () => {
     if (selectedIds.length < 1) {
-      toast({ variant: "destructive", title: "Selección insuficiente", description: "Seleccione al menos 1 registro." });
+      toast({ variant: "destructive", title: "Selección insuficiente", description: "Seleccione al menos 1 registro pendiente." });
       return;
     }
 
@@ -484,7 +478,7 @@ export default function AnalysisPage() {
                 <span className="text-[10px] font-black text-slate-500 uppercase">Estado Clasificación IA:</span>
               </div>
               <Select value={aiFilter} onValueChange={(v) => { setAiFilter(v as any); setCurrentPage(1); }}>
-                <SelectTrigger className="h-8 min-w-[200px] bg-white border-none shadow-sm text-[10px] font-bold uppercase">
+                <SelectTrigger className="h-8 min-w-[240px] bg-white border-none shadow-sm text-[10px] font-bold uppercase">
                   <SelectValue placeholder="Seleccionar estado..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -509,7 +503,7 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6 space-y-6">
-          {/* Panel de Estadísticas */}
+          {/* Panel de Estadísticas SSOT */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
@@ -572,7 +566,7 @@ export default function AnalysisPage() {
                   className="bg-white text-primary hover:bg-white/90 gap-2 h-10 px-6 rounded-xl font-bold"
                 >
                   {isAuditing ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                  Auditar Lote
+                  Validar Lote
                 </Button>
                 <Separator orientation="vertical" className="h-8 bg-white/20 mx-2" />
                 <Button 
@@ -599,7 +593,7 @@ export default function AnalysisPage() {
                 <TableRow>
                   <TableHead className="w-12 text-center">
                     <Checkbox 
-                      checked={selectedIds.length === filteredOrders.length && filteredOrders.length > 0}
+                      checked={selectedIds.length === pagedOrders.length && pagedOrders.length > 0}
                       onCheckedChange={toggleSelectAll}
                     />
                   </TableHead>
@@ -614,7 +608,9 @@ export default function AnalysisPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={7} className="text-center py-24"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
-                ) : filteredOrders.map((order) => (
+                ) : pagedOrders.length === 0 ? (
+                  <TableRow><TableCell colSpan={7} className="text-center py-24 text-slate-400 font-bold uppercase italic text-xs">Sin registros que coincidan con el filtro</TableCell></TableRow>
+                ) : pagedOrders.map((order) => (
                   <TableRow key={order.id} className={`hover:bg-slate-50/50 group transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
                     <TableCell className="text-center">
                       <Checkbox 
@@ -837,7 +833,7 @@ export default function AnalysisPage() {
             {/* Pagination Controls */}
             <div className="flex items-center justify-between px-6 py-4 bg-slate-50/50 border-t">
               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                Mostrando {((currentPage - 1) * PAGE_SIZE) + 1} – {Math.min(currentPage * PAGE_SIZE, totalInDb || 0)} de {totalInDb || 0} registros
+                Mostrando {((currentPage - 1) * PAGE_SIZE) + 1} – {Math.min(currentPage * PAGE_SIZE, filteredOrdersFull.length)} de {filteredOrdersFull.length} registros filtrados (Universo: {totalInDb})
               </div>
               <div className="flex items-center gap-2">
                 <Button 
@@ -856,7 +852,7 @@ export default function AnalysisPage() {
                   variant="outline" 
                   size="sm" 
                   onClick={handleNextPage} 
-                  disabled={currentPage * PAGE_SIZE >= (orders?.length || 0) || isLoading}
+                  disabled={currentPage * PAGE_SIZE >= filteredOrdersFull.length || isLoading}
                   className="rounded-lg h-8 px-3 gap-1 uppercase text-[9px] font-black"
                 >
                   Siguiente <ChevronRight className="h-3 w-3" />
