@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState } from 'react';
@@ -99,7 +100,8 @@ export default function UploadPage() {
               id: orderId,
               importBatchId: batchId,
               dataSource: 'EXCEL_HISTORIC',
-              classification_status: 'auto',
+              // Importante: Marcar como pending para obligar a pasar por el botón de Procesar IA
+              classification_status: 'pending',
               processedAt: new Date().toISOString()
             });
           });

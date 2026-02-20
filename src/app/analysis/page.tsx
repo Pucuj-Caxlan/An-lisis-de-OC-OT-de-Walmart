@@ -39,7 +39,8 @@ import {
   ChevronRight,
   ClipboardCheck,
   ZapOff,
-  Rows
+  Rows,
+  Clock
 } from 'lucide-react';
 import {
   Table,
@@ -146,10 +147,11 @@ export default function AnalysisPage() {
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
   const classificationCounts = useMemo(() => {
-    if (!orders) return { classified: 0, not_classified: 0, needs_review: 0, low_confidence: 0 };
+    if (!orders) return { classified: 0, pending: 0, needs_review: 0, low_confidence: 0 };
     return {
-      classified: orders.filter(o => o.classification_status === 'auto' || o.classification_status === 'reviewed').length,
-      not_classified: orders.filter(o => !o.classification_status || o.classification_status === 'pending').length,
+      // Estricto: Debe tener estatus auto/reviewed Y el objeto de análisis semántico real
+      classified: orders.filter(o => (o.classification_status === 'auto' || o.classification_status === 'reviewed') && o.semanticAnalysis).length,
+      pending: orders.filter(o => !o.classification_status || o.classification_status === 'pending' || !o.semanticAnalysis).length,
       needs_review: orders.filter(o => o.needs_review === true).length,
       low_confidence: orders.filter(o => o.confidence_score && o.confidence_score < 0.6).length,
     };
@@ -175,10 +177,10 @@ export default function AnalysisPage() {
       const projectName = String(o.projectName || "").toLowerCase();
       const matchesSearch = pid.includes(searchStr) || projectName.includes(searchStr);
       
-      const isClassified = o.classification_status === 'auto' || o.classification_status === 'reviewed';
+      const isClassified = (o.classification_status === 'auto' || o.classification_status === 'reviewed') && o.semanticAnalysis;
       const matchesAi = aiFilter === 'all' || 
         (aiFilter === 'classified' && isClassified) ||
-        (aiFilter === 'not_classified' && (!o.classification_status || o.classification_status === 'pending')) ||
+        (aiFilter === 'not_classified' && (!o.classification_status || o.classification_status === 'pending' || !o.semanticAnalysis)) ||
         (aiFilter === 'needs_review' && o.needs_review === true) ||
         (aiFilter === 'low_confidence' && o.confidence_score < 0.6);
 
@@ -482,9 +484,9 @@ export default function AnalysisPage() {
                 <SelectContent>
                   <SelectItem value="all">Todos ({totalInDb || 0})</SelectItem>
                   <SelectItem value="classified" className="text-emerald-600">Clasificados IA ({classificationCounts.classified})</SelectItem>
-                  <SelectItem value="not_classified" className="text-amber-600">No clasificados ({classificationCounts.not_classified})</SelectItem>
+                  <SelectItem value="not_classified" className="text-amber-600">Pendientes de Procesar ({classificationCounts.pending})</SelectItem>
                   <SelectItem value="needs_review" className="text-rose-600">Pendientes de revisión ({classificationCounts.needs_review})</SelectItem>
-                  <SelectItem value="low_confidence" className="text-rose-800">Requieren reprocesamiento ({classificationCounts.low_confidence})</SelectItem>
+                  <SelectItem value="low_confidence" className="text-rose-800">Baja Confianza ({classificationCounts.low_confidence})</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -505,32 +507,39 @@ export default function AnalysisPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Registros Totales</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Universo Total</p>
                 <h4 className="text-2xl font-headline font-bold text-slate-800">{totalInDb === null ? '--' : totalInDb}</h4>
               </div>
               <Database className="h-8 w-8 text-primary/10" />
             </Card>
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Normalizados IA</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Clasificados IA</p>
                 <h4 className="text-2xl font-headline font-bold text-emerald-600">{classificationCounts.classified}</h4>
               </div>
               <BrainCircuit className="h-8 w-8 text-emerald-100" />
             </Card>
-            <Card className="md:col-span-2 border-none shadow-sm bg-slate-900 text-white p-4 space-y-3">
+            <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pendientes de Clasificación</p>
+                <h4 className="text-2xl font-headline font-bold text-amber-600">{classificationCounts.pending}</h4>
+              </div>
+              <Clock className="h-8 w-8 text-amber-100" />
+            </Card>
+            <Card className="border-none shadow-sm bg-slate-900 text-white p-4 space-y-3">
               <div className="flex justify-between items-center">
-                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cobertura de Auditoría Semántica</p>
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cobertura Real de Auditoría Semántica</p>
                  <span className="text-xs font-bold text-accent">{Math.round(stats.coverage)}%</span>
               </div>
               <Progress value={stats.coverage} className="h-1.5 bg-white/10" />
               <div className="flex gap-4 pt-1">
                 <div className="flex items-center gap-1.5">
                   <div className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-                  <span className="text-[8px] font-black uppercase opacity-60">{classificationCounts.needs_review} Pendientes de revisión</span>
+                  <span className="text-[8px] font-black uppercase opacity-60">{classificationCounts.needs_review} En Revisión</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                  <span className="text-[8px] font-black uppercase opacity-60">{classificationCounts.not_classified} Sin procesar</span>
+                  <span className="text-[8px] font-black uppercase opacity-60">Faltan {classificationCounts.pending} registros</span>
                 </div>
               </div>
             </Card>
@@ -621,7 +630,7 @@ export default function AnalysisPage() {
                         <div className="flex items-center gap-1.5">
                           {order.classification_status === 'reviewed' ? (
                             <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black h-4 px-1.5">REVIEWED</Badge>
-                          ) : order.classification_status === 'auto' ? (
+                          ) : (order.classification_status === 'auto' && order.semanticAnalysis) ? (
                             <Badge className="bg-primary/10 text-primary border-none text-[8px] font-black h-4 px-1.5">AUTO IA</Badge>
                           ) : (
                             <Badge variant="outline" className="text-[8px] font-black h-4 px-1.5 border-dashed text-slate-400">PENDING</Badge>
