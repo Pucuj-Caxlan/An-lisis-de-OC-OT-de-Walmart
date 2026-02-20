@@ -487,15 +487,15 @@ export default function AnalysisPage() {
                                 </Button>
                               </DialogTrigger>
                               <DialogContent className="w-[95vw] md:max-w-6xl max-h-[95vh] overflow-hidden flex flex-col rounded-3xl p-0 shadow-2xl">
-                                <header className="bg-slate-900 text-white p-6 md:p-8 shrink-0 flex items-center justify-between">
-                                  <div className="space-y-1">
-                                    <Badge variant="outline" className="bg-white/10 text-white border-white/20 uppercase text-[9px] font-black tracking-widest">
+                                <header className="bg-slate-900 text-white p-4 md:p-6 shrink-0 flex items-center justify-between">
+                                  <div className="space-y-0.5">
+                                    <Badge variant="outline" className="bg-white/10 text-white border-white/20 uppercase text-[8px] font-black tracking-widest">
                                       Analítica Forense Walmart
                                     </Badge>
-                                    <DialogTitle className="text-2xl md:text-3xl font-headline font-bold leading-tight">
+                                    <DialogTitle className="text-xl md:text-2xl font-headline font-bold leading-tight">
                                       Trazabilidad: {order.projectId}
                                     </DialogTitle>
-                                    <DialogDescription className="text-slate-400 text-sm font-medium">
+                                    <DialogDescription className="text-slate-400 text-xs font-medium">
                                       {order.projectName} | ID Interno: {order.id}
                                     </DialogDescription>
                                   </div>
@@ -504,9 +504,9 @@ export default function AnalysisPage() {
                                       <Button 
                                         onClick={() => handleGenerateReport(order)} 
                                         disabled={isGeneratingReport}
-                                        className="bg-primary hover:bg-primary/90 gap-2 font-black uppercase text-[10px] tracking-widest h-10 px-4 md:px-6 rounded-xl shadow-lg shadow-primary/20"
+                                        className="bg-primary hover:bg-primary/90 gap-1.5 font-black uppercase text-[9px] tracking-widest h-9 px-3 md:px-5 rounded-xl shadow-lg shadow-primary/20"
                                       >
-                                        {isGeneratingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                                        {isGeneratingReport ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                                         {isGeneratingReport ? "Generando..." : "Informe Forense"}
                                       </Button>
                                     )}
@@ -514,9 +514,9 @@ export default function AnalysisPage() {
                                       <Button 
                                         variant="outline" 
                                         onClick={handleDownloadReportPdf}
-                                        className="bg-white/10 text-white border-white/20 hover:bg-white/20 gap-2 font-black uppercase text-[10px] tracking-widest h-10 px-4 md:px-6 rounded-xl"
+                                        className="bg-white/10 text-white border-white/20 hover:bg-white/20 gap-1.5 font-black uppercase text-[9px] tracking-widest h-9 px-3 md:px-5 rounded-xl"
                                       >
-                                        <FileDown className="h-4 w-4" /> Exportar PDF
+                                        <FileDown className="h-3.5 w-3.5" /> Exportar PDF
                                       </Button>
                                     )}
                                   </div>
@@ -524,33 +524,32 @@ export default function AnalysisPage() {
 
                                 <ScrollArea className="flex-1 bg-slate-50">
                                   {reportResult ? (
-                                    <div ref={reportContainerRef} className="p-6 md:p-10 space-y-12 bg-white min-h-screen max-w-[900px] mx-auto shadow-2xl my-4 md:my-8 rounded-2xl border pb-24">
-                                      {/* Contenido del Reporte PDF ya existente */}
-                                      <section className="space-y-6">
-                                        <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4">
+                                    <div ref={reportContainerRef} className="p-6 md:p-8 space-y-8 bg-white min-h-screen max-w-[900px] mx-auto shadow-2xl my-4 rounded-2xl border pb-24">
+                                      <section className="space-y-4">
+                                        <div className="flex justify-between items-start border-b-2 border-slate-900 pb-3">
                                           <div>
-                                            <h4 className="text-2xl font-black text-slate-900 uppercase">{reportResult.header.title}</h4>
-                                            <p className="text-xs text-slate-500 font-bold">FOLIO: {reportResult.header.orderId} | ESTATUS: {reportResult.header.status}</p>
+                                            <h4 className="text-xl font-black text-slate-900 uppercase">{reportResult.header.title}</h4>
+                                            <p className="text-[10px] text-slate-500 font-bold">FOLIO: {reportResult.header.orderId} | ESTATUS: {reportResult.header.status}</p>
                                           </div>
-                                          <Badge variant={reportResult.executiveSummary.currentRisk === 'P0' ? 'destructive' : 'default'} className="uppercase">
+                                          <Badge variant={reportResult.executiveSummary.currentRisk === 'P0' ? 'destructive' : 'default'} className="uppercase text-[10px]">
                                             Prioridad {reportResult.executiveSummary.currentRisk}
                                           </Badge>
                                         </div>
                                         
-                                        <div className="grid md:grid-cols-3 gap-8">
-                                          <div className="md:col-span-2 space-y-4">
-                                            <p className="text-[10px] font-black text-primary uppercase tracking-widest">Resumen Ejecutivo</p>
-                                            <p className="text-sm text-slate-700 leading-relaxed font-medium">{reportResult.executiveSummary.overview}</p>
-                                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 italic text-xs text-slate-600">
+                                        <div className="grid md:grid-cols-3 gap-6">
+                                          <div className="md:col-span-2 space-y-3">
+                                            <p className="text-[9px] font-black text-primary uppercase tracking-widest">Resumen Ejecutivo</p>
+                                            <p className="text-xs text-slate-700 leading-relaxed font-medium">{reportResult.executiveSummary.overview}</p>
+                                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 italic text-[11px] text-slate-600">
                                               Impacto Estimado: {reportResult.executiveSummary.economicImpact}
                                             </div>
                                           </div>
-                                          <div className="bg-slate-900 p-6 rounded-2xl text-white">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-3">Riesgo Semántico</p>
-                                            <div className="space-y-4">
+                                          <div className="bg-slate-900 p-4 rounded-2xl text-white">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase mb-2">Riesgo Semántico</p>
+                                            <div className="space-y-3">
                                               {Object.entries(reportResult.riskIndex).map(([key, val]) => (
                                                 <div key={key} className="space-y-1">
-                                                  <div className="flex justify-between text-[10px] uppercase font-bold">
+                                                  <div className="flex justify-between text-[9px] uppercase font-bold">
                                                     <span>{key}</span>
                                                     <span>{val}%</span>
                                                   </div>
@@ -564,21 +563,21 @@ export default function AnalysisPage() {
 
                                       <Separator />
 
-                                      <section className="space-y-6">
-                                        <h4 className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
-                                          <Clock className="h-4 w-4" /> Línea de Tiempo Forense
+                                      <section className="space-y-4">
+                                        <h4 className="text-[9px] font-black text-primary uppercase tracking-widest flex items-center gap-1.5">
+                                          <Clock className="h-3.5 w-3.5" /> Línea de Tiempo Forense
                                         </h4>
                                         <div className="space-y-0 relative">
                                           <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-slate-100" />
                                           {reportResult.forensicTimeline.map((item, i) => (
-                                            <div key={i} className="flex gap-6 pb-8 relative group">
-                                              <div className="h-4 w-4 rounded-full bg-white border-2 border-primary z-10 shrink-0 group-hover:scale-125 transition-transform" />
-                                              <div className="space-y-1">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase">{item.date}</p>
-                                                <p className="text-sm font-bold text-slate-800">{item.event}</p>
-                                                <p className="text-[10px] text-slate-500 italic">{item.evidence}</p>
+                                            <div key={i} className="flex gap-4 pb-6 relative group">
+                                              <div className="h-3.5 w-3.5 rounded-full bg-white border-2 border-primary z-10 shrink-0 group-hover:scale-110 transition-transform" />
+                                              <div className="space-y-0.5">
+                                                <p className="text-[9px] font-black text-slate-400 uppercase">{item.date}</p>
+                                                <p className="text-xs font-bold text-slate-800">{item.event}</p>
+                                                <p className="text-[9px] text-slate-500 italic">{item.evidence}</p>
                                                 {item.gapDays && item.gapDays > 0 && (
-                                                  <Badge variant="secondary" className="bg-slate-100 text-[8px] font-black text-slate-500 uppercase mt-2">
+                                                  <Badge variant="secondary" className="bg-slate-100 text-[8px] font-black text-slate-500 uppercase mt-1">
                                                     Brecha: {item.gapDays} días
                                                   </Badge>
                                                 )}
@@ -589,52 +588,52 @@ export default function AnalysisPage() {
                                       </section>
                                     </div>
                                   ) : (
-                                    <div className="p-6 md:p-10 space-y-10 pb-24">
+                                    <div className="p-4 md:p-6 space-y-6 pb-24">
                                       {/* Cronología y Fechas Clave */}
-                                      <section className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
-                                        <h4 className="text-[10px] font-black uppercase text-primary tracking-[0.2em] mb-6 flex items-center gap-2">
-                                          <CalendarDays className="h-5 w-5" /> Línea de Vida de la Incidencia
+                                      <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                                        <h4 className="text-[9px] font-black uppercase text-primary tracking-[0.15em] mb-4 flex items-center gap-1.5">
+                                          <CalendarDays className="h-4 w-4" /> Línea de Vida de la Incidencia
                                         </h4>
-                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
-                                          <div className="space-y-1 text-center">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase">Detección</p>
-                                            <p className="text-sm font-bold text-slate-700">{formatDate(order.fechaDeteccion)}</p>
+                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                          <div className="space-y-0.5 text-center">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase">Detección</p>
+                                            <p className="text-xs font-bold text-slate-700">{formatDate(order.fechaDeteccion)}</p>
                                           </div>
-                                          <div className="space-y-1 text-center border-l border-slate-100">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase">Solicitud</p>
-                                            <p className="text-sm font-bold text-primary">{formatDate(order.fechaSolicitud)}</p>
+                                          <div className="space-y-0.5 text-center border-l border-slate-100">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase">Solicitud</p>
+                                            <p className="text-xs font-bold text-primary">{formatDate(order.fechaSolicitud)}</p>
                                           </div>
-                                          <div className="space-y-1 text-center border-l border-slate-100">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase">Aprobación</p>
-                                            <p className="text-sm font-bold text-slate-700">{formatDate(order.fechaAprobacion)}</p>
+                                          <div className="space-y-0.5 text-center border-l border-slate-100">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase">Aprobación</p>
+                                            <p className="text-xs font-bold text-slate-700">{formatDate(order.fechaAprobacion)}</p>
                                           </div>
-                                          <div className="space-y-1 text-center border-l border-slate-100">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase">Ejecución</p>
-                                            <p className="text-sm font-bold text-slate-700">{formatDate(order.fechaEjecucion)}</p>
+                                          <div className="space-y-0.5 text-center border-l border-slate-100">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase">Ejecución</p>
+                                            <p className="text-xs font-bold text-slate-700">{formatDate(order.fechaEjecucion)}</p>
                                           </div>
-                                          <div className="space-y-1 text-center border-l border-slate-100">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase">Cierre</p>
-                                            <p className="text-sm font-bold text-slate-700">{formatDate(order.fechaCierre)}</p>
+                                          <div className="space-y-0.5 text-center border-l border-slate-100">
+                                            <p className="text-[8px] font-black text-slate-400 uppercase">Cierre</p>
+                                            <p className="text-xs font-bold text-slate-700">{formatDate(order.fechaCierre)}</p>
                                           </div>
                                         </div>
                                       </section>
 
                                       {/* Evidencia Documental (Fragments) */}
                                       {order.pdfEvidenceFragments && order.pdfEvidenceFragments.length > 0 && (
-                                        <section className="space-y-6">
-                                          <h4 className="text-[10px] font-black uppercase text-primary tracking-[0.2em] flex items-center gap-2">
-                                            <FileText className="h-5 w-5" /> Evidencia Documental (OCR Forensic)
+                                        <section className="space-y-3">
+                                          <h4 className="text-[9px] font-black uppercase text-primary tracking-[0.15em] flex items-center gap-1.5">
+                                            <FileText className="h-4 w-4" /> Evidencia Documental (OCR Forensic)
                                           </h4>
-                                          <div className="grid gap-4">
+                                          <div className="grid gap-3">
                                             {order.pdfEvidenceFragments.map((frag: any, i: number) => (
-                                              <Card key={i} className="p-6 border-none bg-primary/5 rounded-2xl relative group hover:bg-primary/10 transition-all">
-                                                <div className="flex justify-between items-start mb-3">
-                                                  <Badge variant="outline" className="text-[9px] uppercase font-bold text-primary/60 border-primary/10">
+                                              <Card key={i} className="p-4 border-none bg-primary/5 rounded-xl relative group hover:bg-primary/10 transition-all">
+                                                <div className="flex justify-between items-start mb-2">
+                                                  <Badge variant="outline" className="text-[8px] uppercase font-bold text-primary/60 border-primary/10">
                                                     <MapPin className="h-3 w-3 mr-1" /> Sección: {frag.section}
                                                   </Badge>
-                                                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Página {frag.page}</span>
+                                                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Pág. {frag.page}</span>
                                                 </div>
-                                                <p className="text-sm text-slate-700 font-medium leading-relaxed italic border-l-2 border-primary/20 pl-4">
+                                                <p className="text-[11px] text-slate-700 font-medium leading-relaxed italic border-l-2 border-primary/20 pl-3">
                                                   "{frag.text}"
                                                 </p>
                                               </Card>
@@ -644,31 +643,31 @@ export default function AnalysisPage() {
                                       )}
 
                                       <section>
-                                        <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
-                                          <BookOpenCheck className="h-4 w-4 text-primary" /> Descripción Original del Registro
+                                        <h4 className="text-[9px] font-black uppercase text-slate-400 tracking-[0.15em] mb-2 flex items-center gap-1.5">
+                                          <BookOpenCheck className="h-3.5 w-3.5 text-primary" /> Descripción Original
                                         </h4>
-                                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 italic text-slate-700 text-sm leading-relaxed">
+                                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 italic text-slate-700 text-[11px] leading-relaxed">
                                           "{order.descripcion_original || order.descripcion}"
                                         </div>
                                       </section>
 
-                                      <div className="grid md:grid-cols-2 gap-8">
-                                        <Card className="p-6 md:p-8 border-none bg-slate-900 text-white rounded-3xl shadow-xl overflow-hidden relative">
-                                          <div className="absolute top-0 right-0 p-4 opacity-10">
-                                            <Fingerprint className="h-24 w-24" />
+                                      <div className="grid md:grid-cols-2 gap-5">
+                                        <Card className="p-5 border-none bg-slate-900 text-white rounded-2xl shadow-xl overflow-hidden relative">
+                                          <div className="absolute top-0 right-0 p-3 opacity-10">
+                                            <Fingerprint className="h-16 w-16" />
                                           </div>
-                                          <h4 className="text-[10px] font-black uppercase text-slate-400 mb-6 flex items-center gap-2">
-                                            <SearchCode className="h-4 w-4 text-accent" /> Razonamiento Forense Gemini
+                                          <h4 className="text-[8px] font-black uppercase text-slate-400 mb-4 flex items-center gap-1.5">
+                                            <SearchCode className="h-3.5 w-3.5 text-accent" /> Razonamiento Forense Gemini
                                           </h4>
-                                          <p className="text-sm font-medium leading-relaxed mb-8">
+                                          <p className="text-[11px] font-medium leading-relaxed mb-6">
                                             {order.rationale_tecnico || "Análisis automatizado basado en taxonomía MEP."}
                                           </p>
-                                          <div className="space-y-4">
+                                          <div className="space-y-3">
                                             <div>
-                                              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Términos de Evidencia</p>
-                                              <div className="flex flex-wrap gap-2">
+                                              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2">Términos de Evidencia</p>
+                                              <div className="flex flex-wrap gap-1.5">
                                                 {order.evidence_terms?.map((term: string, i: number) => (
-                                                  <Badge key={i} variant="secondary" className="bg-white/10 text-white border-none text-[9px] font-bold px-3 py-1">
+                                                  <Badge key={i} variant="secondary" className="bg-white/10 text-white border-none text-[8px] font-bold px-2 py-0.5">
                                                     {term}
                                                   </Badge>
                                                 ))}
@@ -677,52 +676,52 @@ export default function AnalysisPage() {
                                           </div>
                                         </Card>
 
-                                        <Card className="p-6 md:p-8 border-none bg-white rounded-3xl shadow-sm border border-slate-100">
-                                          <h4 className="text-[10px] font-black uppercase text-primary mb-6 flex items-center gap-2 tracking-widest">
-                                            <Microscope className="h-4 w-4" /> Lógica de Clasificación
+                                        <Card className="p-5 border-none bg-white rounded-2xl shadow-sm border border-slate-100">
+                                          <h4 className="text-[8px] font-black uppercase text-primary mb-4 flex items-center gap-1.5 tracking-widest">
+                                            <Microscope className="h-3.5 w-3.5" /> Lógica de Clasificación
                                           </h4>
-                                          <div className="space-y-6">
-                                            <div className="space-y-1">
-                                              <p className="text-[9px] font-black text-slate-400 uppercase">Criterio Aplicado</p>
-                                              <p className="text-sm font-bold text-slate-800">{order.logica_clasificacion?.criterio_aplicado || "Inferencia Semántica"}</p>
+                                          <div className="space-y-4">
+                                            <div className="space-y-0.5">
+                                              <p className="text-[8px] font-black text-slate-400 uppercase">Criterio Aplicado</p>
+                                              <p className="text-[11px] font-bold text-slate-800">{order.logica_clasificacion?.criterio_aplicado || "Inferencia Semántica"}</p>
                                             </div>
-                                            <div className="space-y-1">
-                                              <p className="text-[9px] font-black text-slate-400 uppercase">Taxonomía Nivel 3</p>
-                                              <p className="text-sm font-bold text-slate-800">{order.detalle_nivel_3 || "No determinado"}</p>
+                                            <div className="space-y-0.5">
+                                              <p className="text-[8px] font-black text-slate-400 uppercase">Taxonomía Nivel 3</p>
+                                              <p className="text-[11px] font-bold text-slate-800">{order.detalle_nivel_3 || "No determinado"}</p>
                                             </div>
                                             <Separator className="bg-slate-50" />
-                                            <div className="space-y-2">
-                                              <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
-                                                <AlertTriangle className="h-3 w-3 text-rose-500" /> Ambigüedades Detectadas
+                                            <div className="space-y-1">
+                                              <p className="text-[8px] font-black text-slate-400 uppercase flex items-center gap-1">
+                                                <AlertTriangle className="h-3 w-3 text-rose-500" /> Ambigüedades
                                               </p>
-                                              <p className="text-xs text-slate-500 italic leading-relaxed">
-                                                {order.logica_clasificacion?.posibles_ambiguedades || "Ninguna detectada. Clasificación robusta."}
+                                              <p className="text-[10px] text-slate-500 italic leading-relaxed">
+                                                {order.logica_clasificacion?.posibles_ambiguedades || "Ninguna detectada."}
                                               </p>
                                             </div>
                                           </div>
                                         </Card>
                                       </div>
 
-                                      <div className="flex flex-col md:flex-row items-center justify-between pt-8 gap-6 border-t mt-4">
-                                        <div className="flex items-center gap-6">
+                                      <div className="flex flex-col md:flex-row items-center justify-between pt-6 gap-4 border-t mt-2">
+                                        <div className="flex items-center gap-5">
                                           <div className="text-center">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Confianza</p>
-                                            <span className={`text-2xl font-headline font-bold ${order.confidence_score > 0.8 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                            <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Confianza</p>
+                                            <span className={`text-xl font-headline font-bold ${order.confidence_score > 0.8 ? 'text-emerald-600' : 'text-amber-600'}`}>
                                               {Math.round(order.confidence_score * 100)}%
                                             </span>
                                           </div>
-                                          <Separator orientation="vertical" className="h-12" />
+                                          <Separator orientation="vertical" className="h-10" />
                                           <div className="text-center">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Impacto</p>
-                                            <span className="text-xl font-headline font-bold text-slate-800">${formatAmount(order.impactoNeto || 0)}</span>
+                                            <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Impacto</p>
+                                            <span className="text-lg font-headline font-bold text-slate-800">${formatAmount(order.impactoNeto || 0)}</span>
                                           </div>
                                         </div>
-                                        <div className="flex gap-3 w-full md:w-auto">
-                                          <Button variant="outline" onClick={() => handleStartEditing(order)} className="flex-1 md:flex-none rounded-xl px-6 md:px-8 h-12 text-[10px] font-black uppercase tracking-widest border-2">
-                                            Corregir Manual
+                                        <div className="flex gap-2 w-full md:w-auto">
+                                          <Button variant="outline" onClick={() => handleStartEditing(order)} className="flex-1 md:flex-none rounded-lg px-5 h-10 text-[9px] font-black uppercase tracking-widest border-2">
+                                            Corregir
                                           </Button>
-                                          <Button onClick={() => handleValidateAudit(order)} className="flex-1 md:flex-none rounded-xl px-6 md:px-8 h-12 text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
-                                            Validar Auditoría
+                                          <Button onClick={() => handleValidateAudit(order)} className="flex-1 md:flex-none rounded-lg px-6 h-10 text-[9px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
+                                            Validar
                                           </Button>
                                         </div>
                                       </div>
@@ -731,20 +730,20 @@ export default function AnalysisPage() {
                                 </ScrollArea>
 
                                 {isEditing && (
-                                  <div className="absolute inset-0 bg-white z-20 p-6 md:p-10 animate-in slide-in-from-bottom-10 overflow-y-auto">
-                                    <div className="max-w-4xl mx-auto space-y-10 pb-20">
+                                  <div className="absolute inset-0 bg-white z-20 p-6 md:p-8 animate-in slide-in-from-bottom-10 overflow-y-auto">
+                                    <div className="max-w-4xl mx-auto space-y-8 pb-20">
                                       <div className="flex justify-between items-center">
-                                        <h3 className="text-2xl font-headline font-bold text-slate-900">Sobreescritura Manual</h3>
+                                        <h3 className="text-xl font-headline font-bold text-slate-900">Sobreescritura Manual</h3>
                                         <Button variant="ghost" size="icon" onClick={() => setIsEditing(false)} className="rounded-full">
-                                          <X className="h-6 w-6" />
+                                          <X className="h-5 w-5" />
                                         </Button>
                                       </div>
-                                      <div className="grid md:grid-cols-2 gap-10">
-                                        <div className="space-y-6">
-                                          <div className="space-y-2">
-                                            <Label className="text-[10px] font-black uppercase text-slate-400">Disciplina Técnica</Label>
+                                      <div className="grid md:grid-cols-2 gap-8">
+                                        <div className="space-y-4">
+                                          <div className="space-y-1.5">
+                                            <Label className="text-[9px] font-black uppercase text-slate-400">Disciplina Técnica</Label>
                                             <Select value={editValues.disciplina} onValueChange={(v) => setEditValues({...editValues, disciplina: v})}>
-                                              <SelectTrigger className="h-12 rounded-xl text-sm font-bold">
+                                              <SelectTrigger className="h-10 rounded-xl text-xs font-bold">
                                                 <SelectValue placeholder="Seleccionar Disciplina" />
                                               </SelectTrigger>
                                               <SelectContent>
@@ -752,10 +751,10 @@ export default function AnalysisPage() {
                                               </SelectContent>
                                             </Select>
                                           </div>
-                                          <div className="space-y-2">
-                                            <Label className="text-[10px] font-black uppercase text-slate-400">Causa Raíz</Label>
+                                          <div className="space-y-1.5">
+                                            <Label className="text-[9px] font-black uppercase text-slate-400">Causa Raíz</Label>
                                             <Select value={editValues.causa} onValueChange={(v) => setEditValues({...editValues, causa: v})}>
-                                              <SelectTrigger className="h-12 rounded-xl text-sm font-bold">
+                                              <SelectTrigger className="h-10 rounded-xl text-xs font-bold">
                                                 <SelectValue placeholder="Seleccionar Causa" />
                                               </SelectTrigger>
                                               <SelectContent>
@@ -763,35 +762,35 @@ export default function AnalysisPage() {
                                               </SelectContent>
                                             </Select>
                                           </div>
-                                          <div className="space-y-2">
-                                            <Label className="text-[10px] font-black uppercase text-slate-400">Subcausa / Detalle</Label>
+                                          <div className="space-y-1.5">
+                                            <Label className="text-[9px] font-black uppercase text-slate-400">Subcausa / Detalle</Label>
                                             <Input 
                                               value={editValues.subcausa} 
                                               onChange={(e) => setEditValues({...editValues, subcausa: e.target.value})}
-                                              className="h-12 rounded-xl font-bold"
+                                              className="h-10 rounded-xl font-bold text-xs"
                                               placeholder="Especifique el detalle técnico..."
                                             />
                                           </div>
                                         </div>
-                                        <div className="bg-slate-50 p-8 rounded-3xl border border-dashed border-slate-200">
-                                          <h4 className="text-[10px] font-black uppercase text-slate-400 mb-6 flex items-center gap-2">
-                                            <ShieldAlert className="h-4 w-4" /> Notas de Gobernanza
+                                        <div className="bg-slate-50 p-6 rounded-2xl border border-dashed border-slate-200">
+                                          <h4 className="text-[9px] font-black uppercase text-slate-400 mb-4 flex items-center gap-1.5">
+                                            <ShieldAlert className="h-3.5 w-3.5" /> Notas de Gobernanza
                                           </h4>
-                                          <p className="text-sm text-slate-500 leading-relaxed italic mb-6">
-                                            "Al aplicar una corrección manual, el registro se marcará como **'Overridden'**. La IA aprenderá de esta decisión para futuras auditorías de este PID."
+                                          <p className="text-xs text-slate-500 leading-relaxed italic mb-4">
+                                            "Al aplicar una corrección manual, el registro se marcará como **'Overridden'**. La IA aprenderá de esta decisión."
                                           </p>
-                                          <div className="flex items-center gap-2 text-rose-500">
-                                            <AlertTriangle className="h-4 w-4" />
-                                            <span className="text-[10px] font-black uppercase tracking-widest">Esta acción es permanente</span>
+                                          <div className="flex items-center gap-1.5 text-rose-500">
+                                            <AlertTriangle className="h-3.5 w-3.5" />
+                                            <span className="text-[9px] font-black uppercase tracking-widest">Esta acción es permanente</span>
                                           </div>
                                         </div>
                                       </div>
-                                      <div className="flex justify-end gap-4 pt-10 border-t">
-                                        <Button variant="ghost" onClick={() => setIsEditing(false)} className="rounded-xl px-10 h-12 text-[10px] font-black uppercase tracking-widest border-2">
+                                      <div className="flex justify-end gap-3 pt-8 border-t">
+                                        <Button variant="ghost" onClick={() => setIsEditing(false)} className="rounded-lg px-8 h-10 text-[9px] font-black uppercase tracking-widest border-2">
                                           Descartar
                                         </Button>
-                                        <Button onClick={() => handleSaveManualOverride(order.id)} className="rounded-xl px-12 h-12 text-[10px] font-black uppercase tracking-widest shadow-xl shadow-primary/20 bg-primary">
-                                          <Save className="h-4 w-4 mr-2" /> Aplicar Cambio
+                                        <Button onClick={() => handleSaveManualOverride(order.id)} className="rounded-lg px-10 h-10 text-[9px] font-black uppercase tracking-widest shadow-xl shadow-primary/20 bg-primary">
+                                          <Save className="h-3.5 w-3.5 mr-1.5" /> Aplicar Cambio
                                         </Button>
                                       </div>
                                     </div>
