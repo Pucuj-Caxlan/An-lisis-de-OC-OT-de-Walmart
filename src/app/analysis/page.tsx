@@ -31,7 +31,10 @@ import {
   X,
   Lock,
   Flag,
-  Signature
+  Signature,
+  Zap,
+  MoreVertical,
+  ChevronDown
 } from 'lucide-react';
 import {
   Table,
@@ -47,6 +50,7 @@ import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebas
 import { collection, query, limit, doc, writeBatch, setDoc } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { generateTraceabilityReport, TraceabilityReportOutput } from '@/ai/flows/traceability-report-flow';
+import { analyzeBulkOrders, BulkIntelligenceOutput } from '@/ai/flows/bulk-intelligence-analysis-flow';
 import {
   Dialog,
   DialogContent,
@@ -93,6 +97,7 @@ export default function AnalysisPage() {
   const [reportResult, setReportResult] = useState<TraceabilityReportOutput | null>(null);
   const [mounted, setMounted] = useState(false);
   
+  // Estados de Selección y Procesamiento Masivo
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
@@ -100,8 +105,11 @@ export default function AnalysisPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteMode, setDeleteMode] = useState<DeletionMode>('bulk');
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [editValues, setEditValues] = useState({ disciplina: '', causa: '' });
+  // Estados de IA Masiva
+  const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
+  const [isBulkAiProcessing, setIsBulkAiProcessing] = useState(false);
+  const [bulkAiProgress, setBulkAiProgress] = useState(0);
+  const [bulkAiResult, setBulkAiResult] = useState<BulkIntelligenceOutput | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -136,6 +144,24 @@ export default function AnalysisPage() {
     }) || [];
   }, [orders, searchTerm, statusFilter]);
 
+  const selectedTotalAmount = useMemo(() => {
+    return filteredOrders
+      .filter(o => selectedIds.includes(o.id))
+      .reduce((acc, curr) => acc + (curr.impactoNeto || 0), 0);
+  }, [filteredOrders, selectedIds]);
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filteredOrders.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredOrders.map(o => o.id));
+    }
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
   const handleValidateAudit = (orderId: string) => {
     if (!db || !user) return;
     updateDocumentNonBlocking(doc(db, 'orders', orderId), {
@@ -145,6 +171,92 @@ export default function AnalysisPage() {
       auditedAt: new Date().toISOString()
     });
     toast({ title: "Auditoría Validada" });
+  };
+
+  const handleBulkAudit = async () => {
+    if (!db || !user || selectedIds.length === 0) return;
+    setIsAuditing(true);
+    try {
+      const batch = writeBatch(db);
+      selectedIds.forEach(id => {
+        const ref = doc(db, 'orders', id);
+        batch.update(ref, {
+          classification_status: 'reviewed',
+          needs_review: false,
+          auditedBy: user.uid,
+          auditedAt: new Date().toISOString()
+        });
+      });
+      await batch.commit();
+      toast({ title: "Auditoría Masiva Completada", description: `${selectedIds.length} registros validados.` });
+      setSelectedIds([]);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error en Auditoría", description: e.message });
+    } finally {
+      setIsAuditing(false);
+    }
+  };
+
+  const handleBulkDeletion = async () => {
+    if (!db || !user || deleteConfirmText !== 'BORRAR') return;
+    setIsDeleting(true);
+    try {
+      await executeDeletion(db, user, deleteMode, selectedIds);
+      toast({ title: "Registros Eliminados", description: "El borrado masivo finalizó con éxito." });
+      setShowDeleteConfirm(false);
+      setSelectedIds([]);
+      setDeleteConfirmText('');
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error en Borrado", description: e.message });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleBulkAiAnalysis = async () => {
+    if (selectedIds.length < 2) {
+      toast({ variant: "destructive", title: "Selección insuficiente", description: "Seleccione al menos 2 registros." });
+      return;
+    }
+
+    setShowBulkAiDialog(true);
+    setIsBulkAiProcessing(true);
+    setBulkAiProgress(0);
+    setBulkAiResult(null);
+
+    try {
+      const selectedOrders = filteredOrders.filter(o => selectedIds.includes(o.id));
+      const BATCH_SIZE = 30; // Lotes pequeños para estabilidad
+      let consolidatedData: any[] = [];
+
+      for (let i = 0; i < selectedOrders.length; i += BATCH_SIZE) {
+        const chunk = selectedOrders.slice(i, i + BATCH_SIZE).map(o => ({
+          id: o.id,
+          projectId: o.projectId,
+          projectName: o.projectName,
+          impactoNeto: o.impactoNeto,
+          disciplina_normalizada: o.disciplina_normalizada,
+          causa_raiz_normalizada: o.causa_raiz_normalizada,
+          descripcion: String(o.descripcion || "").substring(0, 400),
+          isSigned: o.isSigned,
+          fechaSolicitud: o.fechaSolicitud
+        }));
+
+        const chunkResult = await analyzeBulkOrders({ orders: chunk });
+        consolidatedData.push(chunkResult);
+        setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
+        await new Promise(r => setTimeout(r, 500)); // Throttle
+      }
+
+      // Mezclar resultados (para el MVP usamos el último como resumen global)
+      setBulkAiResult(consolidatedData[consolidatedData.length - 1]);
+      toast({ title: "Análisis Masivo Finalizado", description: "Se detectaron patrones y riesgos de grupo." });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Fallo en IA Masiva", description: e.message });
+      setShowBulkAiDialog(false);
+    } finally {
+      setIsBulkAiProcessing(false);
+    }
   };
 
   return (
@@ -173,6 +285,7 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6 space-y-6">
+          {/* Panel de Estadísticas Superiores */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
@@ -197,10 +310,63 @@ export default function AnalysisPage() {
             </Card>
           </div>
 
+          {/* Panel de Acciones Masivas (Aparece al seleccionar registros) */}
+          {selectedIds.length > 0 && (
+            <Card className="border-none shadow-xl bg-primary text-white p-4 flex flex-col md:flex-row items-center justify-between gap-4 animate-in slide-in-from-top-2 duration-300">
+              <div className="flex items-center gap-4">
+                <div className="bg-white/20 p-2 rounded-xl">
+                  <LayoutGrid className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest opacity-80">Selección Activa</p>
+                  <h4 className="text-lg font-headline font-bold">{selectedIds.length} Registros • <span className="text-accent">${formatAmount(selectedTotalAmount)}</span></h4>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button 
+                  onClick={handleBulkAiAnalysis}
+                  variant="outline" 
+                  className="bg-white/10 border-white/20 text-white hover:bg-white/20 gap-2 h-10 px-6 rounded-xl"
+                >
+                  <Sparkles className="h-4 w-4" /> Análisis Masivo IA
+                </Button>
+                <Button 
+                  onClick={handleBulkAudit}
+                  disabled={isAuditing}
+                  className="bg-white text-primary hover:bg-white/90 gap-2 h-10 px-6 rounded-xl font-bold"
+                >
+                  {isAuditing ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Auditar Lote
+                </Button>
+                <Separator orientation="vertical" className="h-8 bg-white/20 mx-2" />
+                <Button 
+                  onClick={() => { setDeleteMode('bulk'); setShowDeleteConfirm(true); }}
+                  variant="ghost" 
+                  className="text-rose-200 hover:text-white hover:bg-rose-500/20 h-10 w-10 p-0 rounded-xl"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+                <Button 
+                  onClick={() => setSelectedIds([])}
+                  variant="ghost" 
+                  className="text-white/60 hover:text-white h-10 w-10 p-0 rounded-xl"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+            </Card>
+          )}
+
           <Card className="border-none shadow-md overflow-hidden bg-white rounded-2xl">
             <Table>
               <TableHeader className="bg-slate-50/50">
                 <TableRow>
+                  <TableHead className="w-12 text-center">
+                    <Checkbox 
+                      checked={selectedIds.length === filteredOrders.length && filteredOrders.length > 0}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  </TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Origen / Nivel Trust</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Clasificación IA</TableHead>
@@ -211,9 +377,15 @@ export default function AnalysisPage() {
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow><TableCell colSpan={6} className="text-center py-24"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center py-24"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
                 ) : filteredOrders.map((order) => (
-                  <TableRow key={order.id} className="hover:bg-slate-50/50 group transition-colors">
+                  <TableRow key={order.id} className={`hover:bg-slate-50/50 group transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
+                    <TableCell className="text-center">
+                      <Checkbox 
+                        checked={selectedIds.includes(order.id)}
+                        onCheckedChange={() => toggleSelectOne(order.id)}
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1.5">
                         <Badge variant="outline" className={`text-[8px] font-black border-none h-4 px-1.5 w-fit ${order.reliability_level === 'HIGH' ? 'bg-emerald-100 text-emerald-700' : order.reliability_level === 'MEDIUM' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
@@ -266,50 +438,136 @@ export default function AnalysisPage() {
                               </div>
                             </header>
                             <ScrollArea className="max-h-[70vh] bg-slate-50 p-6">
-                              <div className="grid md:grid-cols-3 gap-6">
-                                <Card className="p-4 bg-white border-none shadow-sm rounded-2xl space-y-4">
-                                  <h4 className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-500" /> Nivel de Integridad</h4>
-                                  <div className="flex items-end justify-between">
-                                    <span className="text-4xl font-headline font-bold">{order.structural_quality_score || 0}%</span>
-                                    <Badge variant="outline" className="text-[8px] font-black">{order.reliability_level}</Badge>
-                                  </div>
-                                  <Progress value={order.structural_quality_score || 0} className="h-1.5" />
-                                  <p className="text-[10px] text-slate-500 italic">Score calculado por el motor estructural basado en 12 variables institucionales.</p>
-                                </Card>
-                                <Card className="md:col-span-2 p-4 bg-slate-900 text-white border-none shadow-sm rounded-2xl relative overflow-hidden">
-                                  <BrainCircuit className="absolute -bottom-2 -right-2 h-20 w-20 opacity-5" />
-                                  <h4 className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2"><Sparkles className="h-4 w-4 text-accent" /> Rationale Forense</h4>
-                                  <p className="text-xs font-medium text-slate-300 leading-relaxed italic mt-4">"{order.rationale_tecnico || "Analizando coherencia semántica entre descripción y causa raíz histórica..."}"</p>
-                                  <div className="flex gap-2 mt-6">
-                                    <Badge className="bg-white/10 text-white border-none text-[8px] uppercase">{order.disciplina_normalizada}</Badge>
-                                    <Badge className="bg-white/10 text-white border-none text-[8px] uppercase">{order.causa_raiz_normalizada}</Badge>
-                                  </div>
-                                </Card>
-                              </div>
-                              <div className="mt-6">
-                                <h4 className="text-[10px] font-black text-primary uppercase tracking-widest mb-4">Detalle de Inferencia Estructural</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                  <div className="bg-white p-3 rounded-xl border border-slate-100">
-                                    <p className="text-[8px] font-black text-slate-400 uppercase">Trazabilidad PDF</p>
-                                    <p className="text-[10px] font-bold uppercase">{order.pdf_traceability_reconstructed ? 'SÍ (Reconstruida)' : 'NO'}</p>
-                                  </div>
-                                  <div className="bg-white p-3 rounded-xl border border-slate-100">
-                                    <p className="text-[8px] font-black text-slate-400 uppercase">Fuente Original</p>
-                                    <p className="text-[10px] font-bold uppercase">{order.dataSource}</p>
-                                  </div>
-                                  <div className="bg-white p-3 rounded-xl border border-slate-100">
-                                    <p className="text-[8px] font-black text-slate-400 uppercase">Firmas Detectadas</p>
-                                    <p className="text-[10px] font-bold uppercase">{order.isSigned ? 'SÍ (DocuSign)' : 'BITÁCORA NO FIRMADA'}</p>
-                                  </div>
-                                  <div className="bg-white p-3 rounded-xl border border-slate-100">
-                                    <p className="text-[8px] font-black text-slate-400 uppercase">Fecha Solicitud</p>
-                                    <p className="text-[10px] font-bold uppercase">{order.fechaSolicitud || 'N/A'}</p>
+                              {reportResult ? (
+                                <div className="space-y-8 animate-in fade-in duration-500">
+                                  {/* Cabecera del Reporte de IA */}
+                                  <section className="grid md:grid-cols-3 gap-6">
+                                    <Card className="p-5 bg-white border-none shadow-sm rounded-2xl space-y-4">
+                                      <h4 className="text-[10px] font-black text-primary uppercase tracking-widest">Resumen Ejecutivo</h4>
+                                      <p className="text-xs font-medium text-slate-600 leading-relaxed">{reportResult.executiveSummary.overview}</p>
+                                      <div className="pt-2">
+                                        <Badge className={`${reportResult.executiveSummary.currentRisk === 'P0' ? 'bg-rose-500' : 'bg-amber-500'} text-white border-none`}>
+                                          PRIORIDAD {reportResult.executiveSummary.currentRisk}
+                                        </Badge>
+                                      </div>
+                                    </Card>
+                                    <Card className="md:col-span-2 p-5 bg-slate-900 text-white border-none shadow-sm rounded-2xl relative overflow-hidden">
+                                      <Zap className="absolute -bottom-4 -right-4 h-32 w-32 opacity-5 text-accent" />
+                                      <h4 className="text-[10px] font-black text-accent uppercase tracking-widest">Análisis Profundo</h4>
+                                      <p className="text-xs font-medium text-slate-300 leading-relaxed mt-4 italic">"{reportResult.deepAnalysis.recurrentPatterns}"</p>
+                                      <div className="flex gap-2 mt-6">
+                                        {reportResult.deepAnalysis.mainDrivers.map((d, i) => (
+                                          <Badge key={i} className="bg-white/10 text-white border-none text-[8px] uppercase">{d}</Badge>
+                                        ))}
+                                      </div>
+                                    </Card>
+                                  </section>
+
+                                  {/* Línea de Tiempo Forense */}
+                                  <section className="space-y-4">
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                      <History className="h-4 w-4 text-primary" /> Reconstrucción de Línea de Tiempo
+                                    </h4>
+                                    <div className="space-y-3">
+                                      {reportResult.forensicTimeline.map((ev, i) => (
+                                        <div key={i} className="flex items-center gap-4 bg-white p-3 rounded-xl border border-slate-100">
+                                          <div className="h-8 w-8 bg-slate-50 rounded-lg flex items-center justify-center shrink-0">
+                                            <span className="text-[10px] font-black text-slate-400">{i + 1}</span>
+                                          </div>
+                                          <div className="flex-1">
+                                            <p className="text-[10px] font-bold text-slate-800">{ev.event}</p>
+                                            <p className="text-[9px] text-slate-400 uppercase">{ev.evidence}</p>
+                                          </div>
+                                          <div className="text-right">
+                                            <p className="text-[10px] font-black text-primary">{ev.date}</p>
+                                            {ev.gapDays !== undefined && <p className="text-[8px] text-emerald-500 font-bold">+{ev.gapDays} DÍAS</p>}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </section>
+
+                                  {/* Recomendaciones de Mitigación */}
+                                  <section className="space-y-4">
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Planes de Acción Sugeridos</h4>
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                      {reportResult.recommendations.map((rec, i) => (
+                                        <div key={i} className={`p-4 rounded-2xl border-2 ${rec.priority === 'Alta' ? 'border-rose-100 bg-rose-50/30' : 'border-slate-100 bg-white'}`}>
+                                          <div className="flex justify-between items-start mb-2">
+                                            <Badge className={`${rec.type === 'Correctiva' ? 'bg-rose-500' : 'bg-primary'} text-white text-[8px] uppercase border-none`}>{rec.type}</Badge>
+                                            <span className="text-[8px] font-black text-slate-400 uppercase">{rec.owner}</span>
+                                          </div>
+                                          <p className="text-[11px] font-bold text-slate-800 leading-tight">{rec.action}</p>
+                                          <p className="text-[9px] text-slate-500 mt-2 italic">Impacto: {rec.expectedImpact}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </section>
+                                </div>
+                              ) : (
+                                <div className="grid md:grid-cols-3 gap-6">
+                                  <Card className="p-4 bg-white border-none shadow-sm rounded-2xl space-y-4">
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-500" /> Nivel de Integridad</h4>
+                                    <div className="flex items-end justify-between">
+                                      <span className="text-4xl font-headline font-bold">{order.structural_quality_score || 0}%</span>
+                                      <Badge variant="outline" className="text-[8px] font-black">{order.reliability_level}</Badge>
+                                    </div>
+                                    <Progress value={order.structural_quality_score || 0} className="h-1.5" />
+                                    <p className="text-[10px] text-slate-500 italic">Score calculado por el motor estructural basado en 12 variables institucionales.</p>
+                                  </Card>
+                                  <Card className="md:col-span-2 p-4 bg-slate-900 text-white border-none shadow-sm rounded-2xl relative overflow-hidden">
+                                    <BrainCircuit className="absolute -bottom-2 -right-2 h-20 w-20 opacity-5" />
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2"><Sparkles className="h-4 w-4 text-accent" /> Rationale Forense</h4>
+                                    <p className="text-xs font-medium text-slate-300 leading-relaxed italic mt-4">"{order.rationale_tecnico || "Analizando coherencia semántica entre descripción y causa raíz histórica..."}"</p>
+                                    <div className="flex gap-2 mt-6">
+                                      <Badge className="bg-white/10 text-white border-none text-[8px] uppercase">{order.disciplina_normalizada}</Badge>
+                                      <Badge className="bg-white/10 text-white border-none text-[8px] uppercase">{order.causa_raiz_normalizada}</Badge>
+                                    </div>
+                                  </Card>
+                                  <div className="md:col-span-3 mt-6">
+                                    <h4 className="text-[10px] font-black text-primary uppercase tracking-widest mb-4">Detalle de Inferencia Estructural</h4>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                      <div className="bg-white p-3 rounded-xl border border-slate-100">
+                                        <p className="text-[8px] font-black text-slate-400 uppercase">Trazabilidad PDF</p>
+                                        <p className="text-[10px] font-bold uppercase">{order.pdf_traceability_reconstructed ? 'SÍ (Reconstruida)' : 'NO'}</p>
+                                      </div>
+                                      <div className="bg-white p-3 rounded-xl border border-slate-100">
+                                        <p className="text-[8px] font-black text-slate-400 uppercase">Fuente Original</p>
+                                        <p className="text-[10px] font-bold uppercase">{order.dataSource}</p>
+                                      </div>
+                                      <div className="bg-white p-3 rounded-xl border border-slate-100">
+                                        <p className="text-[8px] font-black text-slate-400 uppercase">Firmas Detectadas</p>
+                                        <p className="text-[10px] font-bold uppercase">{order.isSigned ? 'SÍ (DocuSign)' : 'BITÁCORA NO FIRMADA'}</p>
+                                      </div>
+                                      <div className="bg-white p-3 rounded-xl border border-slate-100">
+                                        <p className="text-[8px] font-black text-slate-400 uppercase">Fecha Solicitud</p>
+                                        <p className="text-[10px] font-bold uppercase">{order.fechaSolicitud || 'N/A'}</p>
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
+                              )}
                             </ScrollArea>
                             <footer className="p-4 bg-white border-t flex justify-end gap-3">
-                              <Button variant="outline" className="rounded-xl uppercase text-[9px] font-black px-6 h-9">Generar Reporte 360</Button>
+                              <Button 
+                                variant="outline" 
+                                className="rounded-xl uppercase text-[9px] font-black px-6 h-9"
+                                disabled={isGeneratingReport}
+                                onClick={async () => {
+                                  setIsGeneratingReport(true);
+                                  try {
+                                    const result = await generateTraceabilityReport({ orderData: order });
+                                    setReportResult(result);
+                                  } catch (e) {
+                                    toast({ variant: "destructive", title: "Fallo al generar reporte" });
+                                  } finally {
+                                    setIsGeneratingReport(false);
+                                  }
+                                }}
+                              >
+                                {isGeneratingReport ? <RefreshCcw className="h-3 w-3 animate-spin mr-2" /> : <TrendingUp className="h-3 w-3 mr-2" />}
+                                Generar Reporte 360
+                              </Button>
                               <Button onClick={() => handleValidateAudit(order.id)} className="rounded-xl uppercase text-[9px] font-black px-8 h-9 shadow-lg shadow-primary/20">Validar Auditoría</Button>
                             </footer>
                           </DialogContent>
@@ -323,6 +581,141 @@ export default function AnalysisPage() {
             </Table>
           </Card>
         </main>
+
+        {/* DIÁLOGOS DE CONFIRMACIÓN Y PROCESAMIENTO */}
+
+        {/* Diálogo de IA Masiva */}
+        <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
+          <DialogContent className="max-w-3xl rounded-3xl border-none shadow-2xl p-0 overflow-hidden bg-white">
+            <header className="bg-slate-900 text-white p-6 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="bg-primary p-2 rounded-xl">
+                  <BrainCircuit className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <DialogTitle className="text-xl font-headline font-bold uppercase tracking-tight">Inteligencia de Grupo IA</DialogTitle>
+                  <DialogDescription className="text-slate-400 text-xs uppercase">Analizando {selectedIds.length} registros seleccionados</DialogDescription>
+                </div>
+              </div>
+              <Button variant="ghost" onClick={() => setShowBulkAiDialog(false)} className="text-white/70 hover:text-white h-8 w-8 p-0">
+                <X className="h-4 w-4" />
+              </Button>
+            </header>
+
+            <div className="p-8">
+              {isBulkAiProcessing ? (
+                <div className="space-y-8 py-12 text-center">
+                  <div className="relative h-24 w-24 mx-auto">
+                    <RefreshCcw className="h-24 w-24 text-primary opacity-10 animate-spin" />
+                    <Sparkles className="h-8 w-8 text-accent absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-lg font-bold text-slate-800 uppercase tracking-widest">Sincronizando Motores Forenses...</h3>
+                    <p className="text-xs text-slate-400">Gemini está identificando patrones de riesgo en el lote.</p>
+                  </div>
+                  <div className="max-w-xs mx-auto space-y-2">
+                    <div className="flex justify-between text-[10px] font-black text-primary">
+                      <span>PROGRESO</span>
+                      <span>{bulkAiProgress}%</span>
+                    </div>
+                    <Progress value={bulkAiProgress} className="h-1.5" />
+                  </div>
+                </div>
+              ) : bulkAiResult ? (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                  <div className="bg-slate-50 p-6 rounded-2xl border-2 border-primary/10 relative overflow-hidden">
+                    <Zap className="absolute top-2 right-2 h-12 w-12 text-primary/5" />
+                    <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-4">Resumen de Inteligencia</h4>
+                    <p className="text-sm font-medium text-slate-700 leading-relaxed italic">"{bulkAiResult.executiveSummary}"</p>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <ShieldAlert className="h-4 w-4 text-rose-500" /> Anomalías Detectadas
+                      </h4>
+                      <div className="space-y-2">
+                        {bulkAiResult.anomaliesDetected.map((anom, i) => (
+                          <div key={i} className="bg-rose-50 p-3 rounded-xl border border-rose-100">
+                            <p className="text-[10px] font-bold text-rose-900">{anom.issue}</p>
+                            <p className="text-[9px] text-rose-700/70">{anom.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Recomendaciones de Grupo
+                      </h4>
+                      <div className="space-y-2">
+                        {bulkAiResult.recommendations.map((rec, i) => (
+                          <div key={i} className="bg-emerald-50 p-3 rounded-xl border border-emerald-100 flex items-start gap-2">
+                            <Zap className="h-3 w-3 text-emerald-600 mt-0.5" />
+                            <p className="text-[10px] font-bold text-emerald-900">{rec}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 flex justify-between items-center border-t">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase">Impacto Total Auditado</p>
+                      <p className="text-xl font-headline font-bold text-primary">${formatAmount(selectedTotalAmount)}</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <Button variant="outline" onClick={() => setShowBulkAiDialog(false)} className="rounded-xl h-10 px-6 uppercase text-[10px] font-black">Cerrar</Button>
+                      <Button 
+                        onClick={handleBulkAudit}
+                        className="rounded-xl h-10 px-8 bg-primary hover:bg-primary/90 text-white uppercase text-[10px] font-black shadow-lg shadow-primary/20"
+                      >
+                        Aprobar y Auditar Lote
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Diálogo de Borrado Seguro */}
+        <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+          <DialogContent className="rounded-3xl border-none shadow-2xl p-0 overflow-hidden bg-white max-w-md">
+            <div className="bg-rose-600 text-white p-6 flex flex-col items-center text-center space-y-2">
+              <div className="bg-white/20 p-3 rounded-full mb-2">
+                <ShieldAlert className="h-8 w-8 text-white" />
+              </div>
+              <DialogTitle className="text-xl font-headline font-bold uppercase tracking-tight">Protocolo de Seguridad</DialogTitle>
+              <DialogDescription className="text-rose-100 text-xs">
+                {deleteMode === 'bulk' ? `Está por eliminar ${selectedIds.length} registros del sistema.` : 'Está por eliminar este registro de forma permanente.'}
+              </DialogDescription>
+            </div>
+            <div className="p-8 space-y-6">
+              <div className="space-y-2 text-center">
+                <p className="text-sm font-bold text-slate-700">Para confirmar esta acción, escriba <span className="text-rose-600 font-black">"BORRAR"</span> a continuación:</p>
+                <Input 
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value.toUpperCase())}
+                  placeholder="Escriba aquí..."
+                  className="text-center h-12 text-lg font-black tracking-widest border-2 focus-visible:ring-rose-500"
+                />
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} className="flex-1 h-12 rounded-xl uppercase text-[10px] font-black">Cancelar</Button>
+                <Button 
+                  onClick={handleBulkDeletion}
+                  disabled={deleteConfirmText !== 'BORRAR' || isDeleting}
+                  variant="destructive"
+                  className="flex-1 h-12 rounded-xl uppercase text-[10px] font-black bg-rose-600 hover:bg-rose-700"
+                >
+                  {isDeleting ? <RefreshCcw className="h-4 w-4 animate-spin" /> : 'Confirmar Borrado'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
       </SidebarInset>
     </div>
   );
