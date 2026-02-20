@@ -34,7 +34,10 @@ import {
   ShieldCheck,
   CheckCircle2,
   LayoutGrid,
-  ListChecks
+  ListChecks,
+  Zap,
+  Layers,
+  BarChart3
 } from 'lucide-react';
 import {
   Table,
@@ -50,6 +53,7 @@ import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebas
 import { collection, query, limit, doc, writeBatch } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { generateTraceabilityReport, TraceabilityReportOutput } from '@/ai/flows/traceability-report-flow';
+import { analyzeBulkOrders, BulkIntelligenceOutput } from '@/ai/flows/bulk-intelligence-analysis-flow';
 import {
   Dialog,
   DialogContent,
@@ -109,6 +113,10 @@ export default function AnalysisPage() {
     causa: '',
     subcausa: ''
   });
+
+  const [isBulkAnalyzing, setIsBulkAnalyzing] = useState(false);
+  const [bulkAnalysisResult, setBulkAnalysisResult] = useState<BulkIntelligenceOutput | null>(null);
+  const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -207,6 +215,40 @@ export default function AnalysisPage() {
       toast({ variant: "destructive", title: "Error en Auditoría", description: error.message });
     } finally {
       setIsAuditing(false);
+    }
+  };
+
+  const handleBulkAiAnalysis = async () => {
+    if (selectedIds.length < 2) {
+      toast({ variant: "destructive", title: "Selección insuficiente", description: "Seleccione al menos 2 registros para análisis comparativo." });
+      return;
+    }
+
+    const selectedOrders = orders?.filter(o => selectedIds.includes(o.id)) || [];
+    setIsBulkAnalyzing(true);
+    setBulkAnalysisResult(null);
+    setShowBulkAiDialog(true);
+
+    try {
+      const result = await analyzeBulkOrders({
+        orders: selectedOrders.map(o => ({
+          id: o.id,
+          projectId: o.projectId || "N/A",
+          projectName: o.projectName || "N/A",
+          impactoNeto: o.impactoNeto || 0,
+          disciplina_normalizada: o.disciplina_normalizada,
+          causa_raiz_normalizada: o.causa_raiz_normalizada,
+          descripcion: o.descripcion || o.description || "",
+          isSigned: o.isSigned,
+          fechaSolicitud: o.fechaSolicitud
+        }))
+      });
+      setBulkAnalysisResult(result);
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error Análisis Masivo", description: error.message });
+      setShowBulkAiDialog(false);
+    } finally {
+      setIsBulkAnalyzing(false);
     }
   };
 
@@ -317,6 +359,15 @@ export default function AnalysisPage() {
           <div className="flex items-center gap-4">
             {selectedIds.length > 0 && (
               <div className="flex items-center gap-2 animate-in fade-in zoom-in">
+                <Button 
+                  onClick={handleBulkAiAnalysis}
+                  variant="outline" 
+                  size="sm" 
+                  className="bg-primary/5 text-primary border-primary/20 hover:bg-primary/10 h-9 gap-2 px-4 shadow-sm"
+                  disabled={selectedIds.length < 2}
+                >
+                  <Sparkles className="h-4 w-4" /> ANÁLISIS IA ({selectedIds.length})
+                </Button>
                 <Button 
                   onClick={() => setShowAuditConfirm(true)}
                   variant="default" 
@@ -705,6 +756,148 @@ export default function AnalysisPage() {
           </Card>
         </main>
 
+        {/* Bulk AI Intelligence Dialog */}
+        <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
+          <DialogContent className="w-[90vw] md:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0 shadow-2xl rounded-3xl border-none">
+            <header className="bg-primary text-white p-5 shrink-0 flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Badge className="bg-white/20 text-white border-none uppercase text-[8px] font-black">Inteligencia de Grupo IA</Badge>
+                <DialogTitle className="text-xl font-headline font-bold uppercase tracking-tight">Análisis Consolidado ({selectedIds.length} Órdenes)</DialogTitle>
+              </div>
+              <Button variant="ghost" onClick={() => setShowBulkAiDialog(false)} className="text-white/70 hover:text-white h-8 w-8 p-0">
+                <X className="h-4 w-4" />
+              </Button>
+            </header>
+            
+            <ScrollArea className="flex-1 bg-slate-50">
+              <div className="p-6 md:p-8 space-y-6">
+                {isBulkAnalyzing ? (
+                  <div className="flex flex-col items-center justify-center py-24 space-y-4">
+                    <div className="relative">
+                       <Zap className="h-12 w-12 text-primary animate-pulse" />
+                       <Loader2 className="h-12 w-12 text-primary animate-spin absolute inset-0 opacity-20" />
+                    </div>
+                    <p className="text-xs font-black uppercase text-slate-400 tracking-widest animate-pulse">Sincronizando Patrones Forenses...</p>
+                  </div>
+                ) : bulkAnalysisResult ? (
+                  <div className="space-y-8 animate-in fade-in duration-500">
+                    {/* Executive Summary Card */}
+                    <Card className="border-none shadow-sm bg-white overflow-hidden rounded-2xl">
+                      <CardContent className="p-6 space-y-4">
+                        <div className="flex justify-between items-start">
+                           <div className="space-y-1">
+                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Diagnóstico de Lote</h4>
+                             <p className="text-sm font-medium text-slate-700 leading-relaxed italic border-l-4 border-primary pl-4">
+                               "{bulkAnalysisResult.executiveSummary}"
+                             </p>
+                           </div>
+                           <Badge className={`${bulkAnalysisResult.isEligibleForBulkAudit ? 'bg-emerald-500' : 'bg-amber-500'} uppercase text-[9px] font-black`}>
+                             {bulkAnalysisResult.isEligibleForBulkAudit ? 'Apto para Auditoría Masiva' : 'Requiere Revisión Individual'}
+                           </Badge>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <div className="grid md:grid-cols-2 gap-6">
+                      {/* Common Patterns */}
+                      <section className="space-y-3">
+                        <h4 className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                           <Layers className="h-4 w-4" /> Patrones & Recurrencias
+                        </h4>
+                        <div className="space-y-2">
+                          {bulkAnalysisResult.commonPatterns.map((p, i) => (
+                            <div key={i} className="bg-white p-3 rounded-xl shadow-sm border border-slate-100 flex gap-3 items-center">
+                               <div className="h-2 w-2 rounded-full bg-primary" />
+                               <span className="text-xs font-bold text-slate-700">{p}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-slate-500 leading-relaxed p-3 bg-slate-100 rounded-lg italic">
+                           {bulkAnalysisResult.recurrenceAnalysis}
+                        </p>
+                      </section>
+
+                      {/* Discipline Impact */}
+                      <section className="space-y-3">
+                        <h4 className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                           <BarChart3 className="h-4 w-4" /> Concentración por Disciplina
+                        </h4>
+                        <Card className="p-4 border-none shadow-sm bg-white rounded-2xl space-y-4">
+                           {bulkAnalysisResult.disciplineImpact.map((d, i) => (
+                             <div key={i} className="space-y-1">
+                               <div className="flex justify-between text-[10px] font-bold">
+                                 <span className="text-slate-600 uppercase">{d.name}</span>
+                                 <span className="text-primary">{d.percentage}%</span>
+                               </div>
+                               <Progress value={d.percentage} className="h-1.5" />
+                             </div>
+                           ))}
+                        </Card>
+                      </section>
+                    </div>
+
+                    {/* Anomalies */}
+                    {bulkAnalysisResult.anomaliesDetected.length > 0 && (
+                      <section className="space-y-3">
+                         <h4 className="text-[10px] font-black text-rose-500 uppercase tracking-widest flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4" /> Anomalías de Lote (Divergencias)
+                         </h4>
+                         <div className="grid gap-3">
+                           {bulkAnalysisResult.anomaliesDetected.map((a, i) => (
+                             <div key={i} className="bg-rose-50 border border-rose-100 p-4 rounded-xl flex gap-4">
+                               <ShieldAlert className="h-5 w-5 text-rose-500 shrink-0" />
+                               <div className="space-y-1">
+                                  <p className="text-xs font-black text-rose-900 uppercase">{a.issue}</p>
+                                  <p className="text-[11px] text-rose-700 leading-relaxed">{a.description}</p>
+                                  <p className="text-[9px] font-bold text-rose-400 mt-2 uppercase">Afecta a: {a.orderIds.join(', ')}</p>
+                               </div>
+                             </div>
+                           ))}
+                         </div>
+                      </section>
+                    )}
+
+                    {/* Recommendations */}
+                    <section className="space-y-3 pb-8">
+                       <h4 className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4" /> Hoja de Ruta Sugerida
+                       </h4>
+                       <div className="grid md:grid-cols-2 gap-3">
+                          {bulkAnalysisResult.recommendations.map((r, i) => (
+                            <div key={i} className="bg-emerald-50 border border-emerald-100 p-3 rounded-xl flex items-center gap-3">
+                               <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                               <span className="text-xs font-medium text-emerald-800">{r}</span>
+                            </div>
+                          ))}
+                       </div>
+                    </section>
+                  </div>
+                ) : null}
+              </div>
+            </ScrollArea>
+            
+            <DialogFooter className="p-4 bg-white border-t rounded-b-3xl flex items-center justify-between sm:justify-between">
+               <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Confianza IA</span>
+                  <Badge variant="outline" className="text-[10px] font-black border-primary/20 text-primary">
+                    {Math.round((bulkAnalysisResult?.confidenceScore || 0) * 100)}%
+                  </Badge>
+               </div>
+               <div className="flex gap-2">
+                  <Button variant="ghost" onClick={() => setShowBulkAiDialog(false)} className="rounded-xl px-6 h-9 text-[9px] font-black uppercase">Cerrar</Button>
+                  {bulkAnalysisResult?.isEligibleForBulkAudit && (
+                    <Button 
+                      onClick={handleBulkAudit} 
+                      className="bg-emerald-600 hover:bg-emerald-700 rounded-xl px-8 h-9 text-[9px] font-black uppercase shadow-lg shadow-emerald-200"
+                    >
+                      Aprobar Lote Masivamente
+                    </Button>
+                  )}
+               </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Confirmation Dialogs */}
         <Dialog open={showAuditConfirm} onOpenChange={setShowAuditConfirm}>
           <DialogContent className="sm:max-w-md rounded-2xl border-none">
@@ -774,3 +967,4 @@ export default function AnalysisPage() {
     </div>
   );
 }
+
