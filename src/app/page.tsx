@@ -27,7 +27,8 @@ import {
   LayoutGrid,
   Clock,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Flag
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -252,7 +253,12 @@ export default function VpDashboard() {
     }).format(val);
   };
 
-  const handleToggleYear = (y: number) => {
+  const handleToggleYear = (y: number | 'all') => {
+    if (y === 'all') {
+      const areAllSelected = selectedYears.length === YEARS.length;
+      setSelectedYears(areAllSelected ? [new Date().getFullYear()] : [...YEARS]);
+      return;
+    }
     setSelectedYears(prev => 
       prev.includes(y) ? (prev.length > 1 ? prev.filter(year => year !== y) : prev) : [...prev, y].sort()
     );
@@ -297,11 +303,17 @@ export default function VpDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <div className="flex bg-slate-100 p-1 rounded-xl border gap-1">
+              <button 
+                onClick={() => handleToggleYear('all')} 
+                className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-1.5 ${selectedYears.length === YEARS.length ? 'bg-primary text-white shadow-lg' : 'text-slate-500 hover:bg-white'}`}
+              >
+                TODO <span className="opacity-60">({yearStats.total || 0})</span>
+              </button>
               {YEARS.map(y => (
                 <button 
                   key={y} 
                   onClick={() => handleToggleYear(y)} 
-                  className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-1.5 ${selectedYears.includes(y) ? 'bg-primary text-white shadow-lg' : 'text-slate-500 hover:bg-white'}`}
+                  className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-1.5 ${selectedYears.includes(y) && selectedYears.length !== YEARS.length ? 'bg-primary text-white shadow-lg' : 'text-slate-500 hover:bg-white'}`}
                 >
                   {y} <span className="opacity-60">({yearStats[y] || 0})</span>
                 </button>
@@ -378,7 +390,7 @@ export default function VpDashboard() {
                 <h2 className="text-2xl font-headline font-bold text-slate-800">{formatCurrency(metrics.totalImpact)}</h2>
                 <div className="mt-4 flex items-center gap-2">
                   <Badge variant="outline" className="text-[8px] bg-primary/5 text-primary border-primary/20 uppercase font-black">{filteredData.length} Órdenes</Badge>
-                  <span className="text-[8px] font-bold text-slate-400 uppercase">{selectedYears.join(' + ')}</span>
+                  <span className="text-[8px] font-bold text-slate-400 uppercase">{selectedYears.length === YEARS.length ? 'UNIVERSO TOTAL' : selectedYears.join(' + ')}</span>
                 </div>
               </CardContent>
             </Card>
@@ -427,11 +439,13 @@ export default function VpDashboard() {
               <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between py-4">
                 <div>
                   <CardTitle className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
-                    <Target className="h-4 w-4" /> Curva de Pareto: Causa Raíz vs Impacto Acumulado
+                    <Target className="h-4 w-4" /> Curva de Pareto: Concentración de Impacto
                   </CardTitle>
                   <CardDescription className="text-[9px] font-bold text-slate-400 uppercase mt-1">Identificación del Grupo Crítico para Mitigación Estratégica</CardDescription>
                 </div>
-                <Badge variant="outline" className="text-[8px] font-black uppercase tracking-tight bg-white">Real-Time Data</Badge>
+                <div className="flex items-center gap-2">
+                   <Badge className="bg-primary text-white border-none text-[8px] font-black uppercase tracking-tight px-3 py-1">Estrategia 80/20</Badge>
+                </div>
               </CardHeader>
               <CardContent className="h-[450px] pt-10 px-6">
                 {metrics.paretoData.length > 0 ? (
@@ -451,7 +465,11 @@ export default function VpDashboard() {
                       <Tooltip content={<CustomTooltip currencyFormatter={formatCurrency} />} />
                       <Bar yAxisId="left" dataKey="impact" name="Monto" radius={[6, 6, 0, 0]} barSize={30}>
                         {metrics.paretoData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.cumulativePercentage <= 85 ? '#2962FF' : '#cbd5e1'} />
+                          <Cell 
+                            key={`cell-${index}`} 
+                            fill={entry.cumulativePercentage <= 85 ? '#2962FF' : '#cbd5e1'} 
+                            fillOpacity={entry.cumulativePercentage <= 85 ? 1 : 0.5}
+                          />
                         ))}
                         <LabelList 
                           dataKey="impact" 
@@ -487,11 +505,18 @@ export default function VpDashboard() {
               </CardContent>
               <CardFooter className="bg-slate-50 border-t py-3 flex justify-between items-center text-[9px] font-black uppercase text-slate-400 px-6">
                 <div className="flex gap-6">
-                  <span className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full bg-primary" /> Grupo Crítico (80%)</span>
-                  <span className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full bg-slate-300" /> Incidencias Menores</span>
+                  <span className="flex items-center gap-2">
+                    <div className="h-3 w-3 rounded-md bg-primary" /> 
+                    <span className="text-primary font-black">NÚCLEO DE IMPACTO (80%)</span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <div className="h-3 w-3 rounded-md bg-slate-300" /> 
+                    <span>INCIDENCIAS MENORES</span>
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-3 w-3 text-emerald-500" /> Sincronización Forense Activa
+                  <Flag className="h-3 w-3 text-amber-500" />
+                  <span className="text-slate-500">CORTE ESTRATÉGICO EN EL 85% ACUMULADO</span>
                 </div>
               </CardFooter>
             </Card>
@@ -633,7 +658,7 @@ export default function VpDashboard() {
             <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between py-4">
               <div className="space-y-1">
                 <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
-                  <LayoutGrid className="h-4 w-4" /> Muestra de Registros para el Periodo {selectedYears.join(', ')}
+                  <LayoutGrid className="h-4 w-4" /> Muestra de Registros para el Periodo {selectedYears.length === YEARS.length ? 'TOTAL' : selectedYears.join(', ')}
                 </CardTitle>
                 <CardDescription className="text-[9px] font-medium uppercase text-slate-400">Exhibiendo {filteredData.length} registros que alimentan los KPIs actuales</CardDescription>
               </div>
