@@ -68,30 +68,23 @@ export default function UploadPdfPage() {
 
       // 2. Análisis Semántico de Auditoría
       const semantic = await analyzeOrderSemantically({
-        projectId: extracted.extractedData.projectInfo?.projectId,
-        projectName: extracted.extractedData.projectInfo?.projectName,
-        format: extracted.extractedData.projectInfo?.format,
-        descripcion: extracted.extractedData.descriptionSection.description || "",
-        causaDeclarada: extracted.extractedData.projectInfo.rootCauseDeclared || "",
-        montoTotal: extracted.extractedData.financialImpact.netImpact || 0,
-        contextoExtendido: extracted.extractedData,
-        isSigned: extracted.extractedData.isSigned
+        descripcion: extracted.extractedData.descriptionSection?.description || ""
       });
 
       // Homologación de campos para compatibilidad total con Excel y Dashboard
       const homogenizedData = {
         ...extracted.extractedData,
-        projectId: extracted.extractedData.projectInfo?.projectId || "",
-        projectName: extracted.extractedData.projectInfo?.projectName || "",
+        projectId: extracted.extractedData.projectInfo?.projectId || "N/A",
+        projectName: extracted.extractedData.projectInfo?.projectName || "N/A",
         format: extracted.extractedData.projectInfo?.format || "Otros",
         impactoNeto: extracted.extractedData.financialImpact?.netImpact || 0,
-        causaRaiz: extracted.extractedData.projectInfo?.rootCauseDeclared || "",
+        causaRaiz: extracted.extractedData.projectInfo?.rootCauseDeclared || "Sin definir",
         descripcion: extracted.extractedData.descriptionSection?.description || "",
         fechaSolicitud: extracted.extractedData.header?.requestDate || new Date().toISOString(),
         isSigned: extracted.extractedData.isSigned || false,
         // Metadatos de IA
         semanticAnalysis: semantic,
-        standardizedDescription: semantic.standardizedDescription,
+        standardizedDescription: semantic.standardizedDescription || "",
         processedAt: new Date().toISOString()
       };
 
@@ -110,7 +103,6 @@ export default function UploadPdfPage() {
           const existingDoc = querySnapshot.docs[0];
           updateDocumentNonBlocking(doc(db, 'orders', existingDoc.id), {
             ...homogenizedData,
-            pdfUrl: 'simulated_storage_path',
             lastUpdatedFromPdf: new Date().toISOString(),
             dataSource: 'PDF_ENRICHED'
           });
@@ -120,7 +112,6 @@ export default function UploadPdfPage() {
           setDocumentNonBlocking(doc(db, 'orders', newId), {
             ...homogenizedData,
             id: newId,
-            pdfUrl: 'simulated_storage_path',
             createdFromPdf: true,
             dataSource: 'PDF_ORIGINAL'
           }, { merge: true });
@@ -131,6 +122,7 @@ export default function UploadPdfPage() {
       toast({ title: "Documento Normalizado", description: "Se han homologado los campos del PDF con la base de datos central." });
 
     } catch (error: any) {
+      console.error(error);
       const isQuotaError = error.message?.includes('429') || error.message?.toLowerCase().includes('quota');
       if (isQuotaError) {
         setMatchStatus('RETRY');
@@ -254,23 +246,23 @@ export default function UploadPdfPage() {
                           </p>
                           <div className="flex flex-wrap gap-2">
                             <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-[10px] uppercase font-bold">
-                              Causa Raíz Real: {results.extractedData.semanticAnalysis?.causaRaizReal}
+                              Causa Raíz Real: {results.extractedData.semanticAnalysis?.causa_raiz_normalizada}
                             </Badge>
                             <Badge variant="secondary" className="bg-primary/10 text-primary text-[10px] uppercase font-bold">
-                              Especialidad: {results.extractedData.semanticAnalysis?.especialidadImpactada}
+                              Especialidad: {results.extractedData.semanticAnalysis?.disciplina_normalizada}
                             </Badge>
                           </div>
                         </div>
                         <div className="space-y-3">
-                          {results.extractedData.semanticAnalysis?.auditAlerts?.map((alert: any, i: number) => (
-                            <div key={i} className={`flex gap-3 p-3 rounded-xl border ${alert.severity === 'High' ? 'bg-rose-50 border-rose-100' : 'bg-amber-50 border-amber-100'}`}>
-                              <AlertTriangle className={`h-4 w-4 shrink-0 ${alert.severity === 'High' ? 'text-rose-500' : 'text-amber-500'}`} />
-                              <div className="text-[10px]">
-                                <p className="font-bold text-slate-800">{alert.type}</p>
-                                <p className="text-slate-600 leading-tight">{alert.message}</p>
-                              </div>
-                            </div>
-                          ))}
+                          {results.extractedData.semanticAnalysis?.needs_review && (
+                             <div className="flex gap-3 p-3 rounded-xl border bg-amber-50 border-amber-100">
+                               <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                               <div className="text-[10px]">
+                                 <p className="font-bold text-slate-800">Revisión Requerida</p>
+                                 <p className="text-slate-600 leading-tight">La IA tiene dudas sobre la clasificación semántica.</p>
+                               </div>
+                             </div>
+                          )}
                         </div>
                       </div>
                     </div>

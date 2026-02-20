@@ -27,6 +27,7 @@ const SemanticAnalysisOutputSchema = z.object({
   confidence_score: z.number().describe("Nivel de certeza de la clasificación (0.0 a 1.0)."),
   evidence_terms: z.array(z.string()).describe("Palabras clave o frases que justifican la clasificación."),
   descripcion_original: z.string().describe("Texto íntegro analizado."),
+  standardizedDescription: z.string().describe("Descripción técnica estandarizada y clara del hallazgo."),
   rationale_tecnico: z.string().describe("Explicación resumida del porqué técnico de la decisión."),
   logica_clasificacion: z.object({
     terminos_detectados: z.array(z.string()),
@@ -48,8 +49,9 @@ Tu misión es clasificar registros OC/OT con trazabilidad absoluta y explicabili
 REGLAS DE CLASIFICACIÓN FORENSE:
 1. EXPLICABILIDAD: No solo elijas una categoría. Explica qué elementos del texto activaron la decisión en 'rationale_tecnico'.
 2. TRAZABILIDAD: Lista los términos exactos encontrados que coinciden con la taxonomía en 'evidence_terms'.
-3. AMBIGÜEDAD: Si el texto es vago (ej. "ajustes varios", "extra", "trabajos"), clasifica como "Indefinida", pon confianza < 0.6 y detalla la ambigüedad.
-4. TAXONOMÍA: 
+3. ESTANDARIZACIÓN: Genera una 'standardizedDescription' que resuma de forma técnica y profesional lo que se realizará.
+4. AMBIGÜEDAD: Si el texto es vago (ej. "ajustes varios", "extra", "trabajos"), clasifica como "Indefinida", pon confianza < 0.6 y detalla la ambigüedad.
+5. TAXONOMÍA: 
    - Disciplina -> Causa -> Subcausa -> Detalle Nivel 3.
    - Si no puedes llegar al Nivel 3, pon "No determinado".
 
