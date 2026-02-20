@@ -11,4 +11,4 @@ import '@/ai/flows/chat-assistant-flow.ts';
 import '@/ai/flows/root-cause-intelligence-flow.ts';
 import '@/ai/flows/traceability-report-flow.ts';
 import '@/ai/flows/bulk-intelligence-analysis-flow.ts';
-
+import '@/ai/flows/word-cloud-analysis-flow.ts';

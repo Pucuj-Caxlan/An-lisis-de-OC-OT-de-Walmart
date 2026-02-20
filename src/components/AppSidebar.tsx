@@ -11,7 +11,8 @@ import {
   HelpCircle,
   BarChart3,
   BrainCircuit,
-  FileText
+  FileText,
+  CloudLightning
 } from "lucide-react"
 
 import {
@@ -109,6 +110,19 @@ export function AppSidebar() {
             Inteligencia
           </SidebarGroupLabel>
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton 
+                asChild 
+                isActive={pathname === '/word-cloud'}
+                tooltip="Nube Forense 80/20"
+                className={`hover:bg-primary/10 transition-colors duration-200 ${pathname === '/word-cloud' ? 'text-primary bg-primary/5' : ''}`}
+              >
+                <Link href="/word-cloud">
+                  <CloudLightning className={`h-5 w-5 ${pathname === '/word-cloud' ? 'text-primary' : ''}`} />
+                  <span className="font-medium">Nube Forense 80/20</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton 
                 asChild 
