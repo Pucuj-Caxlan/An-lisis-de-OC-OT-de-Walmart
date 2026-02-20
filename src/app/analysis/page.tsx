@@ -27,7 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from '@/components/ui/badge';
+import { Badge } from '@/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, query, limit, doc, increment, setDoc } from 'firebase/firestore';
@@ -104,7 +104,10 @@ export default function AnalysisPage() {
         updateDocumentNonBlocking(doc(db, 'orders', order.id), updateData);
 
         // Actualización de Agregados (Simulación de Trigger de Cloud Function)
-        const aggregateRef = doc(db, 'aggregates', 'global', 'disciplines_stats', result.disciplina_normalizada);
+        // Sanitizar el ID para evitar errores de segmentos en Firestore (ej. "Legal/Permisos")
+        const safeDisciplineId = result.disciplina_normalizada.replace(/\//g, '-');
+        const aggregateRef = doc(db, 'aggregates', 'global', 'disciplines_stats', safeDisciplineId);
+        
         setDocumentNonBlocking(aggregateRef, {
           count: increment(1),
           total_impact: increment(order.impactoNeto || 0),
