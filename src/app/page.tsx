@@ -28,7 +28,11 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
-  Flag
+  Flag,
+  FileText,
+  Copy,
+  X,
+  ShieldAlert
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -69,6 +73,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Separator } from '@/components/ui/separator';
 
 const YEARS = [2022, 2023, 2024, 2025, 2026];
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -76,9 +88,12 @@ const YEAR_COLORS: Record<number, string> = {
   2022: '#94a3b8',
   2023: '#64748b',
   2024: '#2962FF',
-  2025: '#FF8F00',
+  2025: '#1E3A8A', // Corporate Blue
   2026: '#6200EA'
 };
+
+const CORE_COLOR = '#1E3A8A'; // Azul Corporativo Intenso para Núcleo 80/20
+const NEUTRAL_COLOR = '#E2E8F0'; // Gris Neutro para el resto
 
 const CustomTooltip = ({ active, payload, label, currencyFormatter }: any) => {
   if (active && payload && payload.length) {
@@ -179,7 +194,6 @@ export default function VpDashboard() {
   const metrics = useMemo(() => {
     const totalImpact = filteredData.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
     
-    // Comparativo Interanual
     const impactsByYear: Record<number, number> = {};
     selectedYears.forEach(y => impactsByYear[y] = 0);
     filteredData.forEach(o => {
@@ -187,7 +201,6 @@ export default function VpDashboard() {
       if (y && impactsByYear[y] !== undefined) impactsByYear[y] += (o.impactoNeto || 0);
     });
 
-    // Variación % (si hay exactamente 2 años)
     let variation = 0;
     if (selectedYears.length === 2) {
       const sorted = [...selectedYears].sort((a, b) => a - b);
@@ -196,7 +209,6 @@ export default function VpDashboard() {
       variation = v1 > 0 ? ((v2 - v1) / v1) * 100 : 0;
     }
 
-    // Pareto por Causa Raíz
     const causesMap: Record<string, { impact: number, count: number }> = {};
     filteredData.forEach(o => {
       const cause = o.causa_raiz_normalizada || o.causaRaiz || 'Sin definir';
@@ -281,12 +293,19 @@ export default function VpDashboard() {
         paretoTop80: metrics.vitalFew.map(v => v.name)
       });
       setActionPlan(result);
-      toast({ title: "Plan de Acción Generado", description: "Análisis multi-anual completo." });
+      toast({ title: "IA Action Plan Generado", description: "Listo para revisión ejecutiva." });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Error IA", description: e.message });
     } finally {
       setIsGeneratingPlan(false);
     }
+  };
+
+  const handleCopySummary = () => {
+    if (!actionPlan) return;
+    const text = `DIAGNÓSTICO EJECUTIVO: ${actionPlan.narrative}\n\nACCIONES PRIORITARIAS:\n${actionPlan.actionPlan.map(p => `- ${p.title}: ${p.steps[0]}`).join('\n')}\n\nAHORRO ESTIMADO: ${actionPlan.estimatedReduction}`;
+    navigator.clipboard.writeText(text);
+    toast({ title: "Copiado al portapapeles" });
   };
 
   return (
@@ -467,8 +486,7 @@ export default function VpDashboard() {
                         {metrics.paretoData.map((entry, index) => (
                           <Cell 
                             key={`cell-${index}`} 
-                            fill={entry.cumulativePercentage <= 85 ? '#2962FF' : '#cbd5e1'} 
-                            fillOpacity={entry.cumulativePercentage <= 85 ? 1 : 0.5}
+                            fill={entry.cumulativePercentage <= 85 ? CORE_COLOR : NEUTRAL_COLOR} 
                           />
                         ))}
                         <LabelList 
@@ -506,11 +524,11 @@ export default function VpDashboard() {
               <CardFooter className="bg-slate-50 border-t py-3 flex justify-between items-center text-[9px] font-black uppercase text-slate-400 px-6">
                 <div className="flex gap-6">
                   <span className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-md bg-primary" /> 
-                    <span className="text-primary font-black">NÚCLEO DE IMPACTO (80%)</span>
+                    <div className="h-3 w-3 rounded-md" style={{ backgroundColor: CORE_COLOR }} /> 
+                    <span style={{ color: CORE_COLOR }} className="font-black tracking-widest">NÚCLEO CRÍTICO 80/20</span>
                   </span>
                   <span className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-md bg-slate-300" /> 
+                    <div className="h-3 w-3 rounded-md" style={{ backgroundColor: NEUTRAL_COLOR }} /> 
                     <span>INCIDENCIAS MENORES</span>
                   </span>
                 </div>
@@ -522,83 +540,48 @@ export default function VpDashboard() {
             </Card>
 
             <div className="space-y-6">
-              {actionPlan ? (
-                <Card className="border-none shadow-xl bg-slate-900 text-white rounded-[2rem] overflow-hidden animate-in fade-in slide-in-from-right-5 duration-700">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <Badge className="bg-accent text-slate-900 border-none text-[8px] font-black uppercase">IA Strategic Plan</Badge>
-                      <span className={`text-[10px] font-black uppercase ${actionPlan.sentiment === 'Optimista' ? 'text-emerald-400' : 'text-rose-400'}`}>{actionPlan.sentiment}</span>
-                    </div>
-                    <CardTitle className="text-xl font-headline font-bold uppercase tracking-tight mt-4">Estrategia de Mitigación</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                      <p className="text-xs font-medium text-slate-300 leading-relaxed italic">"{actionPlan.narrative}"</p>
-                    </div>
-                    <div className="space-y-3">
-                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2"><Target className="h-3 w-3 text-accent" /> Acciones Prioritarias</p>
-                      <div className="space-y-2">
-                        {actionPlan.actionPlan.slice(0, 3).map((plan, i) => (
-                          <div key={i} className="p-3 bg-white/5 rounded-xl border border-white/5 group hover:bg-white/10 transition-all cursor-default">
-                            <p className="text-[10px] font-black text-accent uppercase leading-none mb-1.5">{plan.title}</p>
-                            <p className="text-[11px] text-slate-400 font-medium leading-relaxed">{plan.steps[0]}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="pt-4 border-t border-white/10 flex justify-between items-center">
-                      <div>
-                        <p className="text-[8px] font-black text-slate-500 uppercase">Ahorro Estimado</p>
-                        <p className="text-lg font-headline font-bold text-emerald-400">{actionPlan.estimatedReduction}</p>
-                      </div>
-                      <Button variant="ghost" className="text-xs text-slate-400 hover:text-white" onClick={() => setActionPlan(null)}>Cerrar</Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card className="border-none shadow-md bg-white rounded-[2rem] overflow-hidden h-full flex flex-col">
-                  <CardHeader className="bg-slate-50/50 border-b pb-4">
-                    <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
-                      <BarChart3 className="h-4 w-4" /> Desglose por Disciplina Técnico-Económico
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="flex-1 pt-6 px-4">
-                    {metrics.discData.length > 0 ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={metrics.discData} layout="vertical" margin={{ left: 20, right: 40 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                          <XAxis type="number" hide />
-                          <YAxis 
-                            dataKey="name" 
-                            type="category" 
-                            tick={{ fontSize: 8, fontWeight: 'bold', fill: '#64748b' }} 
-                            width={100}
-                            axisLine={false}
-                            tickLine={false}
+              <Card className="border-none shadow-md bg-white rounded-[2rem] overflow-hidden h-full flex flex-col">
+                <CardHeader className="bg-slate-50/50 border-b pb-4">
+                  <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4" /> Desglose por Disciplina Técnico-Económico
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex-1 pt-6 px-4">
+                  {metrics.discData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={metrics.discData} layout="vertical" margin={{ left: 20, right: 40 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                        <XAxis type="number" hide />
+                        <YAxis 
+                          dataKey="name" 
+                          type="category" 
+                          tick={{ fontSize: 8, fontWeight: 'bold', fill: '#64748b' }} 
+                          width={100}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <Tooltip content={<CustomTooltip currencyFormatter={formatCurrency} />} />
+                        <Bar dataKey="impact" fill="#2962FF" radius={[0, 6, 6, 0]} barSize={24}>
+                          <LabelList 
+                            dataKey="impact" 
+                            position="right" 
+                            formatter={(v: any) => `${Math.round((v / metrics.totalImpact) * 100)}%`}
+                            style={{ fontSize: '9px', fontWeight: 'bold', fill: '#94a3b8' }}
                           />
-                          <Tooltip content={<CustomTooltip currencyFormatter={formatCurrency} />} />
-                          <Bar dataKey="impact" fill="#2962FF" radius={[0, 6, 6, 0]} barSize={24}>
-                            <LabelList 
-                              dataKey="impact" 
-                              position="right" 
-                              formatter={(v: any) => `${Math.round((v / metrics.totalImpact) * 100)}%`}
-                              style={{ fontSize: '9px', fontWeight: 'bold', fill: '#94a3b8' }}
-                            />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center h-full text-slate-200 gap-2">
-                        <Layers className="h-10 w-10 opacity-20" />
-                        <p className="text-[9px] font-black uppercase tracking-widest">Sin registros clasificados</p>
-                      </div>
-                    )}
-                  </CardContent>
-                  <CardFooter className="bg-slate-50/50 border-t py-4 text-center">
-                    <p className="text-[9px] text-slate-400 font-bold uppercase italic mx-auto">Impacto Semántico Normalizado</p>
-                  </CardFooter>
-                </Card>
-              )}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-200 gap-2">
+                      <Layers className="h-10 w-10 opacity-20" />
+                      <p className="text-[9px] font-black uppercase tracking-widest">Sin registros clasificados</p>
+                    </div>
+                  )}
+                </CardContent>
+                <CardFooter className="bg-slate-50/50 border-t py-4 text-center">
+                  <p className="text-[9px] text-slate-400 font-bold uppercase italic mx-auto">Impacto Semántico Normalizado</p>
+                </CardFooter>
+              </Card>
             </div>
           </div>
 
@@ -704,6 +687,158 @@ export default function VpDashboard() {
             </CardFooter>
           </Card>
         </main>
+
+        {/* Modal Ejecutivo IA Action Plan */}
+        <Dialog open={!!actionPlan} onOpenChange={(open) => !open && setActionPlan(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-0 rounded-[2.5rem] border-none shadow-2xl bg-slate-50 outline-none">
+            <header className="bg-slate-900 text-white p-8 flex justify-between items-center sticky top-0 z-20">
+              <div className="flex items-center gap-4">
+                <div className="bg-accent p-3 rounded-2xl">
+                  <BrainCircuit className="h-8 w-8 text-slate-900" />
+                </div>
+                <div>
+                  <Badge className="bg-accent text-slate-900 border-none text-[9px] font-black uppercase mb-1">Audit Intelligence 360</Badge>
+                  <DialogTitle className="text-2xl font-headline font-bold uppercase tracking-tight">IA Strategic Action Plan</DialogTitle>
+                  <DialogDescription className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1 flex items-center gap-2">
+                    <CalendarDays className="h-3 w-3" /> Generado: {new Date().toLocaleDateString()} • {selectedYears.join(', ')}
+                  </DialogDescription>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button variant="ghost" className="text-white/60 hover:text-white hover:bg-white/10 h-10 w-10 p-0 rounded-xl" onClick={() => setActionPlan(null)}>
+                  <X className="h-6 w-6" />
+                </Button>
+              </div>
+            </header>
+
+            <div className="p-10 space-y-10">
+              {/* Diagnóstico Ejecutivo */}
+              <section className="grid md:grid-cols-3 gap-8">
+                <Card className="md:col-span-2 border-none bg-white p-8 rounded-3xl shadow-sm space-y-6">
+                  <div className="flex items-center gap-3 text-primary">
+                    <ShieldCheck className="h-6 w-6" />
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em]">Diagnóstico Ejecutivo Forense</h4>
+                  </div>
+                  <p className="text-lg font-medium text-slate-800 leading-relaxed italic border-l-4 border-primary pl-8 py-2">
+                    "{actionPlan?.narrative}"
+                  </p>
+                  <div className="grid md:grid-cols-2 gap-6 pt-4">
+                    <div className="space-y-3">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <TrendingUp className="h-3 w-3 text-emerald-500" /> Salud de Gestión
+                      </p>
+                      <Badge className={`h-8 px-4 rounded-xl text-[10px] font-black uppercase ${actionPlan?.sentiment === 'Optimista' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                        ESTADO: {actionPlan?.sentiment}
+                      </Badge>
+                    </div>
+                    <div className="space-y-3">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <Zap className="h-3 w-3 text-accent" /> Ahorro Proyectado
+                      </p>
+                      <p className="text-2xl font-headline font-bold text-emerald-600">{actionPlan?.estimatedReduction}</p>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="border-none bg-slate-900 text-white p-8 rounded-3xl shadow-xl relative overflow-hidden flex flex-col justify-between">
+                  <ShieldAlert className="absolute -bottom-4 -right-4 h-32 w-32 opacity-5 text-accent" />
+                  <div className="space-y-4">
+                    <h4 className="text-[10px] font-black text-accent uppercase tracking-widest">Análisis 80/20</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">Concentración del impacto en el driver principal detectado durante el periodo analizado.</p>
+                    <div className="pt-6">
+                      <p className="text-[10px] font-black text-white/60 uppercase">Driver Crítico Dominante</p>
+                      <p className="text-sm font-bold text-white mt-1 leading-tight">{metrics.paretoData[0]?.name}</p>
+                    </div>
+                  </div>
+                  <div className="pt-8 flex justify-between items-end border-t border-white/10 mt-8">
+                    <div>
+                      <p className="text-[8px] font-black text-slate-500 uppercase">Concentración</p>
+                      <p className="text-3xl font-headline font-bold text-accent">{Math.round(metrics.concentrationRatio)}%</p>
+                    </div>
+                    <Badge className="bg-white/10 text-white border-none uppercase text-[8px]">Núcleo Crítico</Badge>
+                  </div>
+                </Card>
+              </section>
+
+              {/* Drivers y Proyecciones */}
+              <section className="grid md:grid-cols-2 gap-8">
+                <div className="space-y-4">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <Target className="h-4 w-4 text-primary" /> Principales Drivers Detectados
+                  </h4>
+                  <div className="space-y-3">
+                    {actionPlan?.keyDrivers.map((driver, i) => (
+                      <div key={i} className="bg-white p-4 rounded-2xl border-2 border-slate-100 flex gap-4 items-center group hover:border-primary/20 transition-all">
+                        <div className="h-8 w-8 bg-slate-50 rounded-lg flex items-center justify-center text-[10px] font-black text-primary">0{i+1}</div>
+                        <p className="text-xs font-bold text-slate-700 uppercase tracking-tight">{driver}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-emerald-500" /> Proyección Estratégica
+                  </h4>
+                  <Card className="bg-white p-6 rounded-[2rem] border-2 border-dashed border-slate-200">
+                    <p className="text-xs text-slate-600 leading-relaxed italic">{actionPlan?.projections}</p>
+                  </Card>
+                </div>
+              </section>
+
+              <Separator className="opacity-50" />
+
+              {/* Action Plan Roadmap */}
+              <section className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] flex items-center gap-2">
+                    <Layers className="h-4 w-4" /> Hoja de Ruta Priorizada para Mitigación
+                  </h4>
+                  <Badge variant="outline" className="text-[8px] font-black uppercase text-slate-400">Total: {actionPlan?.actionPlan.length} Acciones</Badge>
+                </div>
+                <div className="grid md:grid-cols-3 gap-6">
+                  {actionPlan?.actionPlan.map((plan, i) => (
+                    <Card key={i} className="bg-white border-2 border-slate-100 p-6 rounded-3xl shadow-sm hover:border-primary/20 transition-all group relative overflow-hidden flex flex-col">
+                      <div className="absolute top-0 left-0 w-1.5 h-full bg-primary" />
+                      <div className="flex items-start justify-between mb-4">
+                        <h5 className="text-xs font-black text-slate-900 uppercase leading-tight group-hover:text-primary transition-colors">{plan.title}</h5>
+                        <ShieldCheck className="h-5 w-5 text-primary opacity-20" />
+                      </div>
+                      <ul className="space-y-3 mb-8 flex-1">
+                        {plan.steps.map((step, si) => (
+                          <li key={si} className="text-[11px] text-slate-600 flex gap-3 leading-relaxed font-medium">
+                            <span className="h-4 w-4 bg-slate-100 text-slate-900 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0">{si + 1}</span>
+                            {step}
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="pt-4 border-t border-dashed border-slate-100 flex items-center justify-between">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Impacto</span>
+                        <Badge className="bg-emerald-50 text-emerald-700 border-none text-[10px] font-black">
+                          {plan.expectedImpact}
+                        </Badge>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <footer className="p-8 bg-white border-t sticky bottom-0 z-20 flex justify-between items-center rounded-b-[2.5rem]">
+              <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase">
+                <AlertCircle className="h-4 w-4 text-amber-500" /> Basado en el universo de {filteredData.length} registros auditados.
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" className="rounded-xl h-11 px-6 uppercase text-[10px] font-black gap-2" onClick={handleCopySummary}>
+                  <Copy className="h-4 w-4" /> Copiar Resumen
+                </Button>
+                <Button className="rounded-xl h-11 px-8 bg-primary hover:bg-primary/90 text-white uppercase text-[10px] font-black shadow-xl shadow-primary/20 gap-2">
+                  <FileText className="h-4 w-4" /> Exportar Reporte PDF
+                </Button>
+              </div>
+            </footer>
+          </DialogContent>
+        </Dialog>
+
       </SidebarInset>
     </div>
   );
