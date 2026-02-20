@@ -82,13 +82,18 @@ export type TraceabilityReportOutput = z.infer<typeof TraceabilityReportOutputSc
 
 const traceabilityPrompt = ai.definePrompt({
   name: 'traceabilityPrompt',
-  input: {schema: TraceabilityReportInputSchema},
+  input: {
+    schema: z.object({
+      serializedOrderData: z.string(),
+      context: z.any().optional()
+    })
+  },
   output: {schema: TraceabilityReportOutputSchema},
   prompt: `Eres un Analista Forense Senior de Proyectos de Construcción en Walmart. 
 Tu misión es generar un Informe de Trazabilidad Semántica exhaustivo para el registro OC/OT provisto.
 
-DATOS DEL REGISTRO:
-{{{JSONstringify orderData}}}
+DATOS DEL REGISTRO (JSON):
+{{{serializedOrderData}}}
 
 INSTRUCCIONES DE ANÁLISIS:
 1. LÍNEA DE TIEMPO: Reconstruye los hitos. Si faltan fechas, márcalas como 'Dato Faltante'. Calcula los 'gapDays' si es posible inferir el tiempo entre pasos.
@@ -101,7 +106,10 @@ Tono: Ejecutivo, técnico, sobrio y basado 100% en evidencia. No inventes fechas
 });
 
 export async function generateTraceabilityReport(input: TraceabilityReportInput): Promise<TraceabilityReportOutput> {
-  const {output} = await traceabilityPrompt(input);
+  const {output} = await traceabilityPrompt({
+    serializedOrderData: JSON.stringify(input.orderData, null, 2),
+    context: input.context
+  });
   if (!output) throw new Error("Fallo al generar informe de trazabilidad.");
   return output;
 }
