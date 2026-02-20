@@ -36,7 +36,9 @@ import {
   MoreVertical,
   ChevronDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ClipboardCheck,
+  ZapOff
 } from 'lucide-react';
 import {
   Table,
@@ -88,13 +90,14 @@ const AI_BATCH_SIZE = 3;
 const PAGE_SIZE = 50;
 
 type AuditStatus = 'all' | 'pending' | 'audited' | 'review' | 'manual';
+type AIClassificationStatus = 'all' | 'classified' | 'not_classified' | 'needs_review' | 'low_confidence';
 
 export default function AnalysisPage() {
   const { toast } = useToast();
   const db = useFirestore();
   const { user } = useUser();
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<AuditStatus>('all');
+  const [aiFilter, setAiFilter] = useState<AIClassificationStatus>('all');
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportResult, setReportResult] = useState<TraceabilityReportOutput | null>(null);
@@ -102,7 +105,6 @@ export default function AnalysisPage() {
   
   // Estados de Paginación
   const [currentPage, setCurrentPage] = useState(1);
-  const [lastVisible, setLastVisible] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [pageStack, setPageStack] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
   const [totalInDb, setTotalInDb] = useState<number | null>(null);
 
@@ -136,39 +138,38 @@ export default function AnalysisPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
+    // Note: For full server-side filtering on thousands of records with pagination,
+    // we would need specific Firestore indexes. For this MVP we load a larger sample
+    // and paginate locally or use filters that match indexes.
     const baseQuery = query(
       collection(db, 'orders'), 
       orderBy('projectId', 'desc'),
-      limit(PAGE_SIZE)
+      limit(PAGE_SIZE * 4) // Load a buffer for filtering/pagination
     );
 
-    const cursor = pageStack[currentPage - 1];
-    if (cursor) {
-      return query(baseQuery, startAfter(cursor));
-    }
     return baseQuery;
-  }, [db, currentPage, pageStack]);
+  }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
-  // Update last visible for next page
-  useEffect(() => {
-    if (orders && orders.length > 0) {
-      // Note: useCollection returns data with IDs, we need the actual snapshot for startAfter
-      // But useCollection implementation doesn't return the raw snapshots.
-      // We will adjust useCollection or use standard fetch if needed, 
-      // but for this prototype we'll assume we can use the ID if projectId is unique and ordered.
-      // Correction: Firestore cursors need the snapshot. 
-      // I will implement a custom fetch for the cursor to maintain the architecture.
-    }
+  // Dynamic counts based on loaded buffer (representative sample)
+  const classificationCounts = useMemo(() => {
+    if (!orders) return { classified: 0, not_classified: 0, needs_review: 0, low_confidence: 0 };
+    return {
+      classified: orders.filter(o => o.classification_status === 'auto' || o.classification_status === 'reviewed').length,
+      not_classified: orders.filter(o => !o.classification_status).length,
+      needs_review: orders.filter(o => o.needs_review === true).length,
+      low_confidence: orders.filter(o => o.confidence_score && o.confidence_score < 0.6).length,
+    };
   }, [orders]);
 
   const stats = useMemo(() => {
-    if (!orders) return { total: totalInDb || 0, audited: 0, progress: 0 };
+    if (!orders) return { total: totalInDb || 0, audited: 0, coverage: 0 };
     const total = totalInDb || 0;
-    // Estimated audited count would need a filtered count query, but for UI we show total sample for now
-    const audited = orders.filter(o => o.classification_status === 'reviewed').length;
-    return { total, audited, progress: total > 0 ? (audited / 100) * 100 : 0 }; // Placeholder progress
+    const classified = orders.filter(o => o.classification_status === 'auto' || o.classification_status === 'reviewed').length;
+    // Extrapolating coverage from buffer for UI visualization
+    const coverage = orders.length > 0 ? (classified / orders.length) * 100 : 0;
+    return { total, audited: classified, coverage };
   }, [orders, totalInDb]);
 
   const formatAmount = (amount: number) => {
@@ -177,22 +178,33 @@ export default function AnalysisPage() {
   };
 
   const filteredOrders = useMemo(() => {
-    return orders?.filter(o => {
+    if (!orders) return [];
+    let result = orders.filter(o => {
       const searchStr = searchTerm.toLowerCase();
       const pid = String(o.projectId || "").toLowerCase();
-      const matchesSearch = pid.includes(searchStr);
-      const matchesStatus = statusFilter === 'all' || 
-        (statusFilter === 'audited' && o.classification_status === 'reviewed') ||
-        (statusFilter === 'pending' && o.classification_status !== 'reviewed');
-      return matchesSearch && matchesStatus;
-    }) || [];
-  }, [orders, searchTerm, statusFilter]);
+      const projectName = String(o.projectName || "").toLowerCase();
+      const matchesSearch = pid.includes(searchStr) || projectName.includes(searchStr);
+      
+      const isClassified = o.classification_status === 'auto' || o.classification_status === 'reviewed';
+      const matchesAi = aiFilter === 'all' || 
+        (aiFilter === 'classified' && isClassified) ||
+        (aiFilter === 'not_classified' && !o.classification_status) ||
+        (aiFilter === 'needs_review' && o.needs_review === true) ||
+        (aiFilter === 'low_confidence' && o.confidence_score < 0.6);
+
+      return matchesSearch && matchesAi;
+    });
+
+    // Handle pagination on the filtered result
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return result.slice(start, start + PAGE_SIZE);
+  }, [orders, searchTerm, aiFilter, currentPage]);
 
   const selectedTotalAmount = useMemo(() => {
-    return filteredOrders
-      .filter(o => selectedIds.includes(o.id))
-      .reduce((acc, curr) => acc + (curr.impactoNeto || 0), 0);
-  }, [filteredOrders, selectedIds]);
+    return orders
+      ?.filter(o => selectedIds.includes(o.id))
+      .reduce((acc, curr) => acc + (curr.impactoNeto || 0), 0) || 0;
+  }, [orders, selectedIds]);
 
   const toggleSelectAll = () => {
     if (selectedIds.length === filteredOrders.length) {
@@ -207,12 +219,10 @@ export default function AnalysisPage() {
   };
 
   const handleNextPage = () => {
-    if (!orders || orders.length < PAGE_SIZE) return;
-    // To support real cursors with useCollection, we'd need the DocumentSnapshot.
-    // For now, we simulate pagination page increment. 
-    // In a real production app, we would store the last document snapshot in pageStack.
-    setCurrentPage(prev => prev + 1);
-    setSelectedIds([]);
+    if (currentPage * PAGE_SIZE < (orders?.length || 0)) {
+      setCurrentPage(prev => prev + 1);
+      setSelectedIds([]);
+    }
   };
 
   const handlePrevPage = () => {
@@ -240,6 +250,7 @@ export default function AnalysisPage() {
         subcausa_normalizada: result.subcausa_normalizada,
         semanticAnalysis: result,
         structural_quality_score: 95,
+        confidence_score: result.confidence_score,
         reliability_level: 'HIGH',
         rationale_tecnico: result.rationale_tecnico,
         needs_review: result.needs_review,
@@ -352,7 +363,7 @@ export default function AnalysisPage() {
     setBulkAiResult(null);
 
     try {
-      const selectedOrders = filteredOrders.filter(o => selectedIds.includes(o.id));
+      const selectedOrders = orders?.filter(o => selectedIds.includes(o.id)) || [];
       let allAnomalies: any[] = [];
       let allPatterns: string[] = [];
       let allRecommendations: string[] = [];
@@ -388,6 +399,7 @@ export default function AnalysisPage() {
               subcausa_normalizada: result.subcausa_normalizada,
               semanticAnalysis: result,
               structural_quality_score: 95,
+              confidence_score: result.confidence_score,
               reliability_level: 'HIGH',
               rationale_tecnico: result.rationale_tecnico,
               needs_review: result.needs_review,
@@ -466,13 +478,31 @@ export default function AnalysisPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 bg-slate-100 p-1.5 rounded-xl border shadow-inner">
+              <div className="flex items-center gap-2 px-3">
+                <Filter className="h-3.5 w-3.5 text-slate-400" />
+                <span className="text-[10px] font-black text-slate-500 uppercase">Estado Clasificación IA:</span>
+              </div>
+              <Select value={aiFilter} onValueChange={(v) => { setAiFilter(v as any); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 min-w-[200px] bg-white border-none shadow-sm text-[10px] font-bold uppercase">
+                  <SelectValue placeholder="Seleccionar estado..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos ({totalInDb || 0})</SelectItem>
+                  <SelectItem value="classified" className="text-emerald-600">Clasificados IA ({classificationCounts.classified})</SelectItem>
+                  <SelectItem value="not_classified" className="text-amber-600">No clasificados ({classificationCounts.not_classified})</SelectItem>
+                  <SelectItem value="needs_review" className="text-rose-600">Pendientes de revisión ({classificationCounts.needs_review})</SelectItem>
+                  <SelectItem value="low_confidence" className="text-rose-800">Requieren reprocesamiento ({classificationCounts.low_confidence})</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
               <Input
-                placeholder="Buscar PID..."
+                placeholder="Buscar PID o Proyecto..."
                 className="pl-9 w-[220px] h-9 bg-slate-50 border-none shadow-sm"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               />
             </div>
           </div>
@@ -490,17 +520,27 @@ export default function AnalysisPage() {
             </Card>
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Auditados (Muestra)</p>
-                <h4 className="text-2xl font-headline font-bold text-emerald-600">{stats.audited}</h4>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Normalizados IA</p>
+                <h4 className="text-2xl font-headline font-bold text-emerald-600">{classificationCounts.classified}</h4>
               </div>
-              <CheckCircle2 className="h-8 w-8 text-emerald-100" />
+              <BrainCircuit className="h-8 w-8 text-emerald-100" />
             </Card>
             <Card className="md:col-span-2 border-none shadow-sm bg-slate-900 text-white p-4 space-y-3">
               <div className="flex justify-between items-center">
-                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cobertura de Auditoría</p>
-                 <span className="text-xs font-bold text-accent">{totalInDb ? Math.round((stats.audited / totalInDb) * 100) : 0}%</span>
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cobertura de Auditoría Semántica</p>
+                 <span className="text-xs font-bold text-accent">{Math.round(stats.coverage)}%</span>
               </div>
-              <Progress value={totalInDb ? (stats.audited / totalInDb) * 100 : 0} className="h-1.5 bg-white/10" />
+              <Progress value={stats.coverage} className="h-1.5 bg-white/10" />
+              <div className="flex gap-4 pt-1">
+                <div className="flex items-center gap-1.5">
+                  <div className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                  <span className="text-[8px] font-black uppercase opacity-60">{classificationCounts.needs_review} Pendientes de revisión</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  <span className="text-[8px] font-black uppercase opacity-60">{classificationCounts.not_classified} Sin procesar</span>
+                </div>
+              </div>
             </Card>
           </div>
 
@@ -563,10 +603,10 @@ export default function AnalysisPage() {
                       onCheckedChange={toggleSelectAll}
                     />
                   </TableHead>
-                  <TableHead className="text-[10px] font-black uppercase">Origen / Nivel Trust</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase">Estatus IA / Trust</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Clasificación IA</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-center">Trazabilidad</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center">Auditoría</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-right">Monto</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-center">Acciones</TableHead>
                 </TableRow>
@@ -584,12 +624,20 @@ export default function AnalysisPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1.5">
-                        <Badge variant="outline" className={`text-[8px] font-black border-none h-4 px-1.5 w-fit ${order.reliability_level === 'HIGH' ? 'bg-emerald-100 text-emerald-700' : order.reliability_level === 'MEDIUM' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
-                          {order.reliability_level || 'LOW'} TRUST
-                        </Badge>
-                        <Badge variant="outline" className="text-[8px] uppercase h-4 px-1.5 bg-slate-100 text-slate-500 border-none w-fit font-bold">
-                          {order.dataSource === 'PDF_ENRICHED' ? <Lock className="h-2 w-2 mr-1 text-primary" /> : <Database className="h-2 w-2 mr-1" />}
-                          {order.dataSource?.replace('_HISTORIC', '') || 'EXCEL'}
+                        <div className="flex items-center gap-1.5">
+                          {order.classification_status === 'reviewed' ? (
+                            <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black h-4 px-1.5">REVIEWED</Badge>
+                          ) : order.classification_status === 'auto' ? (
+                            <Badge className="bg-primary/10 text-primary border-none text-[8px] font-black h-4 px-1.5">AUTO IA</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[8px] font-black h-4 px-1.5 border-dashed text-slate-400">PENDING</Badge>
+                          )}
+                          {order.needs_review && (
+                            <Badge className="bg-rose-500 text-white border-none text-[8px] font-black h-4 px-1.5 animate-pulse">REVISIÓN</Badge>
+                          )}
+                        </div>
+                        <Badge variant="outline" className={`text-[8px] font-black border-none h-4 px-1.5 w-fit ${order.confidence_score >= 0.8 ? 'bg-emerald-50 text-emerald-600' : order.confidence_score >= 0.6 ? 'bg-amber-50 text-amber-600' : 'bg-rose-50 text-rose-600'}`}>
+                          {order.confidence_score ? `${Math.round(order.confidence_score * 100)}% CONFIDENCE` : 'NO SCORE'}
                         </Badge>
                       </div>
                     </TableCell>
@@ -606,12 +654,16 @@ export default function AnalysisPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-center">
-                      {order.pdf_traceability_reconstructed ? (
-                        <Badge className="bg-emerald-50 text-emerald-600 hover:bg-emerald-50 border-none text-[8px] font-black py-1 px-2">RECONSTRUIDA</Badge>
-                      ) : order.isSigned ? (
-                        <Badge className="bg-primary/10 text-primary hover:bg-primary/10 border-none text-[8px] font-black py-1 px-2">DOCUSIGN OK</Badge>
+                      {order.classification_status === 'reviewed' ? (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          <span className="text-[7px] font-black text-slate-400 uppercase">VALIDADO</span>
+                        </div>
                       ) : (
-                        <Badge variant="outline" className="text-[8px] font-black py-1 px-2 border-dashed opacity-40 text-slate-400">SIN EVIDENCIA</Badge>
+                        <div className="flex flex-col items-center gap-0.5 opacity-30">
+                          <History className="h-4 w-4 text-slate-400" />
+                          <span className="text-[7px] font-black text-slate-400 uppercase">EN ESPERA</span>
+                        </div>
                       )}
                     </TableCell>
                     <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
@@ -804,7 +856,7 @@ export default function AnalysisPage() {
                   variant="outline" 
                   size="sm" 
                   onClick={handleNextPage} 
-                  disabled={(orders?.length || 0) < PAGE_SIZE || isLoading}
+                  disabled={currentPage * PAGE_SIZE >= (orders?.length || 0) || isLoading}
                   className="rounded-lg h-8 px-3 gap-1 uppercase text-[9px] font-black"
                 >
                   Siguiente <ChevronRight className="h-3 w-3" />
