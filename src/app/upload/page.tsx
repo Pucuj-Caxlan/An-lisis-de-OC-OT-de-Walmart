@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState } from 'react';
@@ -28,6 +27,7 @@ import { useFirestore } from '@/firebase';
 import { doc, setDoc, writeBatch } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { correlateHeaders } from '@/ai/flows/header-correlation-flow';
+import * as XLSX from 'xlsx';
 
 export default function UploadPage() {
   const { toast } = useToast();
@@ -54,7 +54,7 @@ export default function UploadPage() {
 
     try {
       for (const file of selectedFiles) {
-        // 1. Header Correlation via AI (Solo para el primer archivo del lote como muestra)
+        // 1. Header Correlation via IA (Solo para el primer archivo del lote como muestra)
         setIsCorrelating(true);
         const reader = new FileReader();
         const headerSample = await new Promise<string[]>((resolve) => {
