@@ -38,7 +38,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  ZapOff
+  ZapOff,
+  Rows
 } from 'lucide-react';
 import {
   Table,
@@ -87,24 +88,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const MAX_BULK_AI_RECORDS = 300;
 const AI_BATCH_SIZE = 3; 
-const PAGE_SIZE = 50;
-
-type AuditStatus = 'all' | 'pending' | 'audited' | 'review' | 'manual';
-type AIClassificationStatus = 'all' | 'classified' | 'not_classified' | 'needs_review' | 'low_confidence';
 
 export default function AnalysisPage() {
   const { toast } = useToast();
   const db = useFirestore();
   const { user } = useUser();
   const [searchTerm, setSearchTerm] = useState('');
-  const [aiFilter, setAiFilter] = useState<AIClassificationStatus>('all');
+  const [aiFilter, setAiFilter] = useState<any>('all');
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportResult, setReportResult] = useState<TraceabilityReportOutput | null>(null);
   const [mounted, setMounted] = useState(false);
   
-  // Estados de Paginación
+  // Estados de Paginación y Densidad
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
   const [totalInDb, setTotalInDb] = useState<number | null>(null);
 
   // Estados de Selección y Procesamiento Masivo
@@ -137,7 +135,7 @@ export default function AnalysisPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    // Align with SSOT: Load full dataset up to 10k for accurate filtering/counting
+    // Buffer SSOT de 10k para búsqueda instantánea
     return query(
       collection(db, 'orders'), 
       orderBy('projectId', 'desc'),
@@ -147,7 +145,6 @@ export default function AnalysisPage() {
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
-  // Robust calculation over the entire loaded dataset
   const classificationCounts = useMemo(() => {
     if (!orders) return { classified: 0, not_classified: 0, needs_review: 0, low_confidence: 0 };
     return {
@@ -189,10 +186,11 @@ export default function AnalysisPage() {
     });
   }, [orders, searchTerm, aiFilter]);
 
+  // Paginación reactiva basada en el estado pageSize
   const pagedOrders = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filteredOrdersFull.slice(start, start + PAGE_SIZE);
-  }, [filteredOrdersFull, currentPage]);
+    const start = (currentPage - 1) * pageSize;
+    return filteredOrdersFull.slice(start, start + pageSize);
+  }, [filteredOrdersFull, currentPage, pageSize]);
 
   const selectedTotalAmount = useMemo(() => {
     return orders
@@ -213,7 +211,7 @@ export default function AnalysisPage() {
   };
 
   const handleNextPage = () => {
-    if (currentPage * PAGE_SIZE < filteredOrdersFull.length) {
+    if (currentPage * pageSize < filteredOrdersFull.length) {
       setCurrentPage(prev => prev + 1);
       setSelectedIds([]);
     }
@@ -830,10 +828,25 @@ export default function AnalysisPage() {
               </TableBody>
             </Table>
 
-            {/* Pagination Controls */}
+            {/* Pagination Controls con Selector de Densidad */}
             <div className="flex items-center justify-between px-6 py-4 bg-slate-50/50 border-t">
-              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                Mostrando {((currentPage - 1) * PAGE_SIZE) + 1} – {Math.min(currentPage * PAGE_SIZE, filteredOrdersFull.length)} de {filteredOrdersFull.length} registros filtrados (Universo: {totalInDb})
+              <div className="flex items-center gap-6">
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  Mostrando {((currentPage - 1) * pageSize) + 1} – {Math.min(currentPage * pageSize, filteredOrdersFull.length)} de {filteredOrdersFull.length} registros filtrados (Universo: {totalInDb})
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-black text-slate-400 uppercase">Filas:</span>
+                  <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(parseInt(v)); setCurrentPage(1); setSelectedIds([]); }}>
+                    <SelectTrigger className="h-7 w-[100px] bg-white border shadow-sm text-[10px] font-bold uppercase">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="100">100 / Pág</SelectItem>
+                      <SelectItem value="250">250 / Pág</SelectItem>
+                      <SelectItem value="500">500 / Pág</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Button 
@@ -852,7 +865,7 @@ export default function AnalysisPage() {
                   variant="outline" 
                   size="sm" 
                   onClick={handleNextPage} 
-                  disabled={currentPage * PAGE_SIZE >= filteredOrdersFull.length || isLoading}
+                  disabled={currentPage * pageSize >= filteredOrdersFull.length || isLoading}
                   className="rounded-lg h-8 px-3 gap-1 uppercase text-[9px] font-black"
                 >
                   Siguiente <ChevronRight className="h-3 w-3" />
