@@ -21,15 +21,13 @@ const WordConceptSchema = z.object({
 });
 
 const WordCloudInputSchema = z.object({
-  orders: z.array(z.object({
-    id: z.string(),
-    impactoNeto: z.number(),
-    disciplina_normalizada: z.string().optional(),
-    causa_raiz_normalizada: z.string().optional(),
-    descripcion: z.string(),
-    standardizedDescription: z.string().optional(),
-    fechaSolicitud: z.string().optional()
-  })).describe("Lote de órdenes para análisis semántico masivo"),
+  groups: z.array(z.object({
+    disciplina: z.string(),
+    causa: z.string(),
+    impactoTotal: z.number(),
+    frecuencia: z.number(),
+    descripcionesMuestra: z.string().optional()
+  })).describe("Datos agregados para análisis semántico masivo representativo"),
 });
 export type WordCloudInput = z.infer<typeof WordCloudInputSchema>;
 
@@ -47,23 +45,22 @@ const wordCloudPrompt = ai.definePrompt({
   input: {schema: WordCloudInputSchema},
   output: {schema: WordCloudOutputSchema},
   prompt: `Eres un Arquitecto de Inteligencia de Negocios Senior en Walmart Real Estate.
-Tu misión es transformar datos dispersos en una Nube de Conceptos Estratégicos.
+Tu misión es transformar datos agregados en una Nube de Conceptos Estratégicos que represente el 100% de la base de datos.
 
-DATOS DISPONIBLES:
-{{#each orders}}
-- PID: {{{id}}} | Monto: \${{{impactoNeto}}} | Disciplina: {{{disciplina_normalizada}}} | Causa: {{{causa_raiz_normalizada}}}
-  Desc: {{{descripcion}}} {{#if standardizedDescription}} | IA: {{{standardizedDescription}}} {{/if}}
+DATOS AGREGADOS (UNIVERSO COMPLETO):
+{{#each groups}}
+- Grupo: {{{disciplina}}} | Causa: {{{causa}}} | Impacto Total: \${{{impactoTotal}}} | Frecuencia: {{{frecuencia}}}
+  Muestra de descripciones: {{{descripcionesMuestra}}}
 {{/each}}
 
 INSTRUCCIONES DE PONDERACIÓN:
-1. IDENTIFICACIÓN: Extrae conceptos clave de las disciplinas, causas y descripciones técnicas.
-2. MODELO MATEMÁTICO: Asigna pesos altos a conceptos que tengan un Impacto Económico alto (70%) y una Frecuencia alta (30%).
+1. IDENTIFICACIÓN: Extrae conceptos clave de las disciplinas, causas y descripciones técnicas provistas en las muestras.
+2. MODELO MATEMÁTICO: Asigna pesos altos a conceptos que tengan un Impacto Económico acumulado alto (70%) y una Frecuencia alta (30%).
 3. CATEGORIZACIÓN: Divide los conceptos en Disciplina, Causa Raíz o Concepto Técnico.
-4. ANÁLISIS 80/20: Determina qué conceptos representan el 80% del impacto total.
-5. DIAGNÓSTICO: Explica de forma ejecutiva por qué esos términos dominan la nube.
+4. ANÁLISIS 80/20: Determina qué conceptos representan el 80% del impacto total basándote en las sumas de los grupos.
+5. DIAGNÓSTICO: Explica de forma ejecutiva por qué esos términos dominan la nube y cómo afectan al presupuesto global.
 
-Busca términos como "Error de Diseño", "Omisión MEP", "Regulatorio", "Ajuste Prototipo", etc.
-Sé preciso en los montos acumulados por palabra.`,
+Responde con precisión sobre los montos acumulados por concepto.`,
 });
 
 export async function analyzeWordCloud(input: WordCloudInput): Promise<WordCloudOutput> {

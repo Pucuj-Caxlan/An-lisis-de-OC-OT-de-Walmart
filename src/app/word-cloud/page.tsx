@@ -63,7 +63,6 @@ export default function WordCloudPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    // Ampliamos el límite para cubrir el 100% de la base instalada (hasta 1000 registros)
     return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(1000));
   }, [db]);
 
@@ -87,6 +86,46 @@ export default function WordCloudPage() {
     });
   }, [orders, filters]);
 
+  // Agregación de datos antes de enviar a la IA para estabilidad total
+  const aggregatedForAi = useMemo(() => {
+    const groups: Record<string, {
+      impact: number;
+      count: number;
+      disciplina: string;
+      causa: string;
+      descriptions: string[];
+    }> = {};
+
+    filteredOrders.forEach(o => {
+      const disc = o.disciplina_normalizada || 'Indefinida';
+      const causa = o.causa_raiz_normalizada || o.causaRaiz || 'Sin definir';
+      const key = `${disc}|${causa}`;
+      
+      if (!groups[key]) {
+        groups[key] = {
+          impact: 0,
+          count: 0,
+          disciplina: disc,
+          causa: causa,
+          descriptions: []
+        };
+      }
+      groups[key].impact += (o.impactoNeto || 0);
+      groups[key].count += 1;
+      if (o.descripcion && groups[key].descriptions.length < 3) {
+        groups[key].descriptions.push(String(o.descripcion).substring(0, 100));
+      }
+    });
+
+    return Object.values(groups).map(g => ({
+      disciplina: g.disciplina,
+      causa: g.causa,
+      impactoTotal: g.impact,
+      frecuencia: g.count,
+      descripcionesMuestra: g.descriptions.join(" | ")
+    }));
+  }, [filteredOrders]);
+
   const runAnalysis = async () => {
     if (filteredOrders.length === 0) {
       toast({ variant: "destructive", title: "Sin datos", description: "Cargue registros primero." });
@@ -96,27 +135,15 @@ export default function WordCloudPage() {
     setCloudData(null);
     
     try {
-      // Usamos el 100% de los registros filtrados para un análisis 80/20 real
-      // Payload ultra-ligero (150 chars) para garantizar estabilidad con 200+ registros
-      const simplifiedOrders = filteredOrders.map(o => ({
-        id: o.id,
-        impactoNeto: o.impactoNeto || 0,
-        disciplina_normalizada: o.disciplina_normalizada || 'Indefinida',
-        causa_raiz_normalizada: o.causa_raiz_normalizada || o.causaRaiz || 'Sin definir',
-        descripcion: String(o.descripcion || "").substring(0, 150),
-        standardizedDescription: o.standardizedDescription,
-        fechaSolicitud: o.fechaSolicitud
-      }));
-
-      const result = await analyzeWordCloud({ orders: simplifiedOrders as any });
+      // Enviamos el resumen agregado que representa el 100% de los datos de forma ultraligera
+      const result = await analyzeWordCloud({ groups: aggregatedForAi });
       setCloudData(result);
-      toast({ title: "Análisis Completado", description: `Se han analizado ${filteredOrders.length} registros.` });
+      toast({ title: "Análisis Completado", description: `Analizado el 100% de la muestra (${filteredOrders.length} registros).` });
     } catch (error: any) {
-      console.error("Word Cloud Error:", error);
       toast({ 
         variant: "destructive", 
         title: "Error de Servidor", 
-        description: "La respuesta tardó demasiado. Intente reduciendo el rango de fechas." 
+        description: "Intente reduciendo los filtros de fecha para una respuesta más rápida." 
       });
     } finally {
       setIsAnalyzing(false);
@@ -183,7 +210,6 @@ export default function WordCloudPage() {
         </header>
 
         <main className="p-6 md:p-8 space-y-6">
-          {/* Panel de Cobertura de Datos */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -231,7 +257,7 @@ export default function WordCloudPage() {
                     <CardTitle className="text-xl font-headline font-bold uppercase tracking-tight flex items-center gap-2">
                       <Layers className="h-5 w-5 text-accent" /> Mapa de Calor Semántico
                     </CardTitle>
-                    <CardDescription className="text-slate-400 text-xs font-medium uppercase">Análisis del 100% de la base de datos instalada</CardDescription>
+                    <CardDescription className="text-slate-400 text-xs font-medium uppercase">Análisis representativo del 100% de la base instalada</CardDescription>
                   </div>
                   <Badge variant="outline" className="bg-white/10 text-white border-white/20 px-4 py-1 uppercase text-[10px] font-black">
                     MUESTRA: {filteredOrders.length} REGISTROS
@@ -244,7 +270,7 @@ export default function WordCloudPage() {
                     <RefreshCcw className="h-12 w-12 animate-spin opacity-40" />
                     <div className="text-center space-y-1">
                       <p className="text-xs font-black uppercase tracking-[0.2em]">Escaneando Base de Datos...</p>
-                      <p className="text-[10px] text-slate-400 uppercase font-bold italic">Procesando {filteredOrders.length} registros para Pareto</p>
+                      <p className="text-[10px] text-slate-400 uppercase font-bold italic">Sincronizando {filteredOrders.length} registros para análisis Pareto</p>
                     </div>
                   </div>
                 ) : !cloudData ? (
@@ -270,7 +296,7 @@ export default function WordCloudPage() {
                   <span className="flex items-center gap-1.5"><div className="h-2 w-2 rounded-full bg-amber-500" /> Riesgo de Control</span>
                   <span className="flex items-center gap-1.5"><div className="h-2 w-2 rounded-full bg-primary" /> Tendencia Estable</span>
                 </div>
-                <span>Algoritmo Forense v2.6 • Walmart Intelligence</span>
+                <span>Algoritmo Forense v2.8 • Representatividad Total</span>
               </CardFooter>
             </Card>
 
@@ -304,7 +330,7 @@ export default function WordCloudPage() {
                   ) : (
                     <div className="py-12 text-center text-slate-500 space-y-3">
                       <SearchCode className="h-8 w-8 mx-auto opacity-20" />
-                      <p className="text-[10px] font-bold uppercase tracking-widest leading-relaxed">Analice los datos de mayor impacto financiero.</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest leading-relaxed">Analice los datos para ver concentración de impacto.</p>
                     </div>
                   )}
                 </CardContent>
@@ -331,7 +357,7 @@ export default function WordCloudPage() {
                       </div>
                     </div>
                     <div className="space-y-3">
-                      <p className="text-[9px] font-black text-primary uppercase tracking-widest">Ejemplos en Base</p>
+                      <p className="text-[9px] font-black text-primary uppercase tracking-widest">Registros de Muestra</p>
                       <ScrollArea className="h-32 pr-4">
                         <div className="space-y-2">
                           {orders
@@ -351,7 +377,7 @@ export default function WordCloudPage() {
               ) : (
                 <div className="h-60 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-slate-300 p-8 text-center bg-white/50">
                   <Info className="h-8 w-8 mb-3 opacity-20" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Seleccione un concepto para auditar.</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Seleccione un concepto para profundizar.</p>
                 </div>
               )}
             </aside>

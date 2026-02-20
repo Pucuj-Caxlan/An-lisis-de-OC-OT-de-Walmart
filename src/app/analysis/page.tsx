@@ -82,7 +82,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const MAX_BULK_AI_RECORDS = 300;
-const AI_BATCH_SIZE = 3; // Reducido a 3 para máxima estabilidad de red y evitar 'Unexpected response'
+const AI_BATCH_SIZE = 3; 
 
 type AuditStatus = 'all' | 'pending' | 'audited' | 'review' | 'manual';
 
@@ -116,7 +116,7 @@ export default function AnalysisPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), limit(500));
+    return query(collection(db, 'orders'), limit(1000));
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -301,11 +301,12 @@ export default function AnalysisPage() {
       let finalSummary = "";
       let lastConfidence = 0;
 
+      // Procesamiento estrictamente secuencial para estabilidad de red
       for (let i = 0; i < selectedOrders.length; i += AI_BATCH_SIZE) {
         const chunk = selectedOrders.slice(i, i + AI_BATCH_SIZE);
-        
-        // 1. Clasificación Semántica Individual (Serializada para evitar timeouts)
         const classifications = [];
+
+        // Clasificación secuencial dentro del bloque
         for (const order of chunk) {
           try {
             const semanticResult = await analyzeOrderSemantically({
@@ -369,8 +370,7 @@ export default function AnalysisPage() {
           setProcessedCount(prev => prev + chunk.length);
           setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
           
-          // Throttling adaptativo para evitar ráfagas de red
-          await new Promise(r => setTimeout(r, 800)); 
+          await new Promise(r => setTimeout(r, 1000)); 
         } catch (chunkError) {
           console.error(`Error en lote:`, chunkError);
         }
@@ -380,7 +380,7 @@ export default function AnalysisPage() {
         executiveSummary: finalSummary,
         totalImpactFormatted: formatAmount(selectedTotalAmount),
         commonPatterns: allPatterns.slice(0, 8),
-        recurrenceAnalysis: "Análisis semántico consolidado y guardado en base.",
+        recurrenceAnalysis: "Análisis semántico consolidado y sincronizado con base de datos.",
         anomaliesDetected: allAnomalies.slice(0, 10),
         disciplineImpact: [], 
         recommendations: allRecommendations.slice(0, 6),
@@ -390,7 +390,7 @@ export default function AnalysisPage() {
 
       toast({ title: "Procesamiento Completo" });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Error de Servidor", description: "La conexión tardó demasiado. Intente con menos registros." });
+      toast({ variant: "destructive", title: "Error de Conexión", description: "La red está saturada. Intente con menos registros." });
       setShowBulkAiDialog(false);
     } finally {
       setIsBulkAiProcessing(false);
@@ -659,7 +659,7 @@ export default function AnalysisPage() {
                                       <Badge variant="outline" className="text-[8px] font-black">{order.reliability_level}</Badge>
                                     </div>
                                     <Progress value={order.structural_quality_score || 0} className="h-1.5" />
-                                    <p className="text-[10px] text-slate-500 italic">Score calculado por el motor estructural basado en 12 variables institucionales.</p>
+                                    <p className="text-[10px] text-slate-500 italic">Score calculado por el motor estructural basado en variables institucionales.</p>
                                   </Card>
                                   <Card className="md:col-span-2 p-4 bg-slate-900 text-white border-none shadow-sm rounded-2xl relative overflow-hidden">
                                     <BrainCircuit className="absolute -bottom-2 -right-2 h-20 w-20 opacity-5" />
@@ -755,7 +755,7 @@ export default function AnalysisPage() {
                   </div>
                   <div className="space-y-2">
                     <h3 className="text-lg font-bold text-slate-800 uppercase tracking-widest">Orquestando Lotes Forenses...</h3>
-                    <p className="text-xs text-slate-400">Procesando en bloques de {AI_BATCH_SIZE} para mayor estabilidad.</p>
+                    <p className="text-xs text-slate-400">Procesando secuencialmente para máxima estabilidad.</p>
                   </div>
                   <div className="max-w-xs mx-auto space-y-2">
                     <div className="flex justify-between text-[10px] font-black text-primary">
