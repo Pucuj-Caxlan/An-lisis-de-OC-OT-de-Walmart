@@ -49,7 +49,7 @@ export default function WordCloudPage() {
   const [mounted, setMounted] = useState(false);
 
   const [filters, setFilters] = useState({
-    year: '2025',
+    year: 'TODO',
     discipline: 'all',
     type: 'all'
   });
@@ -60,7 +60,8 @@ export default function WordCloudPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), limit(500));
+    // Limitamos a 300 para estabilidad del payload hacia la IA
+    return query(collection(db, 'orders'), limit(300));
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -69,7 +70,7 @@ export default function WordCloudPage() {
     if (!orders) return [];
     return orders.filter(o => {
       const dateStr = o.fechaSolicitud || o.requestDate || "";
-      const yearMatch = filters.year === 'all' || dateStr.includes(filters.year);
+      const yearMatch = filters.year === 'TODO' || dateStr.includes(filters.year);
       const discMatch = filters.discipline === 'all' || o.disciplina_normalizada === filters.discipline;
       const typeMatch = filters.type === 'all' || o.dataSource === filters.type;
       return yearMatch && discMatch && typeMatch;
@@ -79,12 +80,30 @@ export default function WordCloudPage() {
   const runAnalysis = async () => {
     if (filteredOrders.length === 0) return;
     setIsAnalyzing(true);
+    setCloudData(null);
+    
     try {
-      const result = await analyzeWordCloud({ orders: filteredOrders as any });
+      // Optimizamos el payload: solo enviamos lo necesario y truncamos descripciones
+      const simplifiedOrders = filteredOrders.map(o => ({
+        id: o.id,
+        impactoNeto: o.impactoNeto || 0,
+        disciplina_normalizada: o.disciplina_normalizada || 'Indefinida',
+        causa_raiz_normalizada: o.causa_raiz_normalizada || o.causaRaiz || 'Sin definir',
+        descripcion: String(o.descripcion || "").substring(0, 300), // Truncado preventivo
+        standardizedDescription: o.standardizedDescription,
+        fechaSolicitud: o.fechaSolicitud
+      }));
+
+      const result = await analyzeWordCloud({ orders: simplifiedOrders as any });
       setCloudData(result);
       toast({ title: "Nube Forense Generada", description: "Análisis semántico 80/20 completado." });
     } catch (error: any) {
-      toast({ variant: "destructive", title: "Error IA", description: error.message });
+      console.error("Word Cloud Analysis Failed:", error);
+      toast({ 
+        variant: "destructive", 
+        title: "Error de IA", 
+        description: "La petición excedió el límite de tiempo o datos. Intente filtrar por un periodo más corto." 
+      });
     } finally {
       setIsAnalyzing(false);
     }
@@ -99,7 +118,6 @@ export default function WordCloudPage() {
   };
 
   const getWordSize = (weight: number) => {
-    // Escala dinámica para los tamaños de fuente
     if (weight > 85) return 'text-5xl md:text-6xl font-black';
     if (weight > 70) return 'text-4xl md:text-5xl font-extrabold';
     if (weight > 50) return 'text-2xl md:text-3xl font-bold';
@@ -129,13 +147,13 @@ export default function WordCloudPage() {
           </div>
           <div className="flex items-center gap-3">
             <div className="hidden md:flex bg-slate-100 p-1 rounded-xl border gap-1">
-              {['2024', '2025', 'all'].map(y => (
+              {['2024', '2025', 'TODO'].map(y => (
                 <button 
                   key={y}
                   onClick={() => setFilters({...filters, year: y})}
                   className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${filters.year === y ? 'bg-primary text-white shadow-sm' : 'text-slate-500 hover:bg-white'}`}
                 >
-                  {y === 'all' ? 'TODO' : y}
+                  {y}
                 </button>
               ))}
             </div>
@@ -163,14 +181,19 @@ export default function WordCloudPage() {
                     <CardDescription className="text-slate-400 text-xs font-medium uppercase">Ponderación: (0.7 Impacto + 0.3 Recurrencia) × Confianza IA</CardDescription>
                   </div>
                   <Badge variant="outline" className="bg-white/10 text-white border-white/20 px-4 py-1 uppercase text-[10px] font-black">
-                    Muestra: {filteredOrders.length} Registros
+                    MUESTRA: {filteredOrders.length} REGISTROS
                   </Badge>
                 </div>
               </CardHeader>
               <CardContent className="flex-1 p-10 flex flex-wrap items-center justify-center gap-x-8 gap-y-6 relative bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px]">
-                {!cloudData ? (
+                {isAnalyzing ? (
+                  <div className="flex flex-col items-center justify-center text-primary space-y-4">
+                    <RefreshCcw className="h-12 w-12 animate-spin opacity-40" />
+                    <p className="text-xs font-black uppercase tracking-[0.2em]">Analizando Patrones 80/20...</p>
+                  </div>
+                ) : !cloudData ? (
                   <div className="flex flex-col items-center justify-center text-slate-300 space-y-4">
-                    <BrainCircuit className="h-20 w-20 opacity-10 animate-pulse" />
+                    <BrainCircuit className="h-20 w-20 opacity-10" />
                     <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-400">Esperando ejecución del motor semántico...</p>
                   </div>
                 ) : (
@@ -262,15 +285,15 @@ export default function WordCloudPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <TrendingUp className={`h-4 w-4 ${selectedConcept.trend === 'Creciente' ? 'text-rose-500' : 'text-emerald-500'}`} />
-                        <span className="text-[10px] font-bold text-slate-600">Alta concentración en {filters.year}</span>
+                        <span className="text-[10px] font-bold text-slate-600">Alta concentración en el periodo</span>
                       </div>
                     </div>
                     <div className="space-y-3">
                       <p className="text-[9px] font-black text-primary uppercase tracking-widest">Ejemplos en Base</p>
                       <ScrollArea className="h-32 pr-4">
                         <div className="space-y-2">
-                          {filteredOrders
-                            .filter(o => o.causa_raiz_normalizada === selectedConcept.text || o.disciplina_normalizada === selectedConcept.text || o.descripcion?.includes(selectedConcept.text))
+                          {orders
+                            ?.filter(o => o.causa_raiz_normalizada === selectedConcept.text || o.disciplina_normalizada === selectedConcept.text || o.descripcion?.includes(selectedConcept.text))
                             .slice(0, 5)
                             .map((o, idx) => (
                               <div key={idx} className="p-2 border-l-2 border-slate-200 bg-slate-50/50 rounded-r-lg">
