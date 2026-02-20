@@ -7,6 +7,7 @@ import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { 
   Search, 
   RefreshCcw,
@@ -22,7 +23,9 @@ import {
   Eye,
   Microscope,
   FileSearch,
-  BookOpenCheck
+  BookOpenCheck,
+  Save,
+  X
 } from 'lucide-react';
 import {
   Table,
@@ -53,6 +56,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from '@/components/ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const DISCIPLINAS_CATALOGO = ["Eléctrica", "Civil", "Estructura Metálica", "HVAC", "Legal/Permisos", "Prototipos", "Contra Incendio", "Indefinida"];
+const CAUSAS_CATALOGO = ["Error Diseño", "Cambio Prototipo", "Omisión Contratista", "Requerimiento Autoridad", "Interferencia Constructiva", "Otros"];
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -61,6 +74,14 @@ export default function AnalysisPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'processed' | 'review'>('all');
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  
+  // Estados para corrección manual
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValues, setEditValues] = useState({
+    disciplina: '',
+    causa: '',
+    subcausa: ''
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -88,8 +109,8 @@ export default function AnalysisPage() {
         descripcion: order.descripcion || order.standardizedDescription || "",
         monto: order.impactoNeto || 0,
         contexto: {
-          disciplinasVigentes: ["Eléctrica", "Civil", "Estructura Metálica", "HVAC", "Legal/Permisos", "Prototipos", "Contra Incendio"],
-          causasVigentes: ["Error Diseño", "Cambio Prototipo", "Omisión Contratista", "Requerimiento Autoridad", "Interferencia Constructiva"]
+          disciplinasVigentes: DISCIPLINAS_CATALOGO,
+          causasVigentes: CAUSAS_CATALOGO
         }
       });
 
@@ -127,6 +148,45 @@ export default function AnalysisPage() {
     } finally {
       setIsAnalyzing(null);
     }
+  };
+
+  const handleValidateAudit = (order: any) => {
+    if (!db) return;
+    updateDocumentNonBlocking(doc(db, 'orders', order.id), {
+      classification_status: 'reviewed',
+      needs_review: false,
+      classified_at: new Date().toISOString()
+    });
+    toast({
+      title: "Auditoría Validada",
+      description: `La clasificación para ${order.projectId} ha sido confirmada correctamente.`,
+    });
+  };
+
+  const handleStartEditing = (order: any) => {
+    setEditValues({
+      disciplina: order.disciplina_normalizada || '',
+      causa: order.causa_raiz_normalizada || '',
+      subcausa: order.subcausa_normalizada || ''
+    });
+    setIsEditing(true);
+  };
+
+  const handleSaveManualOverride = (orderId: string) => {
+    if (!db) return;
+    updateDocumentNonBlocking(doc(db, 'orders', orderId), {
+      disciplina_normalizada: editValues.disciplina,
+      causa_raiz_normalizada: editValues.causa,
+      subcausa_normalizada: editValues.subcausa,
+      classification_status: 'overridden',
+      needs_review: false,
+      classified_at: new Date().toISOString()
+    });
+    setIsEditing(false);
+    toast({
+      title: "Corrección Guardada",
+      description: "Se ha aplicado el override manual exitosamente.",
+    });
   };
 
   const filteredOrders = orders?.filter(o => {
@@ -247,7 +307,7 @@ export default function AnalysisPage() {
                       </TableCell>
                       <TableCell className="text-center">
                         {order.disciplina_normalizada ? (
-                          <Dialog>
+                          <Dialog onOpenChange={(open) => !open && setIsEditing(false)}>
                             <DialogTrigger asChild>
                               <Button variant="ghost" size="sm" className="text-primary gap-1 group-hover:bg-primary group-hover:text-white transition-all">
                                 <FileSearch className="h-4 w-4" /> Ver Ficha
@@ -269,91 +329,149 @@ export default function AnalysisPage() {
                                 </DialogDescription>
                               </DialogHeader>
 
-                              <div className="space-y-8">
-                                <section>
-                                  <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
-                                    <BookOpenCheck className="h-4 w-4 text-primary" /> Descripción Original
-                                  </h4>
-                                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 italic text-slate-700 text-sm leading-relaxed">
-                                    "{order.descripcion_original || order.descripcion}"
-                                  </div>
-                                </section>
-
-                                <div className="grid md:grid-cols-2 gap-6">
-                                  <Card className="p-6 border-none bg-slate-900 text-white rounded-2xl shadow-xl overflow-hidden relative">
-                                    <div className="absolute top-0 right-0 p-4 opacity-10">
-                                      <Fingerprint className="h-20 w-20" />
-                                    </div>
-                                    <h4 className="text-[10px] font-black uppercase text-slate-400 mb-4 flex items-center gap-2">
-                                      <SearchCode className="h-4 w-4 text-accent" /> Razonamiento Forense
+                              {!isEditing ? (
+                                <div className="space-y-8">
+                                  <section>
+                                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
+                                      <BookOpenCheck className="h-4 w-4 text-primary" /> Descripción Original
                                     </h4>
-                                    <p className="text-sm font-medium leading-relaxed mb-6">
-                                      {order.rationale_tecnico || order.rationale_short}
-                                    </p>
-                                    <div className="space-y-4">
-                                      <div>
-                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Evidencia Térmica</p>
-                                        <div className="flex flex-wrap gap-2">
-                                          {order.evidence_terms?.map((term: string, i: number) => (
-                                            <Badge key={i} variant="secondary" className="bg-white/10 text-white border-none text-[9px] font-bold">
-                                              {term}
-                                            </Badge>
-                                          ))}
+                                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 italic text-slate-700 text-sm leading-relaxed">
+                                      "{order.descripcion_original || order.descripcion}"
+                                    </div>
+                                  </section>
+
+                                  <div className="grid md:grid-cols-2 gap-6">
+                                    <Card className="p-6 border-none bg-slate-900 text-white rounded-2xl shadow-xl overflow-hidden relative">
+                                      <div className="absolute top-0 right-0 p-4 opacity-10">
+                                        <Fingerprint className="h-20 w-20" />
+                                      </div>
+                                      <h4 className="text-[10px] font-black uppercase text-slate-400 mb-4 flex items-center gap-2">
+                                        <SearchCode className="h-4 w-4 text-accent" /> Razonamiento Forense
+                                      </h4>
+                                      <p className="text-sm font-medium leading-relaxed mb-6">
+                                        {order.rationale_tecnico || order.rationale_short}
+                                      </p>
+                                      <div className="space-y-4">
+                                        <div>
+                                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Evidencia Térmica</p>
+                                          <div className="flex flex-wrap gap-2">
+                                            {order.evidence_terms?.map((term: string, i: number) => (
+                                              <Badge key={i} variant="secondary" className="bg-white/10 text-white border-none text-[9px] font-bold">
+                                                {term}
+                                              </Badge>
+                                            ))}
+                                          </div>
                                         </div>
                                       </div>
-                                    </div>
-                                  </Card>
+                                    </Card>
 
-                                  <Card className="p-6 border-none bg-white rounded-2xl shadow-sm border border-slate-100">
-                                    <h4 className="text-[10px] font-black uppercase text-primary mb-4 flex items-center gap-2 tracking-widest">
-                                      <Microscope className="h-4 w-4" /> Lógica de Clasificación
-                                    </h4>
-                                    <div className="space-y-5">
-                                      <div className="space-y-1">
-                                        <p className="text-[9px] font-black text-slate-400 uppercase">Criterio Aplicado</p>
-                                        <p className="text-xs font-bold text-slate-800">{order.logica_clasificacion?.criterio_aplicado || "Inferencia Semántica"}</p>
+                                    <Card className="p-6 border-none bg-white rounded-2xl shadow-sm border border-slate-100">
+                                      <h4 className="text-[10px] font-black uppercase text-primary mb-4 flex items-center gap-2 tracking-widest">
+                                        <Microscope className="h-4 w-4" /> Lógica de Clasificación
+                                      </h4>
+                                      <div className="space-y-5">
+                                        <div className="space-y-1">
+                                          <p className="text-[9px] font-black text-slate-400 uppercase">Criterio Aplicado</p>
+                                          <p className="text-xs font-bold text-slate-800">{order.logica_clasificacion?.criterio_aplicado || "Inferencia Semántica"}</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <p className="text-[9px] font-black text-slate-400 uppercase">Taxonomía Nivel 3</p>
+                                          <p className="text-xs font-bold text-slate-800">{order.detalle_nivel_3 || "No determinado"}</p>
+                                        </div>
+                                        <Separator className="bg-slate-50" />
+                                        <div className="space-y-1">
+                                          <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
+                                            <AlertTriangle className="h-3 w-3 text-rose-500" /> Ambigüedades Detectadas
+                                          </p>
+                                          <p className="text-xs text-slate-500 italic">
+                                            {order.logica_clasificacion?.posibles_ambiguedades || "Ninguna detectada. Clasificación robusta."}
+                                          </p>
+                                        </div>
                                       </div>
-                                      <div className="space-y-1">
-                                        <p className="text-[9px] font-black text-slate-400 uppercase">Taxonomía Nivel 3</p>
-                                        <p className="text-xs font-bold text-slate-800">{order.detalle_nivel_3 || "No determinado"}</p>
-                                      </div>
-                                      <Separator className="bg-slate-50" />
-                                      <div className="space-y-1">
-                                        <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
-                                          <AlertTriangle className="h-3 w-3 text-rose-500" /> Ambigüedades Detectadas
-                                        </p>
-                                        <p className="text-xs text-slate-500 italic">
-                                          {order.logica_clasificacion?.posibles_ambiguedades || "Ninguna detectada. Clasificación robusta."}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </Card>
-                                </div>
+                                    </Card>
+                                  </div>
 
-                                <div className="flex items-center justify-between pt-6 border-t border-slate-100">
-                                  <div className="flex items-center gap-4">
-                                    <div className="text-center">
-                                      <p className="text-[9px] font-black text-slate-400 uppercase">Confianza</p>
-                                      <span className={`text-xl font-headline font-bold ${order.confidence_score > 0.8 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                        {Math.round(order.confidence_score * 100)}%
-                                      </span>
+                                  <div className="flex items-center justify-between pt-6 border-t border-slate-100">
+                                    <div className="flex items-center gap-4">
+                                      <div className="text-center">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase">Confianza</p>
+                                        <span className={`text-xl font-headline font-bold ${order.confidence_score > 0.8 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                          {Math.round(order.confidence_score * 100)}%
+                                        </span>
+                                      </div>
+                                      <Separator orientation="vertical" className="h-10" />
+                                      <div className="text-center">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase">Modelo IA</p>
+                                        <span className="text-xs font-bold text-slate-600">Gemini 2.5 Forensic</span>
+                                      </div>
                                     </div>
-                                    <Separator orientation="vertical" className="h-10" />
-                                    <div className="text-center">
-                                      <p className="text-[9px] font-black text-slate-400 uppercase">Modelo IA</p>
-                                      <span className="text-xs font-bold text-slate-600">Gemini 2.5 Forensic</span>
+                                    <div className="flex gap-3">
+                                      <Button variant="outline" onClick={() => handleStartEditing(order)} className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest">
+                                        Corregir Manualmente
+                                      </Button>
+                                      <Button onClick={() => handleValidateAudit(order)} className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
+                                        Validar Auditoría
+                                      </Button>
                                     </div>
                                   </div>
-                                  <div className="flex gap-3">
-                                    <Button variant="outline" className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest">
-                                      Corregir Manualmente
+                                </div>
+                              ) : (
+                                <div className="space-y-8 animate-in fade-in duration-300">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div className="space-y-4">
+                                      <div className="space-y-2">
+                                        <Label className="text-[10px] font-black uppercase text-slate-400">Disciplina Técnica</Label>
+                                        <Select value={editValues.disciplina} onValueChange={(v) => setEditValues({...editValues, disciplina: v})}>
+                                          <SelectTrigger className="rounded-xl">
+                                            <SelectValue placeholder="Seleccionar Disciplina" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {DISCIPLINAS_CATALOGO.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-[10px] font-black uppercase text-slate-400">Causa Raíz</Label>
+                                        <Select value={editValues.causa} onValueChange={(v) => setEditValues({...editValues, causa: v})}>
+                                          <SelectTrigger className="rounded-xl">
+                                            <SelectValue placeholder="Seleccionar Causa" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {CAUSAS_CATALOGO.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-[10px] font-black uppercase text-slate-400">Subcausa / Detalle</Label>
+                                        <Input 
+                                          value={editValues.subcausa} 
+                                          onChange={(e) => setEditValues({...editValues, subcausa: e.target.value})}
+                                          className="rounded-xl"
+                                          placeholder="Especifique el detalle técnico..."
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="bg-slate-50 p-6 rounded-3xl border border-dashed border-slate-200">
+                                      <h4 className="text-[10px] font-black uppercase text-slate-400 mb-4 flex items-center gap-2">
+                                        <Info className="h-4 w-4" /> Notas de Edición
+                                      </h4>
+                                      <p className="text-xs text-slate-500 leading-relaxed">
+                                        Al aplicar una corrección manual, el registro se marcará como <strong>"Sobreescrito" (Overridden)</strong>. 
+                                        Esto permite a la IA aprender de tus decisiones para futuras clasificaciones y mantiene la integridad de la auditoría humana.
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
+                                    <Button variant="ghost" onClick={() => setIsEditing(false)} className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest gap-2">
+                                      <X className="h-4 w-4" /> Cancelar
                                     </Button>
-                                    <Button className="rounded-xl px-6 h-10 text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20">
-                                      Validar Auditoría
+                                    <Button onClick={() => handleSaveManualOverride(order.id)} className="rounded-xl px-8 h-10 text-[10px] font-black uppercase tracking-widest gap-2 shadow-lg shadow-primary/20 bg-primary">
+                                      <Save className="h-4 w-4" /> Guardar Corrección
                                     </Button>
                                   </div>
                                 </div>
-                              </div>
+                              )}
                             </DialogContent>
                           </Dialog>
                         ) : (
