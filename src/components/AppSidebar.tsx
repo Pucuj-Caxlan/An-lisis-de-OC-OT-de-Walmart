@@ -12,7 +12,8 @@ import {
   BarChart3,
   BrainCircuit,
   FileText,
-  CloudLightning
+  CloudLightning,
+  Activity
 } from "lucide-react"
 
 import {
@@ -36,6 +37,11 @@ const navigation = [
     title: "Dashboard VP",
     icon: LayoutDashboard,
     url: "/",
+  },
+  {
+    title: "Control Center",
+    icon: Activity,
+    url: "/control-center",
   },
   {
     title: "Análisis Detallado",
