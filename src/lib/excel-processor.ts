@@ -11,21 +11,28 @@ export interface NormalizedRow {
   municipality: string;
   coordinador: string;
   plan: string;
-  etapaProyecto: string;
+  projectStage: string;
   causaRaiz: string;
   descripcion: string;
   montoDeductiva: number;
   montoAditiva: number;
   impactoNeto: number;
+  importeProy: number;
+  importeObra: number;
+  importeCompras: number;
   areaSolicitante: string;
   generadorDesviacion: string;
-  areaEjerceRecurso: string;
+  areaEjerceRecursoDeductiva: string;
+  areaEjerceRecursoAditiva: string;
   estatus: string;
   fechaSolicitud: string | null;
   fechaAprobacionGerente: string | null;
+  fechaAprobacionLider: string | null;
   fechaPptoProyectista: string | null;
+  fechaRetraso: string | null;
+  noRechazo: string;
+  motivoRechazo: string;
   proveedor: string;
-  qcFlags: string[];
   rowNumber: number;
   sheetName: string;
   structural_quality_score: number;
@@ -33,26 +40,47 @@ export interface NormalizedRow {
   pdf_traceability_reconstructed: boolean;
 }
 
-/**
- * Mapa canónico base para validación estructural.
- */
 export const CANONICAL_SCHEMA = [
   'projectId', 'projectName', 'type', 'format', 'country', 'state', 'municipality',
-  'coordinador', 'plan', 'etapaProyecto', 'causaRaiz', 'descripcion',
-  'montoDeductiva', 'montoAditiva', 'impactoNeto', 'areaSolicitante',
-  'generadorDesviacion', 'areaEjerceRecurso', 'estatus', 'fechaSolicitud',
-  'fechaAprobacionGerente', 'fechaPptoProyectista', 'proveedor'
+  'coordinador', 'plan', 'projectStage', 'causaRaiz', 'descripcion',
+  'montoDeductiva', 'montoAditiva', 'impactoNeto', 'importeProy', 'importeObra', 'importeCompras',
+  'areaSolicitante', 'generadorDesviacion', 'areaEjerceRecursoDeductiva', 'areaEjerceRecursoAditiva',
+  'estatus', 'fechaSolicitud', 'fechaAprobacionGerente', 'fechaAprobacionLider',
+  'fechaPptoProyectista', 'fechaRetraso', 'noRechazo', 'motivoRechazo', 'proveedor'
 ];
 
 const COLUMN_MAP: Record<string, string[]> = {
-  projectId: ['pid', 'id tririga', 'tririga', 'folio proyecto', 'numero de proyecto', 'id_proyecto', 'project id', 'num proyecto'],
-  projectName: ['nombre del proyecto', 'proyecto', 'name', 'descripcion proyecto', 'unidad de negocio', 'nombre unidad'],
-  type: ['tipo', 'ot/ocr/oci', 'tipo orden', 'clase', 'tipo_solicitud', 'clase de orden'],
-  format: ['formato', 'prototipo', 'unidad_negocio', 'formato tienda', 'business unit'],
-  causaRaiz: ['causa raiz', 'causa', 'motivo', 'origen_desviacion', 'root cause', 'causa_normalizada'],
-  descripcion: ['descripcion', 'descripción', 'que se realizara', 'justificacion', 'comentarios', 'detalle tecnico', 'description'],
-  impactoNeto: ['impacto neto', 'impacto', 'neto', 'total_orden', 'monto total', 'net impact', 'amount'],
-  fechaSolicitud: ['fecha de solicitud', 'fecha_solicitud', 'date_requested', 'f. solicitud', 'created date']
+  projectId: ['pid', 'id tririga', 'tririga', 'folio proyecto', 'numero de proyecto', 'project id'],
+  projectName: ['nombre del proyecto', 'proyecto', 'name', 'descripcion proyecto'],
+  type: ['tipo', 'ot/ocr/oci', 'tipo orden', 'clase'],
+  format: ['formato', 'prototipo', 'unidad_negocio', 'formato tienda'],
+  country: ['país', 'pais', 'country'],
+  state: ['estado', 'provincia', 'state'],
+  municipality: ['municipio', 'ciudad', 'municipality'],
+  coordinador: ['coordinador', 'responsable'],
+  plan: ['plan', 'ejercicio'],
+  projectStage: ['etapa del proyecto', 'etapa', 'stage'],
+  causaRaiz: ['causa raiz', 'causa', 'motivo', 'root cause'],
+  descripcion: ['descripcion', 'descripción', 'que se realizara', 'justificacion', 'description'],
+  montoDeductiva: ['monto deductiva', 'deductiva'],
+  montoAditiva: ['monto aditiva', 'aditiva'],
+  impactoNeto: ['impacto neto', 'impacto', 'neto', 'total_orden', 'amount'],
+  importeProy: ['importe proy'],
+  importeObra: ['importe obra'],
+  importeCompras: ['importe compras'],
+  areaSolicitante: ['área solicitante', 'area solicitante'],
+  generadorDesviacion: ['generador de la desviación', 'generador'],
+  areaEjerceRecursoDeductiva: ['área que ejerce el recurso/deductiva', 'area ejerce recurso deductiva'],
+  areaEjerceRecursoAditiva: ['área que ejerce el recurso/aditiva', 'area ejerce recurso aditiva'],
+  estatus: ['estatus', 'status', 'estado orden'],
+  fechaSolicitud: ['fecha de solicitud', 'fecha_solicitud', 'created date'],
+  fechaAprobacionGerente: ['fecha de aprobacion gerente', 'aprobacion gerente'],
+  fechaAprobacionLider: ['fecha de aprobacion líder de squad', 'aprobacion lider'],
+  fechaPptoProyectista: ['fecha ppto proyectista', 'fecha ppto'],
+  fechaRetraso: ['fecha retraso'],
+  noRechazo: ['no de rechazo', 'rechazos'],
+  motivoRechazo: ['motivo del rechazo'],
+  proveedor: ['proveedor', 'contratista', 'vendor']
 };
 
 function parseNumber(val: any): number {
@@ -74,64 +102,17 @@ function parseDate(val: any): string | null {
     if (!dateStr) return null;
     const d = new Date(dateStr);
     if (!isNaN(d.getTime())) return d.toISOString();
-    const parts = dateStr.split(/[\/\-]/);
-    if (parts.length === 3) {
-      const day = parseInt(parts[0]);
-      const month = parseInt(parts[1]) - 1;
-      const year = parts[2].length === 2 ? 2000 + parseInt(parts[2]) : parseInt(parts[2]);
-      const d2 = new Date(year, month, day);
-      if (!isNaN(d2.getTime())) return d2.toISOString();
-    }
     return null;
   } catch { return null; }
 }
 
-/**
- * MODELO MATEMÁTICO: Structural Quality Score (SQS)
- * Calcula la integridad del registro basado en pesos estratégicos.
- */
 function calculateStructuralQuality(normalized: any): number {
   let score = 0;
-  
-  // Pesos Críticos (Total 100)
-  const weights: Record<string, number> = {
-    projectId: 20,
-    impactoNeto: 20,
-    fechaSolicitud: 20,
-    descripcion: 20,
-    causaRaiz: 20
-  };
-
-  Object.entries(weights).forEach(([field, weight]) => {
-    if (normalized[field] && String(normalized[field]).trim() !== '' && normalized[field] !== 0) {
-      score += weight;
-    }
+  const criticalFields = ['projectId', 'impactoNeto', 'fechaSolicitud', 'descripcion', 'causaRaiz'];
+  criticalFields.forEach(f => {
+    if (normalized[f] && String(normalized[f]).trim() !== '' && normalized[f] !== 0) score += 20;
   });
-
-  // Bonos por campos de soporte (Max +20 adicionales, luego normalizado)
-  const supportFields = ['proveedor', 'coordinador', 'disciplina_normalizada', 'format', 'etapaProyecto'];
-  supportFields.forEach(field => {
-    if (normalized[field]) score += 4;
-  });
-
-  // Penalizaciones
-  if (normalized.impactoNeto === 0) score -= 10;
-  if (!normalized.fechaSolicitud) score -= 10;
-
   return Math.min(100, Math.max(0, score));
-}
-
-/**
- * HEURÍSTICA DE RECONSTRUCCIÓN DE TRAZABILIDAD
- */
-function reconstructTraceability(normalized: any): boolean {
-  // Un registro tiene trazabilidad reconstruida si tiene PID válido,
-  // Número de Orden y una descripción técnica mayor a 50 caracteres.
-  const hasValidIdentity = /^(\d+)(-\d+)?$/.test(normalized.projectId);
-  const hasOrderNum = !!normalized.orderNumber || (normalized.type && normalized.type !== '');
-  const hasTechnicalDepth = normalized.descripcion?.length > 50;
-  
-  return hasValidIdentity && hasOrderNum && hasTechnicalDepth;
 }
 
 export function processExcelFile(buffer: ArrayBuffer): { data: NormalizedRow[], errors: any[] } {
@@ -162,15 +143,14 @@ export function processExcelFile(buffer: ArrayBuffer): { data: NormalizedRow[], 
     dataRows.forEach((row, idx) => {
       if (!row || row.every(cell => cell === null || cell === '')) return;
       
-      const normalized: any = { sheetName, rowNumber: headerIdx + idx + 2, qcFlags: [] };
+      const normalized: any = { sheetName, rowNumber: headerIdx + idx + 2 };
 
-      // Mapeo Heurístico
       CANONICAL_SCHEMA.forEach(field => {
         const aliases = COLUMN_MAP[field] || [field.toLowerCase()];
         const colIdx = headers.findIndex(h => aliases.some(a => h === a || h.includes(a)));
         const rawValue = colIdx !== -1 ? row[colIdx] : null;
 
-        if (field.startsWith('monto') || field === 'impactoNeto') {
+        if (field.startsWith('monto') || field.startsWith('impacto') || field.startsWith('importe')) {
           normalized[field] = parseNumber(rawValue);
         } else if (field.startsWith('fecha')) {
           normalized[field] = parseDate(rawValue);
@@ -179,9 +159,8 @@ export function processExcelFile(buffer: ArrayBuffer): { data: NormalizedRow[], 
         }
       });
 
-      // Calidad y Trazabilidad
       normalized.structural_quality_score = calculateStructuralQuality(normalized);
-      normalized.pdf_traceability_reconstructed = reconstructTraceability(normalized);
+      normalized.pdf_traceability_reconstructed = !!(normalized.projectId && normalized.orderNumber && normalized.descripcion?.length > 50);
       
       if (normalized.structural_quality_score > 85) normalized.reliability_level = 'HIGH';
       else if (normalized.structural_quality_score > 60) normalized.reliability_level = 'MEDIUM';
