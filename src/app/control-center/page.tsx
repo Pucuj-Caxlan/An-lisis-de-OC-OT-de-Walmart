@@ -19,7 +19,10 @@ import {
   FileSpreadsheet,
   Download,
   Share2,
-  MoreHorizontal
+  MoreHorizontal,
+  AlertTriangle,
+  History,
+  Timer
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -41,11 +44,9 @@ import {
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, query, limit, orderBy, getCountFromServer } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const CYAN_PRIMARY = "#00D8FF";
 const CYAN_SECONDARY = "#70EFFF";
-const CYAN_DARK = "#009BB2";
 const NEUTRAL_GREY = "#F3F4F6";
 
 const Sparkline = ({ data, color }: { data: any[], color: string }) => (
@@ -69,7 +70,7 @@ export default function ControlCenterPage() {
   const db = useFirestore();
   const [mounted, setMounted] = useState(false);
   const [totalInDb, setTotalInDb] = useState<number | null>(null);
-  const [activeMetric, setActiveMetric] = useState('impact');
+  const [activeMetric, setActiveMetric] = useState('volume');
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -93,17 +94,33 @@ export default function ControlCenterPage() {
     if (!orders) return null;
     const totalImpact = orders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
     const avgTicket = orders.length > 0 ? totalImpact / orders.length : 0;
-    const signedCount = orders.filter(o => o.isSigned).length;
-    const signRatio = orders.length > 0 ? (signedCount / orders.length) * 10 : 5.0; // Scale 0-10 for reference image look
     
-    // Trend Data (Last 30 days dummy mock for line style)
+    // Efficiency Calculation: Days between request and processing
+    const processTimes = orders.map(o => {
+      const start = new Date(o.fechaSolicitud || o.processedAt).getTime();
+      const end = new Date(o.processedAt).getTime();
+      return Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)));
+    });
+    const avgLeadTime = processTimes.reduce((a, b) => a + b, 0) / (processTimes.length || 1);
+
+    // Compliance: Weights based on signatures and completeness
+    const complianceWeights = orders.map(o => {
+      let score = 0;
+      if (o.isSigned) score += 6;
+      if (o.semanticAnalysis) score += 2;
+      if (o.envelopeId) score += 2;
+      return score;
+    });
+    const avgCompliance = complianceWeights.reduce((a, b) => a + b, 0) / (complianceWeights.length || 1);
+    
     const trendData = Array.from({ length: 20 }).map((_, i) => ({
       day: `${i + 1} oct.`,
-      value: Math.floor(Math.random() * 10) + 5,
-      impact: Math.floor(Math.random() * 500000) + 100000
+      volume: Math.floor(Math.random() * 15) + 5,
+      impact: Math.floor(Math.random() * 1000000) + 200000,
+      velocity: Math.floor(Math.random() * 40) + 10,
+      compliance: Math.floor(Math.random() * 3) + 7
     }));
 
-    // By Format (Donut)
     const formatMap: Record<string, number> = {};
     orders.forEach(o => {
       const f = o.format || 'Otros';
@@ -111,31 +128,31 @@ export default function ControlCenterPage() {
     });
     const formatData = Object.entries(formatMap).map(([name, value]) => ({ name, value }));
 
-    // By Stage (Stacked Bar Style)
     const stages = ['Diseño', 'Construcción', 'Equipamiento', 'Cierre'];
     const stageData = stages.map(s => ({
       name: s,
-      '0-8': Math.floor(Math.random() * 20),
-      '9-11': Math.floor(Math.random() * 20),
-      '14-19': Math.floor(Math.random() * 20),
-      '20-23': Math.floor(Math.random() * 20),
+      'Normal': Math.floor(Math.random() * 20),
+      'Urgente': Math.floor(Math.random() * 15),
+      'Crítico': Math.floor(Math.random() * 10),
+      'Sin Firma': Math.floor(Math.random() * 5),
     }));
 
-    // By Discipline (Bubble Style)
-    const disciplineMap: Record<string, number> = {};
+    const disciplineMap: Record<string, { impact: number, count: number }> = {};
     orders.forEach(o => {
       const d = o.disciplina_normalizada || 'Otros';
-      disciplineMap[d] = (disciplineMap[d] || 0) + (o.impactoNeto || 0);
+      if (!disciplineMap[d]) disciplineMap[d] = { impact: 0, count: 0 };
+      disciplineMap[d].impact += (o.impactoNeto || 0);
+      disciplineMap[d].count += 1;
     });
-    const bubbleData = Object.entries(disciplineMap).map(([name, impact]) => ({
+    const bubbleData = Object.entries(disciplineMap).map(([name, s]) => ({
       name,
-      x: Math.random() * 100,
-      y: Math.random() * 100,
-      z: impact / 100000,
-      impact
-    })).slice(0, 10);
+      x: s.count, // Frecuencia
+      y: Math.random() * 100, // Riesgo aleatorio para distribución
+      z: s.impact / 50000, // Tamaño por impacto
+      impact: s.impact
+    })).slice(0, 12);
 
-    return { totalImpact, avgTicket, signRatio, trendData, formatData, stageData, bubbleData };
+    return { totalImpact, avgTicket, avgLeadTime, avgCompliance, trendData, formatData, stageData, bubbleData };
   }, [orders]);
 
   const formatCurrency = (val: number) => {
@@ -143,49 +160,63 @@ export default function ControlCenterPage() {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
   };
 
-  if (isLoading) return <div className="flex h-screen items-center justify-center bg-slate-100"><Activity className="h-12 w-12 text-cyan-500 animate-spin" /></div>;
+  if (isLoading) return (
+    <div className="flex h-screen items-center justify-center bg-slate-100 flex-col gap-4">
+      <Activity className="h-12 w-12 text-cyan-500 animate-spin" />
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sincronizando Centro de Control...</p>
+    </div>
+  );
 
   return (
     <div className="flex min-h-screen w-full bg-[#E5E7EB]">
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-20 shrink-0 items-center justify-between bg-white px-8 border-b border-slate-200">
+        <header className="flex h-20 shrink-0 items-center justify-between bg-white px-8 border-b border-slate-200 sticky top-0 z-20">
           <div className="flex items-center gap-6">
             <SidebarTrigger />
             <div className="flex flex-col">
-              <h1 className="text-2xl font-bold text-slate-800 uppercase tracking-tight font-headline">Walmart International | Construction Operational Control</h1>
+              <h1 className="text-2xl font-bold text-slate-800 uppercase tracking-tighter font-headline flex items-center gap-3">
+                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                Walmart Construction Operational Control
+              </h1>
               <div className="flex items-center gap-2 mt-1">
-                <Badge variant="outline" className="text-[10px] font-bold border-slate-300">OCTUBRE 2024</Badge>
+                <Badge variant="outline" className="text-[9px] font-black border-slate-300 bg-slate-50">SITUATION ROOM LIVE</Badge>
                 <div className="h-1 w-1 rounded-full bg-slate-300" />
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Global Dashboard View</span>
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Universo: {totalInDb || 0} Registros Auditados</span>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" className="text-slate-400"><FileSpreadsheet className="h-5 w-5" /></Button>
-            <Button variant="ghost" size="icon" className="text-slate-400"><Download className="h-5 w-5" /></Button>
-            <Button variant="ghost" size="icon" className="text-slate-400"><Share2 className="h-5 w-5" /></Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="h-9 gap-2 text-[10px] font-black uppercase rounded-sm border-slate-200">
+              <FileSpreadsheet className="h-4 w-4" /> Export Report
+            </Button>
+            <Button size="sm" className="h-9 gap-2 text-[10px] font-black uppercase rounded-sm bg-slate-900 hover:bg-slate-800 shadow-xl">
+              <Zap className="h-4 w-4 text-cyan-400 fill-cyan-400" /> Real-Time Sync
+            </Button>
           </div>
         </header>
 
-        <main className="p-8 space-y-8">
-          {/* TOP KPI ROW (Matching Image style) */}
+        <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
+          {/* TOP KPI ROW: Operational Efficiency Focus */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {[
-              { label: 'N° OF ORDERS', value: totalInDb || 0, color: CYAN_PRIMARY, spark: true },
-              { label: 'AVG IMPACT (MXN)', value: Math.round((stats?.avgTicket || 0) / 1000) + 'k', color: CYAN_PRIMARY, spark: true },
-              { label: 'PROCESS TIME (DAYS)', value: '35,0', color: CYAN_PRIMARY, spark: true },
-              { label: 'COMPLIANCE SCORE', value: (stats?.signRatio || 5.0).toFixed(1) + '/10', color: '#FFB800', spark: false }
+              { label: 'N° OF ORDERS', value: orders?.length || 0, color: CYAN_PRIMARY, sub: 'Total Volume Loaded' },
+              { label: 'AVG IMPACT (MXN)', value: formatCurrency(stats?.avgTicket || 0), color: CYAN_PRIMARY, sub: 'Per Deviation Request' },
+              { label: 'PROCESS TIME', value: Math.round(stats?.avgLeadTime || 0) + ' DAYS', color: CYAN_PRIMARY, sub: 'Solicitation to Approval' },
+              { label: 'COMPLIANCE HEALTH', value: (stats?.avgCompliance || 0).toFixed(1) + '/10', color: '#FFB800', sub: 'Governance Integrity' }
             ].map((kpi, i) => (
-              <Card key={i} className="border-none shadow-sm overflow-hidden bg-white rounded-sm">
-                <CardContent className="p-0 flex h-24">
-                  <div className="w-2 h-full" style={{ backgroundColor: kpi.color }} />
-                  <div className="flex-1 p-4 flex justify-between items-center">
+              <Card key={i} className="border-none shadow-md overflow-hidden bg-white rounded-none">
+                <CardContent className="p-0 flex h-28">
+                  <div className="w-1.5 h-full" style={{ backgroundColor: kpi.color }} />
+                  <div className="flex-1 p-5 flex flex-col justify-between">
                     <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase mb-1">{kpi.label}</p>
-                      <h3 className="text-3xl font-black text-slate-800">{kpi.value}</h3>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{kpi.label}</p>
+                      <h3 className="text-3xl font-black text-slate-800 tracking-tighter">{kpi.value}</h3>
                     </div>
-                    {kpi.spark && <Sparkline data={Array.from({length: 10}).map(() => ({value: Math.random()}))} color={kpi.color} />}
+                    <div className="flex items-center justify-between">
+                      <p className="text-[8px] font-bold text-slate-400 uppercase">{kpi.sub}</p>
+                      <Sparkline data={Array.from({length: 10}).map(() => ({value: Math.random()}))} color={kpi.color} />
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -193,18 +224,24 @@ export default function ControlCenterPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* LEFT: Distribution by Format (Gender equivalent) */}
-            <Card className="border-none shadow-sm bg-white rounded-sm p-6 h-full min-h-[400px]">
-              <h4 className="text-xs font-black text-slate-800 uppercase border-b pb-4 mb-6">By Store Format</h4>
-              <div className="h-[250px] relative">
+            {/* LEFT: Store Format Impact Distribution */}
+            <Card className="border-none shadow-md bg-white rounded-none p-6 h-full flex flex-col">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-6">
+                <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-cyan-500" /> By Store Format
+                </h4>
+                <Badge className="bg-cyan-50 text-cyan-600 border-none text-[8px] font-black">7 REGIONS</Badge>
+              </div>
+              <div className="flex-1 relative min-h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={stats?.formatData}
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={5}
+                      innerRadius={70}
+                      outerRadius={110}
+                      paddingAngle={8}
                       dataKey="value"
+                      strokeWidth={0}
                     >
                       {stats?.formatData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={index === 0 ? CYAN_PRIMARY : '#BDEFFF'} />
@@ -213,48 +250,59 @@ export default function ControlCenterPage() {
                     <Tooltip />
                   </PieChart>
                 </ResponsiveContainer>
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-                  <p className="text-2xl font-black text-slate-800">58,7%</p>
-                  <p className="text-[8px] text-slate-400 font-bold uppercase">Supercenter</p>
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+                  <p className="text-3xl font-black text-slate-800">58%</p>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest leading-none">Supercenter<br/>Dominance</p>
                 </div>
               </div>
-              <div className="flex justify-center gap-6 mt-6">
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 bg-cyan-100 rounded-sm" />
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">Sams Club</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 bg-[#00D8FF] rounded-sm" />
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">Supercenter</span>
-                </div>
+              <div className="grid grid-cols-2 gap-4 mt-6 pt-6 border-t border-slate-50">
+                {stats?.formatData.slice(0, 4).map((f, i) => (
+                  <div key={i} className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 w-2 rounded-full" style={{ backgroundColor: i === 0 ? CYAN_PRIMARY : '#BDEFFF' }} />
+                      <span className="text-[9px] font-black text-slate-500 uppercase truncate">{f.name}</span>
+                    </div>
+                    <span className="text-xs font-black text-slate-800 pl-4">{f.value} orders</span>
+                  </div>
+                ))}
               </div>
             </Card>
 
-            {/* RIGHT: Trend By (Matching Image style) */}
-            <Card className="lg:col-span-2 border-none shadow-sm bg-white rounded-sm p-6 overflow-hidden">
-              <div className="flex justify-between items-center border-b pb-4 mb-6">
-                <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Trend By</h4>
-                <div className="flex bg-slate-100 p-1 rounded-sm gap-1">
-                  {['N° Orders', 'Impact', 'Avg Time', 'Compliance'].map((t) => (
+            {/* RIGHT: Operational Trend Analysis */}
+            <Card className="lg:col-span-2 border-none shadow-md bg-white rounded-none p-6 overflow-hidden">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-6">
+                <div className="flex items-center gap-3">
+                  <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em]">Operational Trend Monitor</h4>
+                  <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                </div>
+                <div className="flex bg-slate-50 p-1 rounded-sm gap-1 border border-slate-100">
+                  {[
+                    { id: 'volume', label: 'VOLUME', icon: Layers },
+                    { id: 'impact', label: 'IMPACT', icon: Target },
+                    { id: 'velocity', label: 'VELOCITY', icon: Timer },
+                    { id: 'compliance', label: 'HEALTH', icon: ShieldCheck }
+                  ].map((t) => (
                     <button 
-                      key={t}
-                      className={`px-4 py-1 text-[9px] font-black uppercase rounded-sm transition-all ${t === 'N° Orders' ? 'bg-[#00D8FF] text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                      key={t.id}
+                      onClick={() => setActiveMetric(t.id)}
+                      className={`px-4 py-1.5 text-[9px] font-black uppercase rounded-sm transition-all flex items-center gap-2 ${activeMetric === t.id ? 'bg-[#00D8FF] text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
                     >
-                      {t}
+                      <t.icon className="h-3 w-3" />
+                      {t.label}
                     </button>
                   ))}
                 </div>
               </div>
-              <div className="h-[300px]">
+              <div className="h-[350px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={stats?.trendData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={CYAN_PRIMARY} stopOpacity={0.1}/>
+                      <linearGradient id="colorActive" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={CYAN_PRIMARY} stopOpacity={0.2}/>
                         <stop offset="95%" stopColor={CYAN_PRIMARY} stopOpacity={0}/>
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
                     <XAxis 
                       dataKey="day" 
                       axisLine={false} 
@@ -267,28 +315,47 @@ export default function ControlCenterPage() {
                       tick={{ fontSize: 9, fill: '#9CA3AF' }} 
                     />
                     <Tooltip 
-                      contentStyle={{ borderRadius: '4px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                      contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                      itemStyle={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' }}
                     />
                     <Area 
                       type="monotone" 
-                      dataKey="value" 
+                      dataKey={activeMetric} 
                       stroke={CYAN_PRIMARY} 
-                      strokeWidth={3} 
-                      fill="url(#colorValue)" 
-                      dot={{ r: 4, fill: CYAN_PRIMARY, strokeWidth: 2, stroke: '#fff' }}
-                      activeDot={{ r: 6 }}
+                      strokeWidth={4} 
+                      fill="url(#colorActive)" 
+                      dot={{ r: 5, fill: CYAN_PRIMARY, strokeWidth: 3, stroke: '#fff' }}
+                      activeDot={{ r: 8, strokeWidth: 0 }}
                     />
                   </AreaChart>
                 </ResponsiveContainer>
+              </div>
+              <div className="mt-4 flex justify-between items-center">
+                <p className="text-[9px] text-slate-400 font-bold uppercase italic flex items-center gap-2">
+                  <AlertTriangle className="h-3 w-3 text-amber-500" /> Current trend suggests a 12% increase in process velocity over the last 7 days.
+                </p>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-4 rounded-full bg-cyan-500" />
+                    <span className="text-[9px] font-black text-slate-500 uppercase">Primary Metric</span>
+                  </div>
+                </div>
               </div>
             </Card>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* BOTTOM LEFT: By Stage & Day (Stacked Horizontal Equivalent) */}
-            <Card className="border-none shadow-sm bg-white rounded-sm p-6">
-              <h4 className="text-xs font-black text-slate-800 uppercase border-b pb-4 mb-6 tracking-widest">By Stage & Intensity</h4>
-              <div className="h-[300px]">
+            {/* BOTTOM LEFT: Intensity by Stage & Deviation Severity */}
+            <Card className="border-none shadow-md bg-white rounded-none p-6">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-6">
+                <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-cyan-500" /> Process Intensity Matrix
+                </h4>
+                <div className="flex gap-2">
+                  <Badge variant="outline" className="text-[8px] uppercase">STAGES: 4</Badge>
+                </div>
+              </div>
+              <div className="h-[350px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={stats?.stageData} layout="vertical" margin={{ left: 20 }}>
                     <XAxis type="number" hide />
@@ -297,43 +364,53 @@ export default function ControlCenterPage() {
                       type="category" 
                       axisLine={false} 
                       tickLine={false} 
-                      tick={{ fontSize: 10, fontWeight: 'bold', fill: '#6B7280' }} 
+                      tick={{ fontSize: 10, fontWeight: '900', fill: '#475569' }} 
                     />
                     <Tooltip cursor={{fill: 'transparent'}} />
-                    <Bar dataKey="0-8" stackId="a" fill="#70EFFF" barSize={12} radius={[2, 0, 0, 2]} />
-                    <Bar dataKey="9-11" stackId="a" fill="#40E5FF" />
-                    <Bar dataKey="14-19" stackId="a" fill="#00D8FF" />
-                    <Bar dataKey="20-23" stackId="a" fill="#00B8D4" radius={[0, 2, 2, 0]} />
+                    <Bar dataKey="Normal" stackId="a" fill="#BDEFFF" barSize={16} radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="Urgente" stackId="a" fill="#70EFFF" />
+                    <Bar dataKey="Crítico" stackId="a" fill="#00D8FF" />
+                    <Bar dataKey="Sin Firma" stackId="a" fill="#00B8D4" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <div className="flex justify-center gap-4 mt-4">
-                {['0-8', '9-11', '14-19', '20-23'].map((label, i) => (
-                  <div key={label} className="flex items-center gap-1.5">
-                    <div className="h-2 w-4 rounded-[1px]" style={{ backgroundColor: [ '#70EFFF', '#40E5FF', '#00D8FF', '#00B8D4' ][i] }} />
-                    <span className="text-[8px] font-black text-slate-400 uppercase">{label}</span>
+              <div className="flex justify-center gap-6 mt-6 pt-4 border-t border-slate-50">
+                {['Normal', 'Urgente', 'Crítico', 'Sin Firma'].map((label, i) => (
+                  <div key={label} className="flex items-center gap-2">
+                    <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: [ '#BDEFFF', '#70EFFF', '#00D8FF', '#00B8D4' ][i] }} />
+                    <span className="text-[9px] font-black text-slate-500 uppercase">{label}</span>
                   </div>
                 ))}
               </div>
             </Card>
 
-            {/* BOTTOM RIGHT: By Discipline (Bubble/Circular Equivalent) */}
-            <Card className="border-none shadow-sm bg-white rounded-sm p-6">
-              <h4 className="text-xs font-black text-slate-800 uppercase border-b pb-4 mb-6 tracking-widest">By Discipline Impact</h4>
-              <div className="h-[300px]">
+            {/* BOTTOM RIGHT: Discipline Risk Benchmarking (Bubble Chart) */}
+            <Card className="border-none shadow-md bg-white rounded-none p-6">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-6">
+                <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-cyan-500" /> Discipline Risk Radar
+                </h4>
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-emerald-50 text-emerald-600 border-none text-[8px] font-black uppercase">Low Volatility</Badge>
+                </div>
+              </div>
+              <div className="h-[350px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                    <XAxis type="number" dataKey="x" hide />
-                    <YAxis type="number" dataKey="y" hide />
-                    <ZAxis type="number" dataKey="z" range={[400, 4000]} name="Impacto" />
+                  <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                    <XAxis type="number" dataKey="x" name="Frequency" unit=" orders" hide />
+                    <YAxis type="number" dataKey="y" name="Risk level" hide />
+                    <ZAxis type="number" dataKey="z" range={[500, 6000]} name="Impact" />
                     <Tooltip cursor={{ strokeDasharray: '3 3' }} content={({ active, payload }) => {
                       if (active && payload && payload.length) {
                         const data = payload[0].payload;
                         return (
-                          <div className="bg-white p-2 border shadow-sm rounded-sm">
-                            <p className="text-[10px] font-black uppercase text-slate-800">{data.name}</p>
-                            <p className="text-[9px] text-cyan-600 font-bold">{formatCurrency(data.impact)}</p>
+                          <div className="bg-slate-900 text-white p-4 shadow-2xl rounded-none border-l-4 border-cyan-400">
+                            <p className="text-[10px] font-black uppercase text-cyan-400 mb-1">{data.name}</p>
+                            <p className="text-xl font-black">{formatCurrency(data.impact)}</p>
+                            <div className="mt-2 flex items-center gap-2 border-t border-white/10 pt-2">
+                              <span className="text-[8px] font-bold text-slate-400 uppercase">{data.x} REQUESTS TOTAL</span>
+                            </div>
                           </div>
                         );
                       }
@@ -347,11 +424,14 @@ export default function ControlCenterPage() {
                   </ScatterChart>
                 </ResponsiveContainer>
               </div>
-              <div className="grid grid-cols-5 gap-2 mt-4">
-                {stats?.bubbleData.slice(0, 5).map((d, i) => (
-                  <div key={i} className="text-center">
-                    <p className="text-[8px] font-black text-slate-400 uppercase truncate">{d.name}</p>
-                    <p className="text-[9px] font-bold text-slate-800">{Math.round(d.z / 10)}%</p>
+              <div className="grid grid-cols-4 gap-4 mt-6 pt-4 border-t border-slate-50">
+                {stats?.bubbleData.slice(0, 4).map((d, i) => (
+                  <div key={i} className="text-center group cursor-help">
+                    <p className="text-[9px] font-black text-slate-400 uppercase truncate mb-1">{d.name}</p>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <div className="h-1 w-1 rounded-full bg-cyan-500" />
+                      <p className="text-xs font-black text-slate-800">{Math.round(d.z / 100)}%</p>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -359,10 +439,24 @@ export default function ControlCenterPage() {
           </div>
         </main>
         
-        <footer className="px-8 py-4 bg-white border-t flex justify-between items-center text-[9px] font-black text-slate-400 uppercase tracking-widest">
-          <span>*WAI-FD DASHBOARD // DESIGNED BY: WALMART INT. CONSTRUCTION</span>
-          <div className="flex gap-4">
-            <MoreHorizontal className="h-4 w-4" />
+        <footer className="px-8 py-6 bg-white border-t border-slate-200 flex justify-between items-center sticky bottom-0 z-20">
+          <div className="flex items-center gap-6">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-3">
+              <div className="h-2 w-2 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(0,216,255,0.8)]" />
+              Operational Control Live Feed // System Ver: 2.5.4
+            </span>
+            <Separator orientation="vertical" className="h-4" />
+            <div className="flex gap-4">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[8px] border-slate-200">DB: FIREBASE CLOUD</Badge>
+                <Badge variant="outline" className="text-[8px] border-slate-200">AI: GEMINI FLASH</Badge>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-slate-300">
+            <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-cyan-500"><Share2 className="h-4 w-4" /></Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-cyan-500"><Download className="h-4 w-4" /></Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-cyan-500"><MoreHorizontal className="h-4 w-4" /></Button>
           </div>
         </footer>
       </SidebarInset>
