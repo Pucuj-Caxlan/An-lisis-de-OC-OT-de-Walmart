@@ -22,7 +22,8 @@ import {
   MoreHorizontal,
   AlertTriangle,
   History,
-  Timer
+  Timer,
+  Layers
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -44,6 +45,7 @@ import {
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, query, limit, orderBy, getCountFromServer } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 
 const CYAN_PRIMARY = "#00D8FF";
 const CYAN_SECONDARY = "#70EFFF";
