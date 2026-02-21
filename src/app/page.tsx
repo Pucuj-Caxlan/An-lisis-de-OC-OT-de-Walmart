@@ -95,46 +95,52 @@ const YEAR_COLORS: Record<number, string> = {
 const CORE_COLOR = '#1E3A8A'; 
 const NEUTRAL_COLOR = '#E2E8F0'; 
 
-// Motor de Normalización de Causa Raíz (Lógica Walmart 80/20)
+// Motor de Normalización de Causa Raíz (Lógica Walmart 80/20) - Estándar Institucional
 const normalizeCauseString = (cause: string): string => {
   if (!cause) return "Errores / Omisiones";
   const c = cause.toLowerCase().trim();
   
+  // Mapeo estricto a las 8 categorías oficiales de Walmart
   if (c.includes("alcance") && c.includes("plan")) return "Alta de alcance en plan";
-  if (c.includes("error") || c.includes("omision") || c.includes("omisión") || c.includes("humano")) return "Errores / Omisiones";
-  if (c.includes("cumplimiento") || c.includes("autoridad") || c.includes("regulatorio")) return "Solicitud de Cumplimiento / Autoridad";
-  if (c.includes("prototipo") || c.includes("actualización")) return "Actualización de Prototipo";
-  if (c.includes("estratégica") || c.includes("scope") || c.includes("iniciativa")) return "Iniciativas estratégicas y adiciones a scope fuera de Prototipo";
-  if (c.includes("alcance conocido") || c.includes("concursos")) return "Alcance conocido no asignado por Concursos";
-  if (c.includes("siniestro") || c.includes("siniestros")) return "Imprevistos por siniestro";
-  if (c.includes("hallazgo") || c.includes("sitio") || c.includes("subsuelo") || c.includes("terreno") || c.includes("construcción")) return "Hallazgos / imprevistos en sitio durante proceso de Construcción";
+  if (c.includes("error") || c.includes("omision") || c.includes("omisión") || c.includes("humano") || c.includes("diseño") || c.includes("ingeniería")) return "Errores / Omisiones";
+  if (c.includes("cumplimiento") || c.includes("autoridad") || c.includes("regulatorio") || c.includes("normativa")) return "Solicitud de Cumplimiento / Autoridad";
+  if (c.includes("prototipo") || c.includes("actualización") || c.includes("ci ")) return "Actualización de Prototipo";
+  if (c.includes("estratégica") || c.includes("scope") || c.includes("iniciativa") || c.includes("pickup") || c.includes("self")) return "Iniciativas estratégicas y adiciones a scope fuera de Prototipo";
+  if (c.includes("alcance conocido") || c.includes("concursos") || c.includes("contratista")) return "Alcance conocido no asignado por Concursos";
+  if (c.includes("siniestro") || c.includes("siniestros") || c.includes("inundación") || c.includes("desastre")) return "Imprevistos por siniestro";
+  if (c.includes("hallazgo") || c.includes("sitio") || c.includes("subsuelo") || c.includes("terreno") || c.includes("construcción") || c.includes("roca") || c.includes("freático")) return "Hallazgos / imprevistos en sitio durante proceso de Construcción";
   
-  // Mapeo de duplicados históricos comunes
-  if (c === "cambio de alcance" || c === "cambio de diseño/alcance" || c === "planificación y alcance") return "Alta de alcance en plan";
-  if (c === "cambio de diseño" || c === "error de diseño" || c === "error de ingeniería/diseño") return "Errores / Omisiones";
-  if (c === "indefinida" || c === "cambio en negociación") return "Errores / Omisiones";
-  if (c === "requisito regulatorio/legal") return "Solicitud de Cumplimiento / Autoridad";
-  
-  return cause; 
+  return "Errores / Omisiones"; // Default fallback
 };
 
 const CustomTooltip = ({ active, payload, label, currencyFormatter }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-white/95 backdrop-blur-sm p-4 border-none shadow-2xl rounded-2xl ring-1 ring-black/5 min-w-[200px]">
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 border-b pb-2">{label}</p>
-        <div className="space-y-2">
-          {payload.map((entry: any, i: number) => (
-            <div key={i} className="flex justify-between items-center gap-4">
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color || entry.fill }} />
-                <span className="text-[10px] font-bold text-slate-600 uppercase">{entry.name === 'impact' ? 'Monto' : entry.name === 'cumulativePercentage' ? 'Acumulado' : entry.name}</span>
+      <div className="bg-white/95 backdrop-blur-sm p-4 border-none shadow-2xl rounded-2xl ring-1 ring-black/5 min-w-[240px]">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b pb-2">{label}</p>
+        <div className="space-y-3">
+          {payload.map((entry: any, i: number) => {
+            const isCumulative = entry.dataKey === 'cumulativePercentage' || entry.name === 'Acumulado';
+            return (
+              <div key={i} className="flex justify-between items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 w-2.5 rounded-full shadow-sm" style={{ backgroundColor: entry.color || entry.fill }} />
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">
+                    {isCumulative ? 'Impacto Acumulado' : 'Monto de la Causa'}
+                  </span>
+                </div>
+                <span className={`text-xs font-black ${isCumulative ? 'text-orange-600' : 'text-slate-900'}`}>
+                  {isCumulative ? `${entry.value.toFixed(1)}%` : currencyFormatter(entry.value)}
+                </span>
               </div>
-              <span className="text-xs font-black text-slate-900">
-                {entry.name === 'cumulativePercentage' ? `${entry.value.toFixed(1)}%` : currencyFormatter(entry.value)}
-              </span>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+        <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-2">
+          <Info className="h-3 w-3 text-slate-300" />
+          <p className="text-[8px] text-slate-400 font-medium uppercase italic leading-tight">
+            Análisis basado en el Principio de Pareto (80/20)
+          </p>
         </div>
       </div>
     );
@@ -209,7 +215,8 @@ export default function VpDashboard() {
     if (!rawOrders) return [];
     return rawOrders.filter(o => {
       const yr = getOrderYear(o);
-      const date = new Date(getOrderDate(o));
+      const dateStr = getOrderDate(o);
+      const date = new Date(dateStr);
       const monthIdx = date.getMonth();
 
       const yearMatch = selectedYears.includes(yr!);
@@ -500,11 +507,11 @@ export default function VpDashboard() {
               <CardContent className="h-[450px] pt-10 px-6">
                 {metrics.paretoData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={metrics.paretoData.slice(0, 15)}>
+                    <ComposedChart data={metrics.paretoData.slice(0, 8)}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis 
                         dataKey="name" 
-                        tick={{ fontSize: 7, fontWeight: 'bold', fill: '#64748b' }} 
+                        tick={{ fontSize: 8, fontWeight: 'bold', fill: '#64748b' }} 
                         height={100} 
                         interval={0} 
                         angle={-35} 
@@ -513,7 +520,7 @@ export default function VpDashboard() {
                       <YAxis yAxisId="left" tick={{ fontSize: 9 }} tickFormatter={(v) => `$${Math.round(v/1000000)}M`} axisLine={false} tickLine={false} />
                       <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 9 }} tickFormatter={(v) => `${v}%`} axisLine={false} tickLine={false} />
                       <Tooltip content={<CustomTooltip currencyFormatter={formatCurrency} />} />
-                      <Bar yAxisId="left" dataKey="impact" name="Monto" radius={[6, 6, 0, 0]} barSize={35}>
+                      <Bar yAxisId="left" dataKey="impact" name="Monto" radius={[6, 6, 0, 0]} barSize={45}>
                         {metrics.paretoData.map((entry, index) => (
                           <Cell 
                             key={`cell-${index}`} 
@@ -526,7 +533,7 @@ export default function VpDashboard() {
                           content={(props: any) => {
                             const { x, y, width, value } = props;
                             return (
-                              <text x={x + width / 2} y={y - 8} fill="#64748b" textAnchor="middle" fontSize={7} fontWeight="bold">
+                              <text x={x + width / 2} y={y - 10} fill="#1E3A8A" textAnchor="middle" fontSize={8} fontWeight="900">
                                 {formatCurrency(value)}
                               </text>
                             );
@@ -540,31 +547,31 @@ export default function VpDashboard() {
                         name="Acumulado" 
                         stroke="#FF8F00" 
                         strokeWidth={4} 
-                        dot={{ r: 4, fill: '#FF8F00', strokeWidth: 2, stroke: '#fff' }} 
-                        activeDot={{ r: 6 }}
+                        dot={{ r: 5, fill: '#FF8F00', strokeWidth: 2, stroke: '#fff' }} 
+                        activeDot={{ r: 7 }}
                       />
                     </ComposedChart>
                   </ResponsiveContainer>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-slate-300 gap-4">
                     <Database className="h-12 w-12 opacity-20" />
-                    <p className="text-xs font-black uppercase tracking-widest">Sin datos para los filtros seleccionados</p>
+                    <p className="text-xs font-black uppercase tracking-widest">Sin datos normalizados disponibles</p>
                   </div>
                 )}
               </CardContent>
               <CardFooter className="bg-slate-50 border-t py-3 flex justify-between items-center text-[9px] font-black uppercase text-slate-400 px-6">
                 <div className="flex gap-6">
                   <span className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-md" style={{ backgroundColor: CORE_COLOR }} /> 
+                    <div className="h-3 w-3 rounded-md shadow-sm" style={{ backgroundColor: CORE_COLOR }} /> 
                     <span style={{ color: CORE_COLOR }} className="font-black tracking-widest">NÚCLEO CRÍTICO 80/20</span>
                   </span>
                   <span className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-md" style={{ backgroundColor: NEUTRAL_COLOR }} /> 
+                    <div className="h-3 w-3 rounded-md shadow-sm" style={{ backgroundColor: NEUTRAL_COLOR }} /> 
                     <span>INCIDENCIAS MENORES</span>
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Flag className="h-3 w-3 text-amber-500" />
+                  <Flag className="h-3 w-3 text-orange-500" />
                   <span className="text-slate-500">CORTE ESTRATÉGICO INSTITUCIONAL</span>
                 </div>
               </CardFooter>
