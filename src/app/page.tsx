@@ -32,7 +32,8 @@ import {
   FileText,
   Copy,
   X,
-  ShieldAlert
+  ShieldAlert,
+  Info
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -220,7 +221,7 @@ export default function VpDashboard() {
       const monthIdx = date.getMonth();
 
       const yearMatch = selectedYears.includes(yr!);
-      const monthMatch = filters.month === 'all' || monthIdx === parseInt(filters.month);
+      const monthMatch = filters.month === 'all' || monthMatch === parseInt(filters.month);
       const discMatch = filters.discipline === 'all' || (o.disciplina_normalizada || o.semanticAnalysis?.disciplina_normalizada) === filters.discipline;
       const formatMatch = filters.storeFormat === 'all' || o.format === filters.storeFormat;
       const searchMatch = !filters.search || 
