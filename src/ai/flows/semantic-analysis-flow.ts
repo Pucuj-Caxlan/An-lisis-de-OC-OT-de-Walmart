@@ -21,7 +21,7 @@ export type SemanticAnalysisInput = z.infer<typeof SemanticAnalysisInputSchema>;
 
 const SemanticAnalysisOutputSchema = z.object({
   disciplina_normalizada: z.string().describe("Disciplina técnica detectada (ej. Eléctrica, Civil, Estructura)."),
-  causa_raiz_normalizada: z.string().describe("Causa raíz normalizada según catálogo."),
+  causa_raiz_normalizada: z.string().describe("Causa raíz normalizada según catálogo oficial de Walmart."),
   subcausa_normalizada: z.string().describe("Subcategoría técnica específica detectada."),
   detalle_nivel_3: z.string().describe("Tercer nivel de especificidad técnica detectado."),
   confidence_score: z.number().describe("Nivel de certeza de la clasificación (0.0 a 1.0)."),
@@ -46,24 +46,23 @@ const semanticPrompt = ai.definePrompt({
   prompt: `Eres un Arquitecto de IA y Auditor Forense Senior especializado en Control de Cambios de Walmart. 
 Tu misión es clasificar registros OC/OT con trazabilidad absoluta y explicabilidad técnica.
 
-REGLAS DE CLASIFICACIÓN FORENSE:
+REGLAS CRÍTICAS DE TAXONOMÍA:
+Debes usar EXCLUSIVAMENTE una de las siguientes causas raíz en el campo 'causa_raiz_normalizada':
+
+1. Alta de alcance en plan: Solicitud de trabajos adicionales a proveedores que prestaron servicio en la misma unidad en planes anteriores.
+2. Errores / Omisiones: Falta de aplicación de CI, criterio, prototipo o especificación / Falta de aplicación de normativa de la autoridad.
+3. Solicitud de Cumplimiento / Autoridad: Modificación ambiental / Redistribución de bolsa de estacionamiento / Cambio en infraestructura de vialidades en zonas aledañas.
+4. Actualización de Prototipo: Implementación de CI / Actualización a la versión vigente de prototipo.
+5. Iniciativas estratégicas y adiciones a scope fuera de Prototipo: Implementación de self-checkout / Implementación cajones pickup.
+6. Alcance conocido no asignado por Concursos: Acuerdos con desarrolladores omitidos por Wal-Mart en el alcance de la contratista.
+7. Imprevistos por siniestro: Inundaciones / Caídos o derrumbes / Desastres naturales.
+8. Hallazgos / imprevistos en sitio durante proceso de Construcción: Detección de roca en subsuelo / Detección de nivel freático / Cimentaciones o imprevistos estructurales.
+
+REGLAS DE CLASIFICACIÓN:
 1. EXPLICABILIDAD: No solo elijas una categoría. Explica qué elementos del texto activaron la decisión en 'rationale_tecnico'.
 2. TRAZABILIDAD: Lista los términos exactos encontrados que coinciden con la taxonomía en 'evidence_terms'.
 3. ESTANDARIZACIÓN: Genera una 'standardizedDescription' que resuma de forma técnica y profesional lo que se realizará.
-4. AMBIGÜEDAD: Si el texto es vago (ej. "ajustes varios", "extra", "trabajos"), clasifica como "Indefinida", pon confianza < 0.6 y detalla la ambigüedad.
-5. TAXONOMÍA: 
-   - Disciplina -> Causa -> Subcausa -> Detalle Nivel 3.
-   - Si no puedes llegar al Nivel 3, pon "No determinado".
-
-CATÁLOGO DE REFERENCIA (DISCIPLINAS):
-{{#each contexto.disciplinasVigentes}}
-- {{{this}}}
-{{/each}}
-
-CATÁLOGO DE REFERENCIA (CAUSAS RAÍZ):
-{{#each contexto.causasVigentes}}
-- {{{this}}}
-{{/each}}
+4. AMBIGÜEDAD: Si el texto es vago (ej. "ajustes varios", "extra", "trabajos"), clasifica bajo la categoría más probable pero marca 'needs_review' como true.
 
 DESCRIPCIÓN PARA ANALIZAR:
 """

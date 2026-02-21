@@ -48,22 +48,25 @@ const anomalyPrompt = ai.definePrompt({
   prompt: `Eres un Auditor Forense Senior de Walmart especializado en Desarrollo Inmobiliario y Control de Cambios. 
   Tu misión es encontrar "Red Flags" y discrepancias críticas en este lote de órdenes de cambio (OC/OT).
 
+  LISTADO OFICIAL DE RED FLAGS PARA ANALIZAR:
+  1. Frecuencia inusualmente alta de solicitudes de órdenes de cambio para un proyecto o ciertos proveedores.
+  2. OC/OTs que no siguen los procesos estándar (urgentes o apresurados) o falta la documentación de soporte requerida.
+  3. OC/OTs enviadas inmediatamente o poco después de la aprobación original del proyecto o del inicio de la construcción.
+  4. OC/OTs con cambios en tarifas, cargos por servicio, cargos administrativos u otros cargos auxiliares que no estén adecuadamente soportados contractualmente.
+  5. OC/OTs con descripciones vagas, propósito comercial inusual o fuera del alcance del trabajo definido.
+  6. OC/OTs con descripción de servicios para la aceleración iniciada por el gobierno o agilización de hitos.
+  7. Posibilidad o apariencia de manipulación del proceso para aumentar inapropiadamente el alcance o gasto general.
+
   DATOS PARA ANALIZAR (NORMALIZADOS):
   {{#each orders}}
   - ID: {{{id}}} | PID: {{{projectId}}} | Monto: MXN {{{impactoNeto}}} | Causa Declarada: {{{causaRaiz}}} | Firmado: {{#if isSigned}} SÍ {{else}} NO {{/if}} | Apéndice F: {{#if appendixF}} SÍ {{else}} NO {{/if}}
     Descripción: {{{descripcion}}}
-    IA Concepto Previo: {{{semanticAnalysis.conceptoNormalizado}}} | IA Causa Real Previa: {{{semanticAnalysis.causaRaizReal}}}
+    IA Causa Normalizada: {{{semanticAnalysis.causa_raiz_normalizada}}} | IA Rationale: {{{semanticAnalysis.rationale_tecnico}}}
   {{/each}}
 
-  CRITERIOS DE AUDITORÍA FORENSE:
-  1. DISCREPANCIA SEMÁNTICA CRÍTICA: La descripción revela un error de diseño o coordinación pero se declara como "Regulatorio" o "Autoridad".
-  2. RIESGO DE COMPLIANCE FINANCIERO: Órdenes con montos altos que NO están firmadas o carecen de Apéndice F.
-  3. FRAGMENTACIÓN DE COSTOS (SPLITTING): Identifica si un mismo PID tiene múltiples órdenes cercanas.
-  4. ANOMALÍA OPERACIONAL: Montos desproporcionados para la descripción técnica provista.
-
   INSTRUCCIONES DE SALIDA:
-  - Sé específico en el hallazgo.
-  - El Health Score debe bajar si hay falta de firmas en montos altos.
+  - Sé específico en el hallazgo citando el número de Red Flag detectado.
+  - El Health Score debe bajar significativamente si detectas manipulación o falta de soporte en montos altos.
   - El resumen debe ser de nivel ejecutivo (VP).`,
 });
 

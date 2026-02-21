@@ -95,6 +95,29 @@ const YEAR_COLORS: Record<number, string> = {
 const CORE_COLOR = '#1E3A8A'; 
 const NEUTRAL_COLOR = '#E2E8F0'; 
 
+// Motor de Normalización de Causa Raíz (Lógica Walmart 80/20)
+const normalizeCauseString = (cause: string): string => {
+  if (!cause) return "Errores / Omisiones";
+  const c = cause.toLowerCase().trim();
+  
+  if (c.includes("alcance") && c.includes("plan")) return "Alta de alcance en plan";
+  if (c.includes("error") || c.includes("omision") || c.includes("omisión") || c.includes("humano")) return "Errores / Omisiones";
+  if (c.includes("cumplimiento") || c.includes("autoridad") || c.includes("regulatorio")) return "Solicitud de Cumplimiento / Autoridad";
+  if (c.includes("prototipo") || c.includes("actualización")) return "Actualización de Prototipo";
+  if (c.includes("estratégica") || c.includes("scope") || c.includes("iniciativa")) return "Iniciativas estratégicas y adiciones a scope fuera de Prototipo";
+  if (c.includes("alcance conocido") || c.includes("concursos")) return "Alcance conocido no asignado por Concursos";
+  if (c.includes("siniestro") || c.includes("siniestros")) return "Imprevistos por siniestro";
+  if (c.includes("hallazgo") || c.includes("sitio") || c.includes("subsuelo") || c.includes("terreno") || c.includes("construcción")) return "Hallazgos / imprevistos en sitio durante proceso de Construcción";
+  
+  // Mapeo de duplicados históricos comunes
+  if (c === "cambio de alcance" || c === "cambio de diseño/alcance" || c === "planificación y alcance") return "Alta de alcance en plan";
+  if (c === "cambio de diseño" || c === "error de diseño" || c === "error de ingeniería/diseño") return "Errores / Omisiones";
+  if (c === "indefinida" || c === "cambio en negociación") return "Errores / Omisiones";
+  if (c === "requisito regulatorio/legal") return "Solicitud de Cumplimiento / Autoridad";
+  
+  return cause; 
+};
+
 const CustomTooltip = ({ active, payload, label, currencyFormatter }: any) => {
   if (active && payload && payload.length) {
     return (
@@ -137,7 +160,6 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Fetch real total from DB for SSOT
   useEffect(() => {
     if (!db) return;
     const fetchTotal = async () => {
@@ -149,7 +171,7 @@ export default function VpDashboard() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), limit(10000)); // SSOT: Aumentado a 10k para cubrir universo completo
+    return query(collection(db, 'orders'), limit(10000)); 
   }, [db]);
 
   const { data: rawOrders, isLoading } = useCollection(ordersQuery);
@@ -222,7 +244,8 @@ export default function VpDashboard() {
 
     const causesMap: Record<string, { impact: number, count: number }> = {};
     filteredData.forEach(o => {
-      const cause = o.causa_raiz_normalizada || o.causaRaiz || 'Sin definir';
+      const rawCause = o.causa_raiz_normalizada || o.causaRaiz || 'Errores / Omisiones';
+      const cause = normalizeCauseString(rawCause);
       if (!causesMap[cause]) causesMap[cause] = { impact: 0, count: 0 };
       causesMap[cause].impact += (o.impactoNeto || 0);
       causesMap[cause].count += 1;
@@ -477,20 +500,20 @@ export default function VpDashboard() {
               <CardContent className="h-[450px] pt-10 px-6">
                 {metrics.paretoData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={metrics.paretoData.slice(0, 20)}>
+                    <ComposedChart data={metrics.paretoData.slice(0, 15)}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis 
                         dataKey="name" 
-                        tick={{ fontSize: 8, fontWeight: 'bold', fill: '#64748b' }} 
-                        height={80} 
+                        tick={{ fontSize: 7, fontWeight: 'bold', fill: '#64748b' }} 
+                        height={100} 
                         interval={0} 
-                        angle={-25} 
+                        angle={-35} 
                         textAnchor="end"
                       />
                       <YAxis yAxisId="left" tick={{ fontSize: 9 }} tickFormatter={(v) => `$${Math.round(v/1000000)}M`} axisLine={false} tickLine={false} />
                       <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 9 }} tickFormatter={(v) => `${v}%`} axisLine={false} tickLine={false} />
                       <Tooltip content={<CustomTooltip currencyFormatter={formatCurrency} />} />
-                      <Bar yAxisId="left" dataKey="impact" name="Monto" radius={[6, 6, 0, 0]} barSize={30}>
+                      <Bar yAxisId="left" dataKey="impact" name="Monto" radius={[6, 6, 0, 0]} barSize={35}>
                         {metrics.paretoData.map((entry, index) => (
                           <Cell 
                             key={`cell-${index}`} 
@@ -503,7 +526,7 @@ export default function VpDashboard() {
                           content={(props: any) => {
                             const { x, y, width, value } = props;
                             return (
-                              <text x={x + width / 2} y={y - 8} fill="#64748b" textAnchor="middle" fontSize={8} fontWeight="bold">
+                              <text x={x + width / 2} y={y - 8} fill="#64748b" textAnchor="middle" fontSize={7} fontWeight="bold">
                                 {formatCurrency(value)}
                               </text>
                             );
@@ -517,8 +540,8 @@ export default function VpDashboard() {
                         name="Acumulado" 
                         stroke="#FF8F00" 
                         strokeWidth={4} 
-                        dot={{ r: 5, fill: '#FF8F00', strokeWidth: 2, stroke: '#fff' }} 
-                        activeDot={{ r: 8 }}
+                        dot={{ r: 4, fill: '#FF8F00', strokeWidth: 2, stroke: '#fff' }} 
+                        activeDot={{ r: 6 }}
                       />
                     </ComposedChart>
                   </ResponsiveContainer>
@@ -542,7 +565,7 @@ export default function VpDashboard() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Flag className="h-3 w-3 text-amber-500" />
-                  <span className="text-slate-500">CORTE ESTRATÉGICO EN EL 85% ACUMULADO</span>
+                  <span className="text-slate-500">CORTE ESTRATÉGICO INSTITUCIONAL</span>
                 </div>
               </CardFooter>
             </Card>
@@ -679,7 +702,7 @@ export default function VpDashboard() {
                         <Badge variant="outline" className="text-[8px] border-none bg-slate-100 font-black uppercase text-slate-500">{o.format || "N/A"}</Badge>
                       </TableCell>
                       <TableCell className="text-[10px] font-bold text-slate-700 uppercase">{o.disciplina_normalizada || "—"}</TableCell>
-                      <TableCell className="text-[10px] font-bold text-slate-600 uppercase">{o.causa_raiz_normalizada || o.causaRaiz}</TableCell>
+                      <TableCell className="text-[10px] font-bold text-slate-600 uppercase">{normalizeCauseString(o.causa_raiz_normalizada || o.causaRaiz)}</TableCell>
                       <TableCell className="text-right font-black text-slate-900 text-xs pr-8">{formatCurrency(o.impactoNeto || 0)}</TableCell>
                     </TableRow>
                   ))}
