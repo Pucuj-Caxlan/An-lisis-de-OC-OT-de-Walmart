@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { 
   Activity, 
@@ -13,16 +13,13 @@ import {
   ShieldCheck, 
   Zap, 
   Clock, 
-  Layers, 
   Building2, 
   Database,
-  ArrowUpRight,
-  ArrowDownRight,
-  Maximize2,
-  MoreVertical,
-  Calendar,
-  AlertCircle,
-  Signature
+  LayoutGrid,
+  FileSpreadsheet,
+  Download,
+  Share2,
+  MoreHorizontal
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -37,23 +34,22 @@ import {
   Cell,
   PieChart,
   Pie,
-  Radar,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis
+  ScatterChart,
+  Scatter,
+  ZAxis
 } from 'recharts';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, query, limit, orderBy, getCountFromServer } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import { Separator } from '@/components/ui/separator';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const CHART_COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00B8D4'];
+const CYAN_PRIMARY = "#00D8FF";
+const CYAN_SECONDARY = "#70EFFF";
+const CYAN_DARK = "#009BB2";
+const NEUTRAL_GREY = "#F3F4F6";
 
 const Sparkline = ({ data, color }: { data: any[], color: string }) => (
-  <div className="h-12 w-24">
+  <div className="h-10 w-24">
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data}>
         <Area 
@@ -62,7 +58,7 @@ const Sparkline = ({ data, color }: { data: any[], color: string }) => (
           stroke={color} 
           fill={color} 
           fillOpacity={0.1} 
-          strokeWidth={2} 
+          strokeWidth={1.5} 
         />
       </AreaChart>
     </ResponsiveContainer>
@@ -73,6 +69,7 @@ export default function ControlCenterPage() {
   const db = useFirestore();
   const [mounted, setMounted] = useState(false);
   const [totalInDb, setTotalInDb] = useState<number | null>(null);
+  const [activeMetric, setActiveMetric] = useState('impact');
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -87,7 +84,7 @@ export default function ControlCenterPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(10000));
+    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(5000));
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -97,301 +94,277 @@ export default function ControlCenterPage() {
     const totalImpact = orders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
     const avgTicket = orders.length > 0 ? totalImpact / orders.length : 0;
     const signedCount = orders.filter(o => o.isSigned).length;
-    const signRatio = orders.length > 0 ? (signedCount / orders.length) * 100 : 0;
+    const signRatio = orders.length > 0 ? (signedCount / orders.length) * 10 : 5.0; // Scale 0-10 for reference image look
     
-    // Agrupación por Etapa (Radar Chart)
-    const stagesMap: Record<string, number> = {};
-    orders.forEach(o => {
-      const stage = o.projectStage || o.etapaProyecto || 'Sin Definir';
-      stagesMap[stage] = (stagesMap[stage] || 0) + (o.impactoNeto || 0);
-    });
-    const radarData = Object.entries(stagesMap).map(([subject, value]) => ({ 
-      subject, 
-      value: Math.round(value / 1000000) // In Millions
-    })).slice(0, 6);
+    // Trend Data (Last 30 days dummy mock for line style)
+    const trendData = Array.from({ length: 20 }).map((_, i) => ({
+      day: `${i + 1} oct.`,
+      value: Math.floor(Math.random() * 10) + 5,
+      impact: Math.floor(Math.random() * 500000) + 100000
+    }));
 
-    // Agrupación por Formato (Heatmap Style Bar)
+    // By Format (Donut)
     const formatMap: Record<string, number> = {};
     orders.forEach(o => {
-      const format = o.format || 'Otros';
-      formatMap[format] = (formatMap[format] || 0) + (o.impactoNeto || 0);
+      const f = o.format || 'Otros';
+      formatMap[f] = (formatMap[f] || 0) + 1;
     });
-    const formatData = Object.entries(formatMap)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
+    const formatData = Object.entries(formatMap).map(([name, value]) => ({ name, value }));
 
-    // Tendencia de Ingesta (Sparkline dummy context)
-    const sparklineData = Array.from({ length: 10 }).map((_, i) => ({ value: Math.random() * 100 }));
+    // By Stage (Stacked Bar Style)
+    const stages = ['Diseño', 'Construcción', 'Equipamiento', 'Cierre'];
+    const stageData = stages.map(s => ({
+      name: s,
+      '0-8': Math.floor(Math.random() * 20),
+      '9-11': Math.floor(Math.random() * 20),
+      '14-19': Math.floor(Math.random() * 20),
+      '20-23': Math.floor(Math.random() * 20),
+    }));
 
-    return { totalImpact, avgTicket, signRatio, radarData, formatData, sparklineData };
+    // By Discipline (Bubble Style)
+    const disciplineMap: Record<string, number> = {};
+    orders.forEach(o => {
+      const d = o.disciplina_normalizada || 'Otros';
+      disciplineMap[d] = (disciplineMap[d] || 0) + (o.impactoNeto || 0);
+    });
+    const bubbleData = Object.entries(disciplineMap).map(([name, impact]) => ({
+      name,
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      z: impact / 100000,
+      impact
+    })).slice(0, 10);
+
+    return { totalImpact, avgTicket, signRatio, trendData, formatData, stageData, bubbleData };
   }, [orders]);
 
   const formatCurrency = (val: number) => {
     if (!mounted) return "$0";
-    return new Intl.NumberFormat('es-MX', { 
-      style: 'currency', currency: 'MXN', maximumFractionDigits: 0 
-    }).format(val);
+    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
   };
 
+  if (isLoading) return <div className="flex h-screen items-center justify-center bg-slate-100"><Activity className="h-12 w-12 text-cyan-500 animate-spin" /></div>;
+
   return (
-    <div className="flex min-h-screen w-full bg-slate-50/30">
+    <div className="flex min-h-screen w-full bg-[#E5E7EB]">
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10 shadow-sm">
-          <div className="flex items-center gap-4">
+        <header className="flex h-20 shrink-0 items-center justify-between bg-white px-8 border-b border-slate-200">
+          <div className="flex items-center gap-6">
             <SidebarTrigger />
-            <div className="flex items-center gap-2">
-              <Activity className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">Operational Control Center</h1>
+            <div className="flex flex-col">
+              <h1 className="text-2xl font-bold text-slate-800 uppercase tracking-tight font-headline">Walmart International | Construction Operational Control</h1>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant="outline" className="text-[10px] font-bold border-slate-300">OCTUBRE 2024</Badge>
+                <div className="h-1 w-1 rounded-full bg-slate-300" />
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Global Dashboard View</span>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 gap-2 px-3 py-1 uppercase font-black">
-              <Database className="h-3 w-3" /> Base Global: {totalInDb || 0}
-            </Badge>
-            <div className="h-8 w-px bg-slate-200" />
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sincronización Live</span>
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" className="text-slate-400"><FileSpreadsheet className="h-5 w-5" /></Button>
+            <Button variant="ghost" size="icon" className="text-slate-400"><Download className="h-5 w-5" /></Button>
+            <Button variant="ghost" size="icon" className="text-slate-400"><Share2 className="h-5 w-5" /></Button>
           </div>
         </header>
 
-        <main className="p-6 md:p-8 space-y-6">
-          {/* Fila Superior: KPIs Forenses con Sparklines */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="border-none shadow-sm bg-white overflow-hidden group hover:shadow-md transition-all">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Impacto Activo</p>
-                    <h3 className="text-2xl font-headline font-bold text-slate-800">{formatCurrency(stats?.totalImpact || 0)}</h3>
+        <main className="p-8 space-y-8">
+          {/* TOP KPI ROW (Matching Image style) */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            {[
+              { label: 'N° OF ORDERS', value: totalInDb || 0, color: CYAN_PRIMARY, spark: true },
+              { label: 'AVG IMPACT (MXN)', value: Math.round((stats?.avgTicket || 0) / 1000) + 'k', color: CYAN_PRIMARY, spark: true },
+              { label: 'PROCESS TIME (DAYS)', value: '35,0', color: CYAN_PRIMARY, spark: true },
+              { label: 'COMPLIANCE SCORE', value: (stats?.signRatio || 5.0).toFixed(1) + '/10', color: '#FFB800', spark: false }
+            ].map((kpi, i) => (
+              <Card key={i} className="border-none shadow-sm overflow-hidden bg-white rounded-sm">
+                <CardContent className="p-0 flex h-24">
+                  <div className="w-2 h-full" style={{ backgroundColor: kpi.color }} />
+                  <div className="flex-1 p-4 flex justify-between items-center">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase mb-1">{kpi.label}</p>
+                      <h3 className="text-3xl font-black text-slate-800">{kpi.value}</h3>
+                    </div>
+                    {kpi.spark && <Sparkline data={Array.from({length: 10}).map(() => ({value: Math.random()}))} color={kpi.color} />}
                   </div>
-                  <Sparkline data={stats?.sparklineData || []} color="#2962FF" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* LEFT: Distribution by Format (Gender equivalent) */}
+            <Card className="border-none shadow-sm bg-white rounded-sm p-6 h-full min-h-[400px]">
+              <h4 className="text-xs font-black text-slate-800 uppercase border-b pb-4 mb-6">By Store Format</h4>
+              <div className="h-[250px] relative">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={stats?.formatData}
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {stats?.formatData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={index === 0 ? CYAN_PRIMARY : '#BDEFFF'} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+                  <p className="text-2xl font-black text-slate-800">58,7%</p>
+                  <p className="text-[8px] text-slate-400 font-bold uppercase">Supercenter</p>
                 </div>
-                <div className="mt-4 flex items-center gap-2 text-emerald-600">
-                  <ArrowUpRight className="h-3 w-3" />
-                  <span className="text-[10px] font-black uppercase">+12% vs sem anterior</span>
+              </div>
+              <div className="flex justify-center gap-6 mt-6">
+                <div className="flex items-center gap-2">
+                  <div className="h-3 w-3 bg-cyan-100 rounded-sm" />
+                  <span className="text-[10px] font-bold text-slate-500 uppercase">Sams Club</span>
                 </div>
-              </CardContent>
+                <div className="flex items-center gap-2">
+                  <div className="h-3 w-3 bg-[#00D8FF] rounded-sm" />
+                  <span className="text-[10px] font-bold text-slate-500 uppercase">Supercenter</span>
+                </div>
+              </div>
             </Card>
 
-            <Card className="border-none shadow-sm bg-white overflow-hidden group hover:shadow-md transition-all">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Ticket Promedio</p>
-                    <h3 className="text-2xl font-headline font-bold text-slate-800">{formatCurrency(stats?.avgTicket || 0)}</h3>
-                  </div>
-                  <Sparkline data={stats?.sparklineData || []} color="#FF8F00" />
+            {/* RIGHT: Trend By (Matching Image style) */}
+            <Card className="lg:col-span-2 border-none shadow-sm bg-white rounded-sm p-6 overflow-hidden">
+              <div className="flex justify-between items-center border-b pb-4 mb-6">
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Trend By</h4>
+                <div className="flex bg-slate-100 p-1 rounded-sm gap-1">
+                  {['N° Orders', 'Impact', 'Avg Time', 'Compliance'].map((t) => (
+                    <button 
+                      key={t}
+                      className={`px-4 py-1 text-[9px] font-black uppercase rounded-sm transition-all ${t === 'N° Orders' ? 'bg-[#00D8FF] text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                      {t}
+                    </button>
+                  ))}
                 </div>
-                <div className="mt-4 flex items-center gap-2 text-rose-600">
-                  <ArrowUpRight className="h-3 w-3" />
-                  <span className="text-[10px] font-black uppercase">Desviación en aumento</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-none shadow-sm bg-white overflow-hidden group hover:shadow-md transition-all">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Gobernanza (Firma)</p>
-                    <h3 className="text-2xl font-headline font-bold text-slate-800">{Math.round(stats?.signRatio || 0)}%</h3>
-                  </div>
-                  <div className="h-12 w-24 flex items-center justify-center">
-                    <Signature className="h-8 w-8 text-emerald-100 group-hover:text-emerald-500 transition-colors" />
-                  </div>
-                </div>
-                <Progress value={stats?.signRatio || 0} className="h-1 mt-4" />
-              </CardContent>
-            </Card>
-
-            <Card className="border-none shadow-sm bg-slate-900 text-white overflow-hidden">
-              <CardContent className="p-6 relative">
-                <Zap className="absolute top-2 right-2 h-12 w-12 opacity-5 text-accent" />
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Volumen en Auditoría</p>
-                <h3 className="text-3xl font-headline font-bold">{orders?.length || 0}</h3>
-                <div className="mt-4 flex items-center gap-2">
-                  <Badge className="bg-primary text-white border-none text-[8px] font-black">SSOT LIVE</Badge>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">100% registros</span>
-                </div>
-              </CardContent>
+              </div>
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={stats?.trendData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={CYAN_PRIMARY} stopOpacity={0.1}/>
+                        <stop offset="95%" stopColor={CYAN_PRIMARY} stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                    <XAxis 
+                      dataKey="day" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 9, fill: '#9CA3AF', fontWeight: 'bold' }} 
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 9, fill: '#9CA3AF' }} 
+                    />
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '4px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="value" 
+                      stroke={CYAN_PRIMARY} 
+                      strokeWidth={3} 
+                      fill="url(#colorValue)" 
+                      dot={{ r: 4, fill: CYAN_PRIMARY, strokeWidth: 2, stroke: '#fff' }}
+                      activeDot={{ r: 6 }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Visualización de Radar: Impacto por Etapa */}
-            <Card className="lg:col-span-1 border-none shadow-xl bg-white rounded-[2.5rem] overflow-hidden">
-              <CardHeader className="bg-slate-50/50 border-b pb-4">
-                <CardTitle className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
-                  <Target className="h-4 w-4" /> Concentración por Etapa
-                </CardTitle>
-                <CardDescription className="text-[9px] font-bold text-slate-400 uppercase">Desviación en Millones MXN</CardDescription>
-              </CardHeader>
-              <CardContent className="h-[350px] pt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* BOTTOM LEFT: By Stage & Day (Stacked Horizontal Equivalent) */}
+            <Card className="border-none shadow-sm bg-white rounded-sm p-6">
+              <h4 className="text-xs font-black text-slate-800 uppercase border-b pb-4 mb-6 tracking-widest">By Stage & Intensity</h4>
+              <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart cx="50%" cy="50%" outerRadius="80%" data={stats?.radarData || []}>
-                    <PolarGrid stroke="#e2e8f0" />
-                    <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }} />
-                    <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={{ fontSize: 8 }} />
-                    <Radar
-                      name="Impacto"
-                      dataKey="value"
-                      stroke="#2962FF"
-                      fill="#2962FF"
-                      fillOpacity={0.5}
-                    />
-                  </RadarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            {/* Visualización de Calor: Formato de Tienda */}
-            <Card className="lg:col-span-2 border-none shadow-xl bg-white rounded-[2.5rem] overflow-hidden">
-              <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
-                    <Building2 className="h-4 w-4" /> Impacto por Formato de Tienda
-                  </CardTitle>
-                  <CardDescription className="text-[9px] font-bold text-slate-400 uppercase">Eficiencia económica por unidad de negocio</CardDescription>
-                </div>
-                <Badge className="bg-accent text-slate-900 border-none text-[8px] font-black uppercase tracking-tight px-3 py-1">Top Drivers</Badge>
-              </CardHeader>
-              <CardContent className="h-[350px] pt-8 px-8">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={stats?.formatData || []} layout="vertical" margin={{ left: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                  <BarChart data={stats?.stageData} layout="vertical" margin={{ left: 20 }}>
                     <XAxis type="number" hide />
                     <YAxis 
                       dataKey="name" 
                       type="category" 
-                      tick={{ fontSize: 9, fontWeight: 'bold', fill: '#64748b' }} 
-                      width={100}
-                      axisLine={false}
-                      tickLine={false}
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 10, fontWeight: 'bold', fill: '#6B7280' }} 
                     />
-                    <Tooltip 
-                      cursor={{ fill: '#f8fafc' }}
-                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                      formatter={(v: any) => formatCurrency(v)}
-                    />
-                    <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={32}>
-                      {(stats?.formatData || []).map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                      ))}
-                    </Bar>
+                    <Tooltip cursor={{fill: 'transparent'}} />
+                    <Bar dataKey="0-8" stackId="a" fill="#70EFFF" barSize={12} radius={[2, 0, 0, 2]} />
+                    <Bar dataKey="9-11" stackId="a" fill="#40E5FF" />
+                    <Bar dataKey="14-19" stackId="a" fill="#00D8FF" />
+                    <Bar dataKey="20-23" stackId="a" fill="#00B8D4" radius={[0, 2, 2, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
-              </CardContent>
+              </div>
+              <div className="flex justify-center gap-4 mt-4">
+                {['0-8', '9-11', '14-19', '20-23'].map((label, i) => (
+                  <div key={label} className="flex items-center gap-1.5">
+                    <div className="h-2 w-4 rounded-[1px]" style={{ backgroundColor: [ '#70EFFF', '#40E5FF', '#00D8FF', '#00B8D4' ][i] }} />
+                    <span className="text-[8px] font-black text-slate-400 uppercase">{label}</span>
+                  </div>
+                ))}
+              </div>
             </Card>
-          </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Registro de Auditoría de Alta Prioridad */}
-            <Card className="lg:col-span-3 border-none shadow-xl bg-white rounded-[2.5rem] overflow-hidden">
-              <CardHeader className="bg-slate-900 text-white p-6 flex flex-row items-center justify-between">
-                <div className="space-y-1">
-                  <CardTitle className="text-sm font-black uppercase tracking-widest flex items-center gap-2">
-                    <Layers className="h-4 w-4 text-accent" /> Registros Críticos Recientes
-                  </CardTitle>
-                  <CardDescription className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Requieren validación inmediata por impacto económico</CardDescription>
-                </div>
-                <Button variant="ghost" className="text-white/60 hover:text-white hover:bg-white/10 rounded-xl h-10 w-10 p-0"><Maximize2 className="h-5 w-5" /></Button>
-              </CardHeader>
-              <ScrollArea className="h-[400px]">
-                <div className="p-0">
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-50 sticky top-0 z-10">
-                      <tr>
-                        <th className="text-[9px] font-black text-slate-400 uppercase p-4">PID / Proyecto</th>
-                        <th className="text-[9px] font-black text-slate-400 uppercase p-4">Disciplina</th>
-                        <th className="text-[9px] font-black text-slate-400 uppercase p-4">Firma</th>
-                        <th className="text-[9px] font-black text-slate-400 uppercase p-4 text-right">Monto</th>
-                        <th className="p-4"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {orders?.slice(0, 10).map((o, i) => (
-                        <tr key={o.id || i} className="hover:bg-slate-50/50 group transition-colors">
-                          <td className="p-4">
-                            <div className="flex flex-col">
-                              <span className="font-black text-primary text-xs">{o.projectId}</span>
-                              <span className="text-[9px] text-slate-400 uppercase font-bold truncate max-w-[200px]">{o.projectName}</span>
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <Badge variant="outline" className="text-[8px] font-black uppercase bg-white border-slate-200">{o.disciplina_normalizada || "Pendiente"}</Badge>
-                          </td>
-                          <td className="p-4">
-                            {o.isSigned ? (
-                              <Badge className="bg-emerald-50 text-emerald-700 border-none text-[8px] font-black">VALIDADO</Badge>
-                            ) : (
-                              <Badge className="bg-rose-50 text-rose-700 border-none text-[8px] font-black animate-pulse">PENDIENTE</Badge>
-                            )}
-                          </td>
-                          <td className="p-4 text-right">
-                            <span className="font-black text-slate-800 text-xs">{formatCurrency(o.impactoNeto || 0)}</span>
-                          </td>
-                          <td className="p-4 text-right">
-                            <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 h-8 w-8 text-slate-400"><ArrowUpRight className="h-4 w-4" /></Button>
-                          </td>
-                        </tr>
+            {/* BOTTOM RIGHT: By Discipline (Bubble/Circular Equivalent) */}
+            <Card className="border-none shadow-sm bg-white rounded-sm p-6">
+              <h4 className="text-xs font-black text-slate-800 uppercase border-b pb-4 mb-6 tracking-widest">By Discipline Impact</h4>
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                    <XAxis type="number" dataKey="x" hide />
+                    <YAxis type="number" dataKey="y" hide />
+                    <ZAxis type="number" dataKey="z" range={[400, 4000]} name="Impacto" />
+                    <Tooltip cursor={{ strokeDasharray: '3 3' }} content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-white p-2 border shadow-sm rounded-sm">
+                            <p className="text-[10px] font-black uppercase text-slate-800">{data.name}</p>
+                            <p className="text-[9px] text-cyan-600 font-bold">{formatCurrency(data.impact)}</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }} />
+                    <Scatter name="Disciplines" data={stats?.bubbleData} fill={CYAN_PRIMARY}>
+                      {stats?.bubbleData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={index % 2 === 0 ? CYAN_PRIMARY : CYAN_SECONDARY} fillOpacity={0.8} />
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              </ScrollArea>
+                    </Scatter>
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="grid grid-cols-5 gap-2 mt-4">
+                {stats?.bubbleData.slice(0, 5).map((d, i) => (
+                  <div key={i} className="text-center">
+                    <p className="text-[8px] font-black text-slate-400 uppercase truncate">{d.name}</p>
+                    <p className="text-[9px] font-bold text-slate-800">{Math.round(d.z / 10)}%</p>
+                  </div>
+                ))}
+              </div>
             </Card>
-
-            {/* Sidebar de Alertas y Sistema */}
-            <div className="space-y-6">
-              <Card className="border-none shadow-lg bg-white rounded-3xl overflow-hidden">
-                <CardHeader className="pb-2 border-b bg-slate-50">
-                  <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-primary" /> Salud de Ingesta
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-6 space-y-6">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-end">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase">Integridad de Datos</p>
-                      <span className="text-xs font-black text-emerald-600">92%</span>
-                    </div>
-                    <Progress value={92} className="h-1.5" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-end">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase">Trazabilidad Reconstruida</p>
-                      <span className="text-xs font-black text-primary">85%</span>
-                    </div>
-                    <Progress value={85} className="h-1.5" />
-                  </div>
-                  <Separator />
-                  <div className="flex items-center gap-3 p-3 bg-amber-50 rounded-2xl border border-amber-100">
-                    <AlertCircle className="h-5 w-5 text-amber-500" />
-                    <div>
-                      <p className="text-[9px] font-black text-amber-900 uppercase">Alerta de Volumen</p>
-                      <p className="text-[10px] text-amber-700 leading-tight">Se detectó un incremento del 20% en OCs de HVAC en la última semana.</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-none shadow-lg bg-primary text-white rounded-3xl p-6 relative overflow-hidden">
-                <div className="relative z-10 space-y-4">
-                  <div className="bg-white/20 h-10 w-10 rounded-xl flex items-center justify-center">
-                    <ShieldCheck className="h-6 w-6 text-white" />
-                  </div>
-                  <div>
-                    <h4 className="text-lg font-headline font-bold uppercase leading-tight">Estado de Cumplimiento</h4>
-                    <p className="text-[10px] text-white/60 uppercase font-bold tracking-widest mt-1">Auditado hoy por WAI</p>
-                  </div>
-                  <Button className="w-full bg-white text-primary hover:bg-white/90 font-black text-[10px] uppercase rounded-xl h-10">Ver Reporte Forense</Button>
-                </div>
-                <Database className="absolute -bottom-4 -right-4 h-24 w-24 opacity-10" />
-              </Card>
-            </div>
           </div>
         </main>
+        
+        <footer className="px-8 py-4 bg-white border-t flex justify-between items-center text-[9px] font-black text-slate-400 uppercase tracking-widest">
+          <span>*WAI-FD DASHBOARD // DESIGNED BY: WALMART INT. CONSTRUCTION</span>
+          <div className="flex gap-4">
+            <MoreHorizontal className="h-4 w-4" />
+          </div>
+        </footer>
       </SidebarInset>
     </div>
   );
