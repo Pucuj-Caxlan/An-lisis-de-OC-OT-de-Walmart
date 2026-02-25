@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -18,7 +17,8 @@ import {
   Share2,
   Download,
   MoreHorizontal,
-  AlertTriangle
+  AlertTriangle,
+  ShieldCheck
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -72,8 +72,12 @@ export default function ControlCenterPage() {
   useEffect(() => {
     if (!db) return;
     const fetchTotal = async () => {
-      const snapshot = await getCountFromServer(collection(db, 'orders'));
-      setTotalInDb(snapshot.data().count);
+      try {
+        const snapshot = await getCountFromServer(collection(db, 'orders'));
+        setTotalInDb(snapshot.data().count);
+      } catch (e) {
+        console.warn("Failed to fetch total count:", e);
+      }
     };
     fetchTotal();
   }, [db]);
@@ -300,7 +304,7 @@ export default function ControlCenterPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={stats?.trendData} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="colorActive" x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient id="colorActive" x1="0" x1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} stopOpacity={0.25}/>
                         <stop offset="95%" stopColor={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} stopOpacity={0}/>
                       </linearGradient>
