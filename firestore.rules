@@ -2,38 +2,35 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Función de validación simplificada para máxima compatibilidad con Custom Tokens
-    function isSignedIn() {
-      return request.auth != null && request.auth.uid != null;
+    // Versión 2.3.5 - Estabilización de Permisos para Custom Tokens
+    // Se simplifica la validación para asegurar compatibilidad total con el proveedor 'custom'
+    
+    // Acceso total a la colección de órdenes (11,150+ registros)
+    match /orders/{id} {
+      allow read, write: if request.auth != null;
     }
     
-    // Acceso total a la colección de órdenes para usuarios autenticados
-    // Esto garantiza que el listado de 11,150 registros no sea bloqueado
-    match /orders/{orderId} {
-      allow read, write: if isSignedIn();
-    }
-
     // Colecciones de soporte y taxonomía
-    match /taxonomy_disciplines/{id} { allow read: if isSignedIn(); }
-    match /taxonomy_causes/{id} { allow read: if isSignedIn(); }
-    match /classification_overrides/{id} { allow read, write: if isSignedIn(); }
-    match /aggregates/{document=**} { allow read: if isSignedIn(); }
+    match /taxonomy_disciplines/{id} { allow read: if request.auth != null; }
+    match /taxonomy_causes/{id} { allow read: if request.auth != null; }
+    match /classification_overrides/{id} { allow read, write: if request.auth != null; }
+    match /aggregates/{document=**} { allow read: if request.auth != null; }
 
     // Procesos operativos y auditoría
-    match /audits/{id} { allow read, write: if isSignedIn(); }
-    match /audit_logs/{id} { allow read, write: if isSignedIn(); }
-    match /deletion_jobs/{id} { allow read, write: if isSignedIn(); }
-    match /word_cloud_snapshots/{id} { allow read, write: if isSignedIn(); }
-    match /importBatches/{id} { allow read, write: if isSignedIn(); }
+    match /audits/{id} { allow read, write: if request.auth != null; }
+    match /audit_logs/{id} { allow read, write: if request.auth != null; }
+    match /deletion_jobs/{id} { allow read, write: if request.auth != null; }
+    match /word_cloud_snapshots/{id} { allow read, write: if request.auth != null; }
+    match /importBatches/{id} { allow read, write: if request.auth != null; }
     
     // Perfiles de Usuario
     match /users/{userId} {
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Regla de respaldo para cualquier otra colección (Solo Lectura)
+    // Regla de respaldo global (Solo Lectura para rutas no mapeadas)
     match /{document=**} {
-      allow read: if isSignedIn();
+      allow read: if request.auth != null;
       allow write: if false; 
     }
   }

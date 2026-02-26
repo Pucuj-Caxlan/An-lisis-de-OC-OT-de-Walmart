@@ -76,8 +76,6 @@ export default function AnalysisPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [aiFilter, setAiFilter] = useState<string>('all');
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
-  const [reportResult, setReportResult] = useState<TraceabilityReportOutput | null>(null);
   const [mounted, setMounted] = useState(false);
   
   const [currentPage, setCurrentPage] = useState(1);
@@ -85,17 +83,11 @@ export default function AnalysisPage() {
   const [totalInDb, setTotalInDb] = useState<number | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  const [deleteMode, setDeleteMode] = useState<DeletionMode>('bulk');
-
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
   const [isBulkAiProcessing, setIsBulkAiProcessing] = useState(false);
   const [bulkAiProgress, setBulkAiProgress] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
-  const [bulkAiResult, setBulkAiResult] = useState<BulkIntelligenceOutput | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -175,12 +167,6 @@ export default function AnalysisPage() {
     return filteredOrdersFull.slice(start, start + pageSize);
   }, [filteredOrdersFull, currentPage, pageSize]);
 
-  const selectedTotalAmount = useMemo(() => {
-    return orders
-      ?.filter(o => selectedIds.includes(o.id))
-      .reduce((acc, curr) => acc + (curr.impactoNeto || 0), 0) || 0;
-  }, [orders, selectedIds]);
-
   const toggleSelectAll = () => {
     if (selectedIds.length === pagedOrders.length) {
       setSelectedIds([]);
@@ -212,10 +198,7 @@ export default function AnalysisPage() {
     try {
       const result = await analyzeOrderSemantically({
         descripcion: String(order.descripcion || "").substring(0, 250),
-        monto: order.impactoNeto,
-        contexto: {
-          justificacionDetallada: String(order.technicalJustification?.detailedReasoning || "").substring(0, 250)
-        }
+        monto: order.impactoNeto
       });
 
       const orderRef = doc(db, 'orders', order.id);
@@ -225,9 +208,8 @@ export default function AnalysisPage() {
         subcausa_normalizada: result.subcausa_normalizada,
         semanticAnalysis: result,
         confidence_score: result.confidence_score,
-        rationale_tecnico: result.rationale_tecnico,
         needs_review: result.needs_review,
-        classification_status: 'auto', // Asegurar que coincida con el filtro
+        classification_status: 'auto',
         classified_at: new Date().toISOString(),
         classified_by: user.uid
       });
@@ -245,17 +227,6 @@ export default function AnalysisPage() {
     } finally {
       setIsAnalyzing(null);
     }
-  };
-
-  const handleValidateAudit = (orderId: string) => {
-    if (!db || !user) return;
-    updateDocumentNonBlocking(doc(db, 'orders', orderId), {
-      classification_status: 'reviewed',
-      needs_review: false,
-      auditedBy: user.uid,
-      auditedAt: new Date().toISOString()
-    });
-    toast({ title: "Auditoría Validada" });
   };
 
   const handleBulkAudit = async () => {
@@ -276,27 +247,10 @@ export default function AnalysisPage() {
       
       toast({ title: "Auditoría Masiva Completada", description: `${selectedIds.length} registros validados.` });
       setSelectedIds([]);
-      setShowBulkAiDialog(false);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Error en Auditoría", description: e.message });
     } finally {
       setIsAuditing(false);
-    }
-  };
-
-  const handleBulkDeletion = async () => {
-    if (!db || !user || deleteConfirmText !== 'BORRAR') return;
-    setIsDeleting(true);
-    try {
-      await executeDeletion(db, user, deleteMode, selectedIds);
-      toast({ title: "Registros Eliminados", description: "El borrado masivo finalizó con éxito." });
-      setShowDeleteConfirm(false);
-      setSelectedIds([]);
-      setDeleteConfirmText('');
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Error en Borrado", description: e.message });
-    } finally {
-      setIsDeleting(false);
     }
   };
 
@@ -310,15 +264,9 @@ export default function AnalysisPage() {
     setIsBulkAiProcessing(true);
     setBulkAiProgress(0);
     setProcessedCount(0);
-    setBulkAiResult(null);
 
     try {
       const selectedOrders = orders?.filter(o => selectedIds.includes(o.id)) || [];
-      let allAnomalies: any[] = [];
-      let allPatterns: string[] = [];
-      let allRecommendations: string[] = [];
-      let finalSummary = "";
-
       for (let i = 0; i < selectedOrders.length; i += AI_BATCH_SIZE) {
         const chunk = selectedOrders.slice(i, i + AI_BATCH_SIZE);
         const batch = writeBatch(db!);
@@ -338,7 +286,7 @@ export default function AnalysisPage() {
               semanticAnalysis: result,
               confidence_score: result.confidence_score,
               needs_review: result.needs_review,
-              classification_status: 'auto', // Crucial para que aparezcan en los filtros
+              classification_status: 'auto',
               classified_at: new Date().toISOString(),
               classified_by: user?.uid
             });
