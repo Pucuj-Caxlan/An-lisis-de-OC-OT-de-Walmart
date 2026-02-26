@@ -85,9 +85,9 @@ export default function ControlCenterPage() {
   }, [db, user?.uid]);
 
   const ordersQuery = useMemoFirebase(() => {
-    // CRITICAL: Esperar a que el usuario esté autenticado para evitar error de permisos
     if (!db || !user?.uid) return null;
-    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(20000));
+    // Ajustado a 10,000 (Límite máximo de Structured Query)
+    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(10000));
   }, [db, user?.uid]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);

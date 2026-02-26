@@ -181,9 +181,9 @@ export default function VpDashboard() {
   }, [db, user?.uid]);
 
   const ordersQuery = useMemoFirebase(() => {
-    // CRITICAL: Solo iniciar suscripción cuando el usuario esté autenticado para evitar race condition
     if (!db || !user?.uid) return null;
-    return query(collection(db, 'orders'), limit(20000)); 
+    // Ajustado a 10,000 (Límite máximo de Structured Query)
+    return query(collection(db, 'orders'), limit(10000)); 
   }, [db, user?.uid]);
 
   const { data: rawOrders, isLoading } = useCollection(ordersQuery);

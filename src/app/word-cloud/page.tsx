@@ -95,9 +95,9 @@ export default function WordCloudPage() {
   }, [db, user?.uid]);
 
   const ordersQuery = useMemoFirebase(() => {
-    // CRITICAL: Esperar a UID para evitar error de permisos por race condition
     if (!db || !user?.uid) return null;
-    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(20000));
+    // Ajustado a 10,000 (Límite máximo de Structured Query)
+    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(10000));
   }, [db, user?.uid]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -253,8 +253,6 @@ export default function WordCloudPage() {
     }).format(val);
   };
 
-  const classifiedCount = orders?.filter(o => o.classification_status === 'reviewed' || o.classification_status === 'auto').length || 0;
-
   return (
     <div className="flex min-h-screen w-full bg-slate-50/30">
       <AppSidebar />
@@ -267,100 +265,7 @@ export default function WordCloudPage() {
               <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">Inteligencia Semántica 80/20</h1>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Button 
-              variant="outline"
-              onClick={() => setShowFilters(!showFilters)}
-              className={`rounded-xl h-10 px-4 gap-2 transition-all ${showFilters ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600'}`}
-            >
-              <Filter className="h-4 w-4" />
-              {showFilters ? 'Cerrar Filtros' : 'Filtros Avanzados'}
-            </Button>
-            <div className="h-8 w-px bg-slate-200 mx-1" />
-            <Button 
-              onClick={() => runAnalysis(false)} 
-              disabled={isAnalyzing || filteredOrders.length === 0}
-              variant="outline"
-              className="border-primary/20 text-primary hover:bg-primary/5 rounded-xl h-10 px-6 font-bold"
-            >
-              Vista Instantánea (DB)
-            </Button>
-            <Button 
-              onClick={() => runAnalysis(true)} 
-              disabled={isAnalyzing || filteredOrders.length === 0}
-              className="bg-primary hover:bg-primary/90 gap-2 shadow-lg rounded-xl h-10 px-6 font-bold"
-            >
-              {isAnalyzing ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              Refinar con IA
-            </Button>
-          </div>
         </header>
-
-        {showFilters && (
-          <div className="bg-white border-b p-6 animate-in slide-in-from-top-2 duration-300">
-            <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-4 max-w-7xl mx-auto">
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-black text-slate-400 uppercase">Periodo Anual</label>
-                <Select value={filters.year} onValueChange={(v) => setFilters({...filters, year: v})}>
-                  <SelectTrigger className="h-9 bg-slate-50 border-none text-xs font-bold uppercase"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="TODO">Todos los años</SelectItem>
-                    <SelectItem value="2024">2024</SelectItem>
-                    <SelectItem value="2025">2025</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {/* Resto de filtros permanecen igual */}
-            </div>
-          </div>
-        )}
-
-        <main className="p-6 md:p-8 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="bg-slate-100 p-2 rounded-lg text-slate-600">
-                  <Database className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Universo Global (SSOT)</p>
-                  <h4 className="text-xl font-headline font-bold text-slate-800 leading-none">{totalInDb || orders?.length || 0} Registros</h4>
-                </div>
-              </div>
-              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-100 text-[9px] font-black">ACTIVO</Badge>
-            </Card>
-            {/* Otros KPIs permanecen igual */}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <Card className="lg:col-span-3 border-none shadow-xl bg-white rounded-3xl overflow-hidden min-h-[600px] flex flex-col">
-              <CardHeader className="bg-slate-900 text-white p-6 shrink-0">
-                <div className="flex justify-between items-center">
-                  <div className="space-y-1">
-                    <CardTitle className="text-xl font-headline font-bold uppercase tracking-tight flex items-center gap-2">
-                      <Layers className="h-5 w-5 text-accent" /> Mapa de Calor Semántico
-                    </CardTitle>
-                    <CardDescription className="text-slate-400 text-xs font-medium uppercase">Visualización basada en el universo total de {filteredOrders.length} registros</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="flex-1 p-10 flex flex-wrap items-center justify-center gap-x-8 gap-y-6 relative bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px]">
-                {isLoading ? (
-                  <RefreshCcw className="h-12 w-12 animate-spin text-primary opacity-20" />
-                ) : cloudData?.concepts?.map((word, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setSelectedConcept(word)}
-                    className={`transition-all duration-300 transform hover:scale-110 active:scale-95 text-center ${cloudData.concepts && cloudData.concepts.length > 0 ? (word.weight > 85 ? 'text-5xl md:text-6xl font-black' : word.weight > 70 ? 'text-4xl md:text-5xl font-extrabold' : word.weight > 50 ? 'text-2xl md:text-3xl font-bold' : word.weight > 30 ? 'text-lg md:text-xl font-semibold' : 'text-sm font-medium') : 'text-sm'} ${word.sentiment === 'Crítico' ? 'text-rose-600' : word.sentiment === 'Riesgo' ? 'text-amber-600' : 'text-primary'} ${selectedConcept?.text === word.text ? 'scale-110 ring-4 ring-primary/10 rounded-xl px-4 py-2 bg-primary/5 z-10' : ''}`}
-                  >
-                    {word.text}
-                  </button>
-                ))}
-              </CardContent>
-            </Card>
-            {/* Sidebar de diagnóstico permanece igual */}
-          </div>
-        </main>
       </SidebarInset>
     </div>
   );

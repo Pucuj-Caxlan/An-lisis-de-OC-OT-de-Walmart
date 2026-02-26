@@ -20,6 +20,7 @@ export interface UseCollectionResult<T> {
   data: WithId<T>[] | null;
   isLoading: boolean;
   error: FirestoreError | Error | null;
+  snapshot: QuerySnapshot<DocumentData> | null;
 }
 
 export interface InternalQuery extends Query<DocumentData> {
@@ -42,14 +43,15 @@ export function useCollection<T = any>(
   const [data, setData] = useState<WithId<T>[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<FirestoreError | Error | null>(null);
+  const [snapshot, setSnapshot] = useState<QuerySnapshot<DocumentData> | null>(null);
 
   useEffect(() => {
     // Gate Crítica: No intentar suscripción si Auth no está listo o el usuario es nulo
     if (!isAuthReady || !user || !memoizedTargetRefOrQuery) {
-      if (!isAuthReady) console.log("[useCollection] Esperando inicialización de Auth...");
       setData(null);
       setIsLoading(false);
       setError(null);
+      setSnapshot(null);
       return;
     }
 
@@ -58,12 +60,13 @@ export function useCollection<T = any>(
 
     const unsubscribe = onSnapshot(
       memoizedTargetRefOrQuery,
-      (snapshot: QuerySnapshot<DocumentData>) => {
+      (snap: QuerySnapshot<DocumentData>) => {
         const results: WithId<T>[] = [];
-        for (const doc of snapshot.docs) {
+        for (const doc of snap.docs) {
           results.push({ ...(doc.data() as T), id: doc.id });
         }
         setData(results);
+        setSnapshot(snap);
         setError(null);
         setIsLoading(false);
       },
@@ -73,18 +76,24 @@ export function useCollection<T = any>(
             ? (memoizedTargetRefOrQuery as CollectionReference).path
             : (memoizedTargetRefOrQuery as unknown as InternalQuery)._query.path.canonicalString()
 
-        console.error(`[useCollection] Error de permisos en: ${path}`, err);
+        // Diagnóstico preciso del error
+        console.error(`[useCollection] Error Code: ${err.code} | Path: ${path}`, err);
 
-        const contextualError = new FirestorePermissionError({
-          operation: 'list',
-          path,
-        });
-
-        setError(contextualError);
+        if (err.code === 'permission-denied') {
+          const contextualError = new FirestorePermissionError({
+            operation: 'list',
+            path,
+          });
+          setError(contextualError);
+          errorEmitter.emit('permission-error', contextualError);
+        } else {
+          // Si no es permiso, propagamos el error real (ej. limit-exceeded, invalid-argument)
+          setError(err);
+        }
+        
         setData(null);
+        setSnapshot(null);
         setIsLoading(false);
-
-        errorEmitter.emit('permission-error', contextualError);
       }
     );
 
@@ -95,5 +104,5 @@ export function useCollection<T = any>(
     throw new Error(memoizedTargetRefOrQuery + ' was not properly memoized using useMemoFirebase');
   }
 
-  return { data, isLoading, error };
+  return { data, isLoading, error, snapshot };
 }

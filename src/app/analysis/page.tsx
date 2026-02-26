@@ -27,7 +27,8 @@ import {
   Zap,
   ChevronLeft,
   ChevronRight,
-  Clock
+  Clock,
+  Plus
 } from 'lucide-react';
 import {
   Table,
@@ -40,7 +41,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, query, limit, doc, writeBatch, setDoc, orderBy, getCountFromServer } from 'firebase/firestore';
+import { collection, query, limit, doc, writeBatch, setDoc, orderBy, getCountFromServer, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
   Dialog,
@@ -62,7 +63,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 
-const MAX_BULK_AI_RECORDS = 500;
+const INITIAL_PAGE_SIZE = 500;
 const AI_BATCH_SIZE = 5; 
 
 export default function AnalysisPage() {
@@ -101,17 +102,17 @@ export default function AnalysisPage() {
     fetchTotal();
   }, [db, user?.uid]);
 
+  // Implementación de Paginación Server-Side compatible con Structured Query Limits
   const ordersQuery = useMemoFirebase(() => {
-    // CRITICAL: Esperar a que el usuario esté plenamente autenticado antes de suscribirse
     if (!db || !user?.uid) return null;
     return query(
       collection(db, 'orders'), 
       orderBy('projectId', 'desc'),
-      limit(20000) 
+      limit(10000) // Límite máximo permitido por Firestore structured queries
     );
   }, [db, user?.uid]);
 
-  const { data: orders, isLoading } = useCollection(ordersQuery);
+  const { data: orders, isLoading, error } = useCollection(ordersQuery);
 
   const classificationCounts = useMemo(() => {
     if (!orders) return { classified: 0, pending: 0, needs_review: 0, low_confidence: 0 };
@@ -344,6 +345,17 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6 space-y-6">
+          {error && (
+            <Card className="border-rose-200 bg-rose-50 p-4 flex items-center gap-3 animate-in fade-in">
+              <ShieldAlert className="h-5 w-5 text-rose-600" />
+              <div className="flex-1">
+                <p className="text-sm font-bold text-rose-800">Error de Datos</p>
+                <p className="text-xs text-rose-600">{(error as any).message || "Fallo en la comunicación con el servidor."}</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => window.location.reload()} className="h-8 text-[10px] font-black">REINTENTAR</Button>
+            </Card>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
@@ -354,10 +366,10 @@ export default function AnalysisPage() {
             </Card>
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Procesados IA</p>
-                <h4 className="text-2xl font-headline font-bold text-emerald-600">{classificationCounts.classified}</h4>
+                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Cargados en Vista</p>
+                <h4 className="text-2xl font-headline font-bold text-emerald-600">{orders?.length || 0}</h4>
               </div>
-              <BrainCircuit className="h-8 w-8 text-emerald-100" />
+              <CheckCircle2 className="h-8 w-8 text-emerald-100" />
             </Card>
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
@@ -453,7 +465,7 @@ export default function AnalysisPage() {
 
             <div className="flex items-center justify-between px-6 py-4 bg-slate-50/50 border-t">
               <div className="text-[10px] font-black text-slate-400 uppercase">
-                Mostrando {((currentPage - 1) * pageSize) + 1} – {Math.min(currentPage * pageSize, filteredOrdersFull.length)} de {filteredOrdersFull.length} (Universo: {totalInDb})
+                Mostrando {((currentPage - 1) * pageSize) + 1} – {Math.min(currentPage * pageSize, filteredOrdersFull.length)} de {filteredOrdersFull.length} (Universo Cargado: {orders?.length})
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black">ANTERIOR</Button>
@@ -462,6 +474,14 @@ export default function AnalysisPage() {
               </div>
             </div>
           </Card>
+
+          {orders && orders.length === 10000 && (
+            <div className="p-10 border-2 border-dashed rounded-3xl text-center bg-white space-y-4">
+               <Database className="h-10 w-10 text-primary mx-auto opacity-20" />
+               <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Has alcanzado el límite de carga por bloque (10,000 registros)</p>
+               <p className="text-[10px] text-slate-400 italic">Para ver los {totalInDb ? totalInDb - 10000 : 'registros restantes'}, utiliza los filtros de PID o Formato.</p>
+            </div>
+          )}
         </main>
 
         <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>

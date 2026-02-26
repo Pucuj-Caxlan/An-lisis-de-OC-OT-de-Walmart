@@ -104,9 +104,9 @@ export default function TrendsPage() {
   }, [db, user?.uid]);
 
   const ordersQuery = useMemoFirebase(() => {
-    // CRITICAL: Esperar a UID para evitar error de permisos por race condition
     if (!db || !user?.uid) return null;
-    return query(collection(db, 'orders'), limit(20000)); 
+    // Ajustado a 10,000 (Límite máximo de Structured Query)
+    return query(collection(db, 'orders'), limit(10000)); 
   }, [db, user?.uid]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -346,7 +346,6 @@ export default function TrendsPage() {
                   ))}
                 </div>
               </div>
-              {/* Resto de filtros permanecen igual */}
             </div>
           </Card>
 
@@ -366,7 +365,6 @@ export default function TrendsPage() {
                     <h3 className="text-4xl font-headline font-bold text-slate-800 pt-4">Estrategia de Concentración de Impacto 80/20</h3>
                  </div>
               </div>
-              {/* Resto del contenido del reporte permanece igual */}
             </div>
           </div>
         </main>
