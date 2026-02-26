@@ -2,14 +2,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Versión 2.3.6 - Estabilización Crítica para Walmart Operational Control
-    // Esta versión prioriza la visibilidad del universo de 11,150 registros
+    // Versión 2.3.7 - Estabilización de Escritura para Agregados y Auditoría
     
     // 1. Acceso a Órdenes (Colección Principal)
     match /orders/{id} {
-      // Permitir lectura total a usuarios autenticados (incluyendo custom tokens sin email)
       allow read: if request.auth != null;
-      // Permitir escritura controlada para procesos de IA y auditoría
       allow write: if request.auth != null;
     }
     
@@ -17,7 +14,11 @@ service cloud.firestore {
     match /taxonomy_disciplines/{id} { allow read: if request.auth != null; }
     match /taxonomy_causes/{id} { allow read: if request.auth != null; }
     match /classification_overrides/{id} { allow read, write: if request.auth != null; }
-    match /aggregates/{document=**} { allow read: if request.auth != null; }
+    
+    // PERMISO DE ESCRITURA EN AGREGADOS PARA SINCRONIZACIÓN DE UNIVERSO
+    match /aggregates/{document=**} { 
+      allow read, write: if request.auth != null; 
+    }
 
     // 3. Procesos Operativos y Auditoría
     match /audits/{id} { allow read, write: if request.auth != null; }

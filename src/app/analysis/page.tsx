@@ -100,11 +100,11 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Leer Agregados Globales (Single Source of Truth)
+  // 1. Leer Agregados Globales (SSOT)
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // 4. Query Paginada con Cursor
+  // 2. Query Paginada con Cursor
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
@@ -116,7 +116,6 @@ export default function AnalysisPage() {
     } else if (disciplineFilter === 'unclassified') {
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
-      // Filtrar por disciplina específica
       baseQuery = query(q, where('disciplina_normalizada', '==', disciplineFilter), orderBy('projectId', 'asc'), limit(pageSize));
     }
 
@@ -130,14 +129,15 @@ export default function AnalysisPage() {
 
   const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
 
-  // 2. Normalización de Disciplinas para el Filtro
+  // 3. Normalización Dinámica de Disciplinas para el Filtro
   const groupedDisciplines = useMemo(() => {
     const groups: Record<string, { count: number, impact: number, rawNames: string[] }> = {};
     
-    // Cargar desde agregados globales
+    // Cargar desde agregados
     if (globalAgg?.disciplines) {
       Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
         let normalized = String(name).trim().toUpperCase();
+        // Consolidación simple de plurales
         if (normalized.endsWith('S') && normalized.length > 4) {
           normalized = normalized.substring(0, normalized.length - 1);
         }
@@ -151,11 +151,13 @@ export default function AnalysisPage() {
       });
     }
 
-    // Autodescubrimiento desde los registros cargados actualmente
+    // Autodescubrimiento desde los registros cargados actualmente para asegurar visibilidad inmediata
     orders?.forEach(o => {
       if (o.disciplina_normalizada) {
         let name = o.disciplina_normalizada;
         let normalized = String(name).trim().toUpperCase();
+        if (normalized.endsWith('S') && normalized.length > 4) normalized = normalized.substring(0, normalized.length - 1);
+        
         if (!groups[normalized]) {
           groups[normalized] = { count: 0, impact: 0, rawNames: [name] };
         } else if (!groups[normalized].rawNames.includes(name)) {
@@ -167,26 +169,29 @@ export default function AnalysisPage() {
     return groups;
   }, [globalAgg, orders]);
 
-  // 3. Actualizar KPIs Dinámicos basados en la selección
+  // 4. Actualizar KPIs Dinámicos basados en la selección (Ajustado para corregir ceros)
   useEffect(() => {
     const totalInDb = globalAgg?.totalOrders || 0;
     const totalImpactInDb = globalAgg?.totalImpact || 0;
     const totalWithDataInDb = globalAgg?.totalImpact ? Object.values(globalAgg.disciplines || {}).reduce((acc: number, g: any) => acc + (g.count || 0), 0) : 0;
 
+    // Calcular impacto local si el global no está disponible
+    const localImpact = orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0;
+
     if (disciplineFilter === 'all') {
       setStats({
         total: totalInDb || (orders?.length || 0),
-        withData: totalWithDataInDb,
+        withData: totalWithDataInDb || (orders?.filter(o => !!o.disciplina_normalizada).length || 0),
         pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: totalImpactInDb
+        totalImpact: totalImpactInDb || localImpact
       });
     } else if (disciplineFilter === 'unclassified') {
-      const pendingCount = Math.max(0, totalInDb - totalWithDataInDb);
+      const pendingCount = totalInDb > 0 ? Math.max(0, totalInDb - totalWithDataInDb) : (orders?.length || 0);
       setStats({
-        total: pendingCount || (orders?.length || 0),
+        total: pendingCount,
         withData: 0,
-        pending: pendingCount || (orders?.length || 0),
-        totalImpact: 0 
+        pending: pendingCount,
+        totalImpact: localImpact // Usar local sum para registros pendientes
       });
     } else {
       const group = groupedDisciplines[disciplineFilter];
@@ -194,7 +199,7 @@ export default function AnalysisPage() {
         total: group?.count || (orders?.length || 0),
         withData: group?.count || (orders?.length || 0),
         pending: 0,
-        totalImpact: group?.impact || orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0
+        totalImpact: group?.impact || localImpact
       });
     }
   }, [disciplineFilter, globalAgg, groupedDisciplines, orders]);
@@ -239,7 +244,6 @@ export default function AnalysisPage() {
         lastUpdate: new Date().toISOString()
       });
     } catch {
-      // Si el campo o documento no existe, inicializarlo con setDoc
       await setDoc(ref, {
         disciplines: {
           [discName]: { count: 1, impact: impact }
@@ -328,16 +332,17 @@ export default function AnalysisPage() {
       const snapshot = await getCountFromServer(colRef);
       const total = snapshot.data().count;
       
-      // Corregido: Usar setDoc con merge para crear el documento si no existe
+      // Sincronización robusta con setDoc para evitar errores de permiso de actualización inicial
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: total,
         lastUpdate: new Date().toISOString()
       }, { merge: true });
       
       toast({ title: "Universo Sincronizado", description: `Total: ${total.toLocaleString()} registros.` });
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error syncing universe:", e);
-      toast({ variant: "destructive", title: "Error al sincronizar" });
+      const msg = e.code === 'permission-denied' ? "Permisos insuficientes en Firestore." : "Error al sincronizar.";
+      toast({ variant: "destructive", title: "Fallo de Sincronización", description: msg });
     } finally {
       setIsRefreshingStats(false);
     }
@@ -378,7 +383,7 @@ export default function AnalysisPage() {
                     .sort((a, b) => b[1].count - a[1].count)
                     .map(([name, group]) => (
                     <SelectItem key={name} value={name}>
-                      {name} ({group.count || 'NUEVA'})
+                      {name} ({group.count || 'DETEC.'})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -450,7 +455,7 @@ export default function AnalysisPage() {
                 <DollarSign className="h-4 w-4 text-accent opacity-40" />
               </div>
               <h4 className="text-2xl font-headline font-bold text-white">${formatAmount(stats.totalImpact)}</h4>
-              <p className="text-[9px] text-slate-500 mt-1 uppercase font-bold">Consolidado en MXN</p>
+              <p className="text-[9px] text-slate-500 mt-2 uppercase font-bold">Consolidado en MXN</p>
             </Card>
 
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
