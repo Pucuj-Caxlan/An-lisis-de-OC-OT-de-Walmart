@@ -20,7 +20,9 @@ import {
   CheckCircle2,
   Clock,
   Zap,
-  Target
+  Target,
+  DollarSign,
+  Layers
 } from 'lucide-react';
 import {
   Table,
@@ -84,7 +86,7 @@ export default function AnalysisPage() {
   const [pageSize, setPageSize] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageHistory, setPageHistory] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
-  const [stats, setStats] = useState({ total: 0, withData: 0, pending: 0 });
+  const [stats, setStats] = useState({ total: 0, withData: 0, pending: 0, totalImpact: 0 });
   const [disciplineFilter, setDisciplineFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
@@ -92,73 +94,78 @@ export default function AnalysisPage() {
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
   const [bulkAiProgress, setBulkAiProgress] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
-  const [discoveredDisciplines, setDiscoveredDisciplines] = useState<string[]>([]);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Leer Agregados Globales (Single Source of Truth para Filtros)
+  // 1. Leer Agregados Globales (Single Source of Truth)
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // 2. Fallback de descubrimiento de disciplinas si el aggregate no existe
-  useEffect(() => {
-    if (!db || !isAuthReady) return;
-    const discover = async () => {
-      if (globalAgg?.disciplines) return;
-      try {
-        const q = query(collection(db, 'orders'), where('disciplina_normalizada', '!=', ''), limit(500));
-        const snap = await getDocs(q);
-        const unique = new Set<string>();
-        snap.forEach(d => {
-          const disc = d.data().disciplina_normalizada;
-          if (disc) unique.add(disc);
-        });
-        setDiscoveredDisciplines(Array.from(unique).sort());
-      } catch (e) {
-        console.warn("Discovery failed:", e);
+  // 2. Lógica de Agrupación de Disciplinas (Eliminar duplicados por singular/plural)
+  const groupedDisciplines = useMemo(() => {
+    if (!globalAgg?.disciplines) return {};
+    const groups: Record<string, { count: number, impact: number, rawNames: string[] }> = {};
+    
+    Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
+      let normalized = name.trim().toUpperCase();
+      // Normalización básica: quitar 'S' final si es plural común y mapear variaciones
+      if (normalized.endsWith('S') && normalized.length > 4) {
+        normalized = normalized.substring(0, normalized.length - 1);
       }
-    };
-    discover();
-  }, [db, isAuthReady, globalAgg]);
-
-  const disciplineOptions = useMemo(() => {
-    if (globalAgg?.disciplines) {
-      return Object.entries(globalAgg.disciplines)
-        .map(([name, s]: any) => ({ name, count: s.count || 0 }))
-        .sort((a, b) => b.count - a.count);
-    }
-    return discoveredDisciplines.map(d => ({ name: d, count: 0 }));
-  }, [globalAgg, discoveredDisciplines]);
-
-  // 3. Estadísticas de Avance Real
-  const fetchStats = async () => {
-    if (!db || !isAuthReady) return;
-    try {
-      const coll = collection(db, 'orders');
-      const [totalSnap, withDataSnap] = await Promise.all([
-        getCountFromServer(query(coll)),
-        getCountFromServer(query(coll, where('disciplina_normalizada', '!=', '')))
-      ]);
-
-      const total = totalSnap.data().count;
-      const withData = withDataSnap.data().count;
+      if (normalized === 'INGENIERIA') normalized = 'INGENIERÍA';
+      if (normalized === 'ELECTRICA') normalized = 'ELÉCTRICA';
+      if (normalized === 'MECANICA') normalized = 'MECÁNICA';
       
-      setStats({
-        total: total,
-        withData: withData,
-        pending: Math.max(0, total - withData)
-      });
-    } catch (e) {
-      console.error("Stats Error:", e);
-    }
-  };
+      if (!groups[normalized]) {
+        groups[normalized] = { count: 0, impact: 0, rawNames: [] };
+      }
+      groups[normalized].count += s.count || 0;
+      groups[normalized].impact += s.impact || 0;
+      groups[normalized].rawNames.push(name);
+    });
+    
+    return groups;
+  }, [globalAgg]);
 
+  // 3. Actualizar KPIs de la Consola basados en el Filtro
   useEffect(() => {
-    fetchStats();
-  }, [db, isAuthReady, globalAgg]);
+    if (!globalAgg) return;
 
-  // 4. Query Paginada con Filtros Robustos
+    if (disciplineFilter === 'all') {
+      setStats({
+        total: globalAgg.totalOrders || 0,
+        withData: Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0),
+        pending: Math.max(0, (globalAgg.totalOrders || 0) - Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0)),
+        totalImpact: globalAgg.totalImpact || 0
+      });
+    } else if (disciplineFilter === 'unclassified') {
+      const fetchUnclassified = async () => {
+        if (!db) return;
+        const q = query(collection(db, 'orders'), where('classification_status', '==', 'pending'));
+        const snap = await getCountFromServer(q);
+        setStats({
+          total: snap.data().count,
+          withData: 0,
+          pending: snap.data().count,
+          totalImpact: 0 // El impacto de pendientes se calcula bajo demanda si es necesario
+        });
+      };
+      fetchUnclassified();
+    } else {
+      const group = groupedDisciplines[disciplineFilter];
+      if (group) {
+        setStats({
+          total: group.count,
+          withData: group.count,
+          pending: 0,
+          totalImpact: group.impact
+        });
+      }
+    }
+  }, [disciplineFilter, globalAgg, groupedDisciplines, db]);
+
+  // 4. Query Paginada con Filtros Robustos (Usando el grupo de nombres crudos)
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
@@ -168,20 +175,12 @@ export default function AnalysisPage() {
     if (disciplineFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else if (disciplineFilter === 'unclassified') {
-      // Usar classification_status como proxy confiable para "Sin Clasificar"
-      baseQuery = query(
-        q, 
-        where('classification_status', '==', 'pending'), 
-        orderBy('projectId', 'asc'), 
-        limit(pageSize)
-      );
+      baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
-      baseQuery = query(
-        q, 
-        where('disciplina_normalizada', '==', disciplineFilter), 
-        orderBy('projectId', 'asc'), 
-        limit(pageSize)
-      );
+      const group = groupedDisciplines[disciplineFilter];
+      // Si el grupo tiene pocos nombres, podemos usar 'in'. Si no, usamos el primero del grupo como proxy
+      // Para este volumen, usamos el filtro exacto de disciplina_normalizada si está normalizado
+      baseQuery = query(q, where('disciplina_normalizada', 'in', group.rawNames.slice(0, 30)), orderBy('projectId', 'asc'), limit(pageSize));
     }
 
     const currentCursor = pageHistory[currentPage - 1];
@@ -190,7 +189,7 @@ export default function AnalysisPage() {
     }
 
     return baseQuery;
-  }, [db, isAuthReady, pageSize, currentPage, disciplineFilter, pageHistory]);
+  }, [db, isAuthReady, pageSize, currentPage, disciplineFilter, pageHistory, groupedDisciplines]);
 
   const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
 
@@ -236,12 +235,11 @@ export default function AnalysisPage() {
         causa_raiz_normalizada: result.causa_raiz_normalizada,
         subcausa_normalizada: result.subcausa_normalizada,
         classification_status: 'auto',
-        semanticAnalysis: result, // Guardar objeto completo para score
+        semanticAnalysis: result,
         processedAt: new Date().toISOString()
       });
 
       toast({ title: "Registro Clasificado", description: result.disciplina_normalizada });
-      fetchStats();
     } catch (e) {
       toast({ variant: "destructive", title: "Error IA", description: "Fallo en motor Gemini." });
     } finally {
@@ -288,7 +286,6 @@ export default function AnalysisPage() {
     setIsBulkProcessing(false);
     setSelectedIds([]);
     setTimeout(() => setShowBulkAiDialog(false), 2000);
-    fetchStats();
   };
 
   const handleDeleteRecord = async (id: string) => {
@@ -296,7 +293,6 @@ export default function AnalysisPage() {
     const orderRef = doc(db, 'orders', id);
     deleteDocumentNonBlocking(orderRef);
     toast({ title: "Registro eliminado" });
-    fetchStats();
   };
 
   const progressPercentage = stats.total > 0 ? Math.round((stats.withData / stats.total) * 100) : 0;
@@ -316,16 +312,18 @@ export default function AnalysisPage() {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
               <Select value={disciplineFilter} onValueChange={(v) => { setDisciplineFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
-                <SelectTrigger className="h-8 w-64 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
+                <SelectTrigger className="h-8 w-72 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
                   <Filter className="h-3 w-3 mr-2 text-primary" />
                   <SelectValue placeholder="Filtrar por Disciplina" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">TODAS LAS DISCIPLINAS</SelectItem>
+                  <SelectItem value="all">TODAS LAS DISCIPLINAS ({globalAgg?.totalOrders || 0})</SelectItem>
                   <SelectItem value="unclassified" className="text-rose-600 font-bold">SIN CLASIFICAR</SelectItem>
-                  {disciplineOptions.map(d => (
-                    <SelectItem key={d.name} value={d.name}>
-                      {d.name.toUpperCase()} {d.count > 0 ? `(${d.count})` : ''}
+                  {Object.entries(groupedDisciplines)
+                    .sort((a, b) => b[1].count - a[1].count)
+                    .map(([name, group]) => (
+                    <SelectItem key={name} value={name}>
+                      {name} ({group.count})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -362,7 +360,7 @@ export default function AnalysisPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase">Universo Walmart</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Universo {disciplineFilter !== 'all' ? disciplineFilter : 'Walmart'}</p>
                 <Database className="h-4 w-4 text-primary opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-slate-800">{stats.total.toLocaleString()}</h4>
@@ -371,33 +369,33 @@ export default function AnalysisPage() {
             
             <Card className="p-5 border-none shadow-sm bg-white border-l-4 border-l-emerald-500 flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-emerald-600 uppercase">Con Disciplina & Causa</p>
+                <p className="text-[10px] font-black text-emerald-600 uppercase">Integridad Técnica</p>
                 <CheckCircle2 className="h-4 w-4 text-emerald-500 opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-emerald-600">{stats.withData.toLocaleString()}</h4>
-              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Información Técnica Completa</p>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Con Disciplina & Causa</p>
             </Card>
 
-            <Card className="p-5 border-none shadow-sm bg-white border-l-4 border-l-amber-500 flex flex-col justify-between">
+            <Card className="p-5 border-none shadow-sm bg-slate-900 text-white border-l-4 border-l-accent flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-amber-600 uppercase">Sin Clasificar</p>
-                <Clock className="h-4 w-4 text-amber-500 opacity-20" />
+                <p className="text-[10px] font-black text-accent uppercase">Impacto Neto Total</p>
+                <DollarSign className="h-4 w-4 text-accent opacity-40" />
               </div>
-              <h4 className="text-3xl font-headline font-bold text-amber-600">{stats.pending.toLocaleString()}</h4>
-              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Pendientes de IA / Auditoría</p>
+              <h4 className="text-2xl font-headline font-bold text-white">${formatAmount(stats.totalImpact)}</h4>
+              <p className="text-[9px] text-slate-500 mt-1 uppercase font-bold">Consolidado en MXN</p>
             </Card>
 
-            <Card className="p-5 border-none shadow-sm bg-slate-900 text-white flex flex-col justify-between">
+            <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Integridad Datos</p>
-                <Zap className="h-4 w-4 text-accent" />
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Avance Clasificación</p>
+                <Zap className="h-4 w-4 text-primary" />
               </div>
               <div className="space-y-2">
                 <div className="flex items-end justify-between">
-                  <h4 className="text-3xl font-headline font-bold text-accent">{progressPercentage}%</h4>
-                  <span className="text-[9px] text-slate-500 font-black mb-1 uppercase">Avance</span>
+                  <h4 className="text-3xl font-headline font-bold text-primary">{progressPercentage}%</h4>
+                  <span className="text-[9px] text-slate-400 font-black mb-1 uppercase">Sincronizado</span>
                 </div>
-                <Progress value={progressPercentage} className="h-1.5 bg-slate-800" />
+                <Progress value={progressPercentage} className="h-1.5 bg-slate-100" />
               </div>
             </Card>
           </div>
@@ -414,8 +412,8 @@ export default function AnalysisPage() {
                   </TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Estatus Datos</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase">Disciplina & Causa Normalizada</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-right">Monto</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase">Disciplina & Trazabilidad</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-right">Impacto Neto</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-center w-[120px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -470,7 +468,12 @@ export default function AnalysisPage() {
                       <TableCell>
                         <div className="flex flex-col">
                            <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
-                           <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight truncate max-w-[200px]">{order.causa_raiz_normalizada || "Sin definir"}</span>
+                           <div className="flex items-center gap-1.5 mt-0.5">
+                             <Layers className="h-2.5 w-2.5 text-slate-300" />
+                             <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight truncate max-w-[200px]">
+                               {order.subcausa_normalizada || order.causa_raiz_normalizada || "Sin sub-disciplina"}
+                             </span>
+                           </div>
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
@@ -490,7 +493,7 @@ export default function AnalysisPage() {
                               <AlertDialogHeader>
                                 <AlertDialogTitle className="font-headline uppercase text-slate-900 text-sm">Eliminar Registro</AlertDialogTitle>
                                 <AlertDialogDescription className="text-xs text-slate-500">
-                                  ¿Confirmas la eliminación de la orden {order.projectId}?
+                                  ¿Confirmas la eliminación de la orden {order.projectId}? Esta acción no se puede deshacer.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
