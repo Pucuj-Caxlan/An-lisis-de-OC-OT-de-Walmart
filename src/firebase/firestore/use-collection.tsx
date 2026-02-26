@@ -34,7 +34,7 @@ export interface InternalQuery extends Query<DocumentData> {
 
 /**
  * React hook to subscribe to a Firestore collection or query in real-time.
- * Gated by isAuthReady and user presence to prevent race conditions.
+ * Improved error handling to differentiate permission issues from logic errors.
  */
 export function useCollection<T = any>(
     memoizedTargetRefOrQuery: ((CollectionReference<DocumentData> | Query<DocumentData>) & {__memo?: boolean})  | null | undefined,
@@ -46,7 +46,6 @@ export function useCollection<T = any>(
   const [snapshot, setSnapshot] = useState<QuerySnapshot<DocumentData> | null>(null);
 
   useEffect(() => {
-    // Gate Crítica: No intentar suscripción si Auth no está listo o el usuario es nulo
     if (!isAuthReady || !user || !memoizedTargetRefOrQuery) {
       setData(null);
       setIsLoading(false);
@@ -74,9 +73,9 @@ export function useCollection<T = any>(
         const path: string =
           memoizedTargetRefOrQuery.type === 'collection'
             ? (memoizedTargetRefOrQuery as CollectionReference).path
-            : (memoizedTargetRefOrQuery as unknown as InternalQuery)._query.path.canonicalString()
+            : (memoizedTargetRefOrQuery as unknown as InternalQuery)._query.path.canonicalString();
 
-        // Diagnóstico preciso del error
+        // Log exhaustivo para diagnóstico forense
         console.error(`[useCollection] Error Code: ${err.code} | Path: ${path}`, err);
 
         if (err.code === 'permission-denied') {
@@ -87,7 +86,7 @@ export function useCollection<T = any>(
           setError(contextualError);
           errorEmitter.emit('permission-error', contextualError);
         } else {
-          // Si no es permiso, propagamos el error real (ej. limit-exceeded, invalid-argument)
+          // Propagar otros errores (ej. invalid-argument por límites excedidos)
           setError(err);
         }
         

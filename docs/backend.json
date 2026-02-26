@@ -25,17 +25,17 @@
         "montoAditiva": { "type": "number" },
         "impactoNeto": { "type": "number" },
         "areaSolicitante": { "type": "string" },
-        "generadorDesviacion": { "type": "string", "description": "Generador de la desviación" },
+        "generadorDesviacion": { "type": "string" },
         "areaEjerceRecursoDeductiva": { "type": "string" },
         "areaEjerceRecursoAditiva": { "type": "string" },
         "estatus": { "type": "string" },
         "fechaSolicitud": { "type": "string", "format": "date-time" },
         "fechaAprobacionGerente": { "type": "string", "format": "date-time" },
-        "fechaPptoProyectista": { "type": "string", "format": "date-time", "description": "Fecha ppto Proyectista, Construcciones, Compras, y/o LP" },
+        "fechaPptoProyectista": { "type": "string", "format": "date-time" },
         "noRechazo": { "type": "string" },
         "motivoRechazo": { "type": "string" },
         "fechaRetraso": { "type": "string", "format": "date-time" },
-        "fechaAprobacionLider": { "type": "string", "format": "date-time", "description": "Fecha de Aprobacion Líder de Squad" },
+        "fechaAprobacionLider": { "type": "string", "format": "date-time" },
         "importeProy": { "type": "number" },
         "importeObra": { "type": "number" },
         "importeCompras": { "type": "number" },
@@ -43,54 +43,21 @@
         "isSigned": { "type": "boolean" },
         "disciplina_normalizada": { "type": "string" },
         "causa_raiz_normalizada": { "type": "string" },
-        "subcausa_normalizada": { "type": "string" },
-        "confidence_score": { "type": "number" },
-        "structural_quality_score": { "type": "number" },
-        "reliability_level": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] },
-        "classification_status": { "type": "string", "enum": ["pending", "auto", "reviewed", "overridden"] },
-        "semanticAnalysis": { "type": "object" },
+        "classification_status": { "type": "string", "enum": ["pending", "auto", "reviewed"] },
         "processedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["projectId", "impactoNeto"]
     },
-    "WordCloudSnapshot": {
-      "title": "Word Cloud Snapshot",
+    "GlobalAggregate": {
+      "title": "Global Aggregate",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "generatedAt": { "type": "string", "format": "date-time" },
-        "filters": { "type": "object" },
-        "concepts": { "type": "array" },
-        "executiveDiagnosis": { "type": "string" },
-        "coreProblem": { "type": "string" },
-        "concentrationPercentage": { "type": "number" }
-      }
-    },
-    "DeletionJob": {
-      "title": "Deletion Job",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "status": { "type": "string", "enum": ["queued", "running", "done", "failed"] },
-        "mode": { "type": "string", "enum": ["single", "bulk", "all"] },
-        "progress": { "type": "number" },
-        "total": { "type": "number" },
-        "deletedCount": { "type": "number" },
-        "userId": { "type": "string" },
-        "startedAt": { "type": "string" },
-        "completedAt": { "type": "string" }
-      }
-    },
-    "AuditLog": {
-      "title": "Audit Log",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "action": { "type": "string" },
-        "userId": { "type": "string" },
-        "userEmail": { "type": "string" },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "details": { "type": "object" }
+        "totalOrders": { "type": "number" },
+        "totalImpact": { "type": "number" },
+        "lastUpdate": { "type": "string", "format": "date-time" },
+        "disciplines": { "type": "object" },
+        "formats": { "type": "object" }
       }
     }
   },
@@ -98,10 +65,8 @@
     "providers": ["password", "anonymous"]
   },
   "firestore": {
-    "/orders/{orderId}": { "schema": "Order", "description": "Registros de OC/OT con trazabilidad de 32 campos" },
-    "/deletion_jobs/{jobId}": { "schema": "DeletionJob", "description": "Tracking de procesos de borrado masivo" },
-    "/audit_logs/{logId}": { "schema": "AuditLog", "description": "Logs de auditoría institucional" },
-    "/audits/{auditId}": { "schema": "AuditLog", "description": "Historial de escaneos forenses" },
-    "/word_cloud_snapshots/{snapshotId}": { "schema": "WordCloudSnapshot", "description": "Snapshots de análisis semántico 80/20" }
+    "/orders/{orderId}": { "schema": "Order", "description": "Universo de registros OC/OT" },
+    "/aggregates/{aggId}": { "schema": "GlobalAggregate", "description": "Metadatos materializados para dashboards" },
+    "/audit_logs/{logId}": { "schema": "AuditLog", "description": "Logs de auditoría" }
   }
 }

@@ -4,31 +4,23 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { 
   Search, 
   RefreshCcw,
   Sparkles,
   ShieldAlert,
   Filter,
-  FileSearch,
-  Trash2,
   Database,
-  BrainCircuit,
-  History,
-  TrendingUp,
-  ShieldCheck,
-  CheckCircle2,
   LayoutGrid,
   X,
-  Zap,
   ChevronLeft,
   ChevronRight,
   Clock,
-  Plus
+  CheckCircle2,
+  ListOrdered
 } from 'lucide-react';
 import {
   Table,
@@ -41,7 +33,19 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, query, limit, doc, writeBatch, setDoc, orderBy, getCountFromServer, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { 
+  collection, 
+  query, 
+  limit, 
+  doc, 
+  writeBatch, 
+  orderBy, 
+  getCountFromServer, 
+  startAfter, 
+  QueryDocumentSnapshot, 
+  DocumentData,
+  where
+} from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
   Dialog,
@@ -49,10 +53,8 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
-import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -63,8 +65,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 
-const INITIAL_PAGE_SIZE = 500;
-const AI_BATCH_SIZE = 5; 
+const AI_BATCH_SIZE = 5;
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -75,12 +76,14 @@ export default function AnalysisPage() {
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   
-  const [currentPage, setCurrentPage] = useState(1);
+  // Paginación Real
   const [pageSize, setPageSize] = useState(100);
-  const [totalInDb, setTotalInDb] = useState<number | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [pageHistory, setPageHistory] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
+  const [totalGlobal, setTotalGlobal] = useState<number>(0);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [isAuditing, setIsAuditing] = useState(false);
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
   const [isBulkAiProcessing, setIsBulkAiProcessing] = useState(false);
   const [bulkAiProgress, setBulkAiProgress] = useState(0);
@@ -88,103 +91,71 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
+  // Fetch Total Global real-time
   useEffect(() => {
     if (!db || !user?.uid) return;
-    const fetchTotal = async () => {
+    const fetchCount = async () => {
       try {
-        const coll = collection(db, 'orders');
-        const snapshot = await getCountFromServer(coll);
-        setTotalInDb(snapshot.data().count);
+        const q = query(collection(db, 'orders'));
+        const snapshot = await getCountFromServer(q);
+        setTotalGlobal(snapshot.data().count);
       } catch (e) {
-        console.warn("Fallo al obtener conteo total:", e);
+        console.error("Count Error:", e);
       }
     };
-    fetchTotal();
+    fetchCount();
   }, [db, user?.uid]);
 
-  // Implementación de Paginación Server-Side compatible con Structured Query Limits
+  // Query Paginada con cursores
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !user?.uid) return null;
-    return query(
-      collection(db, 'orders'), 
+    
+    let q = query(
+      collection(db, 'orders'),
       orderBy('projectId', 'desc'),
-      limit(10000) // Límite máximo permitido por Firestore structured queries
+      limit(pageSize)
     );
-  }, [db, user?.uid]);
 
-  const { data: orders, isLoading, error } = useCollection(ordersQuery);
-
-  const classificationCounts = useMemo(() => {
-    if (!orders) return { classified: 0, pending: 0, needs_review: 0, low_confidence: 0 };
-    return {
-      classified: orders.filter(o => (o.classification_status === 'auto' || o.classification_status === 'reviewed')).length,
-      pending: orders.filter(o => !o.classification_status || o.classification_status === 'pending').length,
-      needs_review: orders.filter(o => o.needs_review === true).length,
-      low_confidence: orders.filter(o => o.confidence_score && o.confidence_score < 0.6).length,
-    };
-  }, [orders]);
-
-  const stats = useMemo(() => {
-    const total = totalInDb || orders?.length || 0;
-    const classified = classificationCounts.classified;
-    const coverage = total > 0 ? (classified / total) * 100 : 0;
-    return { total, audited: classified, coverage };
-  }, [totalInDb, classificationCounts, orders]);
-
-  const formatAmount = (amount: number) => {
-    if (!mounted) return "0.00";
-    return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-  };
-
-  const filteredOrdersFull = useMemo(() => {
-    if (!orders) return [];
-    return orders.filter(o => {
-      const searchStr = searchTerm.toLowerCase();
-      const pid = String(o.projectId || "").toLowerCase();
-      const projectName = String(o.projectName || "").toLowerCase();
-      const matchesSearch = pid.includes(searchStr) || projectName.includes(searchStr);
-      
-      const isClassified = (o.classification_status === 'auto' || o.classification_status === 'reviewed');
-      const isPending = !o.classification_status || o.classification_status === 'pending';
-      
-      const matchesAi = aiFilter === 'all' || 
-        (aiFilter === 'classified' && isClassified) ||
-        (aiFilter === 'not_classified' && isPending) ||
-        (aiFilter === 'needs_review' && o.needs_review === true) ||
-        (aiFilter === 'low_confidence' && o.confidence_score < 0.6);
-
-      return matchesSearch && matchesAi;
-    });
-  }, [orders, searchTerm, aiFilter]);
-
-  const pagedOrders = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredOrdersFull.slice(start, start + pageSize);
-  }, [filteredOrdersFull, currentPage, pageSize]);
-
-  const toggleSelectAll = () => {
-    if (selectedIds.length === pagedOrders.length) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(pagedOrders.map(o => o.id));
+    // Aplicar filtros de servidor si es posible (solo estatus para optimizar)
+    if (aiFilter === 'not_classified') {
+      q = query(q, where('classification_status', '==', 'pending'));
+    } else if (aiFilter === 'classified') {
+      q = query(q, where('classification_status', '==', 'auto'));
     }
-  };
 
-  const toggleSelectOne = (id: string) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-  };
+    const currentCursor = pageHistory[currentPage - 1];
+    if (currentCursor) {
+      q = query(q, startAfter(currentCursor));
+    }
+
+    return q;
+  }, [db, user?.uid, pageSize, currentPage, aiFilter, pageHistory]);
+
+  const { data: orders, isLoading, snapshot, error } = useCollection(ordersQuery);
 
   const handleNextPage = () => {
-    if (currentPage * pageSize < filteredOrdersFull.length) {
+    if (snapshot && snapshot.docs.length === pageSize) {
+      const last = snapshot.docs[snapshot.docs.length - 1];
+      setPageHistory(prev => {
+        const newHistory = [...prev];
+        newHistory[currentPage] = last;
+        return newHistory;
+      });
       setCurrentPage(prev => prev + 1);
       setSelectedIds([]);
     }
   };
 
   const handlePrevPage = () => {
-    if (currentPage === 1) return;
-    setCurrentPage(prev => prev - 1);
-    setSelectedIds([]);
+    if (currentPage > 1) {
+      setCurrentPage(prev => prev - 1);
+      setSelectedIds([]);
+    }
+  };
+
+  const formatAmount = (amount: number) => {
+    if (!mounted) return "0.00";
+    return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
   };
 
   const handleSingleSemanticAnalysis = async (order: any) => {
@@ -201,60 +172,20 @@ export default function AnalysisPage() {
         disciplina_normalizada: result.disciplina_normalizada,
         causa_raiz_normalizada: result.causa_raiz_normalizada,
         subcausa_normalizada: result.subcausa_normalizada,
-        semanticAnalysis: result,
-        confidence_score: result.confidence_score,
-        needs_review: result.needs_review,
         classification_status: 'auto',
-        classified_at: new Date().toISOString(),
-        classified_by: user.uid
+        processedAt: new Date().toISOString()
       });
 
-      toast({ 
-        title: "Proceso Ejecutado", 
-        description: `Registro clasificado como: ${result.disciplina_normalizada}` 
-      });
-    } catch (e: any) {
-      toast({ 
-        variant: "destructive", 
-        title: "Fallo en IA", 
-        description: "Error de conexión con el motor Gemini." 
-      });
+      toast({ title: "Registro Procesado", description: result.disciplina_normalizada });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Error IA", description: "Fallo en motor Gemini." });
     } finally {
       setIsAnalyzing(null);
     }
   };
 
-  const handleBulkAudit = async () => {
-    if (!db || !user || selectedIds.length === 0) return;
-    setIsAuditing(true);
-    try {
-      const batch = writeBatch(db);
-      selectedIds.forEach(id => {
-        const ref = doc(db, 'orders', id);
-        batch.update(ref, {
-          classification_status: 'reviewed',
-          needs_review: false,
-          auditedBy: user.uid,
-          auditedAt: new Date().toISOString()
-        });
-      });
-      await batch.commit();
-      
-      toast({ title: "Auditoría Masiva Completada", description: `${selectedIds.length} registros validados.` });
-      setSelectedIds([]);
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Error en Auditoría", description: e.message });
-    } finally {
-      setIsAuditing(false);
-    }
-  };
-
   const handleBulkAiAnalysis = async () => {
-    if (selectedIds.length < 1) {
-      toast({ variant: "destructive", title: "Selección insuficiente", description: "Seleccione registros pendientes." });
-      return;
-    }
-
+    if (selectedIds.length === 0) return;
     setShowBulkAiDialog(true);
     setIsBulkAiProcessing(true);
     setBulkAiProgress(0);
@@ -272,31 +203,24 @@ export default function AnalysisPage() {
               descripcion: String(order.descripcion || "").substring(0, 250),
               monto: order.impactoNeto
             });
-            
             const ref = doc(db!, 'orders', order.id);
             batch.update(ref, {
               disciplina_normalizada: result.disciplina_normalizada,
               causa_raiz_normalizada: result.causa_raiz_normalizada,
-              subcausa_normalizada: result.subcausa_normalizada,
-              semanticAnalysis: result,
-              confidence_score: result.confidence_score,
-              needs_review: result.needs_review,
               classification_status: 'auto',
-              classified_at: new Date().toISOString(),
-              classified_by: user?.uid
+              processedAt: new Date().toISOString()
             });
           } catch (e) {}
         }
-
         await batch.commit();
         setProcessedCount(prev => prev + chunk.length);
         setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
       }
-
-      toast({ title: "Procesamiento Completo", description: "El universo de datos ha sido actualizado." });
+      toast({ title: "Lote Procesado con Éxito" });
       setShowBulkAiDialog(false);
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Error de Lote", description: "Fallo parcial en la clasificación." });
+      setSelectedIds([]);
+    } catch (e) {
+      toast({ variant: "destructive", title: "Error de Lote" });
     } finally {
       setIsBulkAiProcessing(false);
     }
@@ -311,79 +235,68 @@ export default function AnalysisPage() {
             <SidebarTrigger />
             <div className="flex items-center gap-2">
               <Database className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Auditoría de Universo Completo</h1>
+              <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Universo de Registros</h1>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3 bg-slate-100 p-1.5 rounded-xl border shadow-inner">
-              <div className="flex items-center gap-2 px-3">
-                <Filter className="h-3.5 w-3.5 text-slate-400" />
-                <span className="text-[10px] font-black text-slate-500 uppercase">Estado IA:</span>
-              </div>
-              <Select value={aiFilter} onValueChange={(v) => { setAiFilter(v); setCurrentPage(1); }}>
-                <SelectTrigger className="h-8 min-w-[240px] bg-white border-none shadow-sm text-[10px] font-bold uppercase">
-                  <SelectValue placeholder="Filtrar por estatus..." />
+            <div className="bg-slate-100 p-1 rounded-xl border flex items-center gap-2">
+              <span className="text-[10px] font-black text-slate-500 uppercase px-2">Bloque:</span>
+              <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(parseInt(v)); setCurrentPage(1); setPageHistory([null]); }}>
+                <SelectTrigger className="h-8 w-24 bg-white border-none shadow-sm text-[10px] font-bold">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los registros ({totalInDb || orders?.length || 0})</SelectItem>
-                  <SelectItem value="classified" className="text-emerald-600">Procesados IA ({classificationCounts.classified})</SelectItem>
-                  <SelectItem value="not_classified" className="text-amber-600">Pendientes de Clasificación ({classificationCounts.pending})</SelectItem>
-                  <SelectItem value="needs_review" className="text-rose-600">Requieren Revisión ({classificationCounts.needs_review})</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                  <SelectItem value="300">300</SelectItem>
+                  <SelectItem value="500">500</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Buscar PID..."
-                className="pl-9 w-[200px] h-9 bg-slate-50 border-none shadow-sm"
-                value={searchTerm}
-                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-              />
+            <div className="bg-slate-100 p-1 rounded-xl border flex items-center gap-2">
+              <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
+              <Select value={aiFilter} onValueChange={(v) => { setAiFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
+                <SelectTrigger className="h-8 min-w-[180px] bg-white border-none shadow-sm text-[10px] font-bold uppercase">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los registros</SelectItem>
+                  <SelectItem value="classified">Procesados IA</SelectItem>
+                  <SelectItem value="not_classified">Pendientes</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </header>
 
         <main className="p-6 space-y-6">
           {error && (
-            <Card className="border-rose-200 bg-rose-50 p-4 flex items-center gap-3 animate-in fade-in">
+            <Card className="border-rose-200 bg-rose-50 p-4 flex items-center gap-3">
               <ShieldAlert className="h-5 w-5 text-rose-600" />
-              <div className="flex-1">
-                <p className="text-sm font-bold text-rose-800">Error de Datos</p>
-                <p className="text-xs text-rose-600">{(error as any).message || "Fallo en la comunicación con el servidor."}</p>
+              <div>
+                <p className="text-sm font-bold text-rose-800">Error de Conectividad</p>
+                <p className="text-xs text-rose-600">{(error as any).code === 'permission-denied' ? 'Falta de permisos en Firestore.' : (error as any).message}</p>
               </div>
-              <Button size="sm" variant="outline" onClick={() => window.location.reload()} className="h-8 text-[10px] font-black">REINTENTAR</Button>
             </Card>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Universo Total</p>
-                <h4 className="text-2xl font-headline font-bold text-slate-800">{totalInDb === null ? (orders?.length || '--') : totalInDb}</h4>
+                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Universo Total Real</p>
+                <h4 className="text-2xl font-headline font-bold text-slate-800">{totalGlobal.toLocaleString()}</h4>
               </div>
               <Database className="h-8 w-8 text-primary/10" />
             </Card>
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Cargados en Vista</p>
-                <h4 className="text-2xl font-headline font-bold text-emerald-600">{orders?.length || 0}</h4>
+                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Página Actual</p>
+                <h4 className="text-2xl font-headline font-bold text-emerald-600">{currentPage}</h4>
               </div>
-              <CheckCircle2 className="h-8 w-8 text-emerald-100" />
+              <ListOrdered className="h-8 w-8 text-emerald-100" />
             </Card>
-            <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Pendientes</p>
-                <h4 className="text-2xl font-headline font-bold text-amber-600">{classificationCounts.pending}</h4>
-              </div>
-              <Clock className="h-8 w-8 text-amber-100" />
-            </Card>
-            <Card className="border-none shadow-sm bg-slate-900 text-white p-4 space-y-3">
-              <div className="flex justify-between items-center">
-                 <p className="text-[10px] font-black text-slate-400 uppercase">Cobertura de Auditoría</p>
-                 <span className="text-xs font-bold text-accent">{Math.round(stats.coverage)}%</span>
-              </div>
-              <Progress value={stats.coverage} className="h-1.5 bg-white/10" />
+            <Card className="border-none shadow-sm bg-slate-900 text-white p-4">
+              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Registros en Vista</p>
+              <h4 className="text-2xl font-headline font-bold text-accent">{orders?.length || 0}</h4>
             </Card>
           </div>
 
@@ -391,14 +304,11 @@ export default function AnalysisPage() {
             <Card className="border-none shadow-xl bg-primary text-white p-4 flex items-center justify-between animate-in slide-in-from-top-2">
               <div className="flex items-center gap-4">
                 <LayoutGrid className="h-5 w-5" />
-                <h4 className="text-lg font-bold">{selectedIds.length} Registros Seleccionados</h4>
+                <h4 className="text-lg font-bold">{selectedIds.length} Seleccionados</h4>
               </div>
               <div className="flex items-center gap-2">
                 <Button onClick={handleBulkAiAnalysis} variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20">
-                  <Sparkles className="h-4 w-4 mr-2" /> Clasificar con IA
-                </Button>
-                <Button onClick={handleBulkAudit} className="bg-white text-primary hover:bg-white/90 font-bold">
-                  Validar Lote
+                  <Sparkles className="h-4 w-4 mr-2" /> Clasificar Lote con IA
                 </Button>
                 <Button onClick={() => setSelectedIds([])} variant="ghost" className="text-white/60"><X className="h-5 w-5" /></Button>
               </div>
@@ -410,35 +320,31 @@ export default function AnalysisPage() {
               <TableHeader className="bg-slate-50/50">
                 <TableRow>
                   <TableHead className="w-12 text-center">
-                    <Checkbox checked={selectedIds.length === pagedOrders.length && pagedOrders.length > 0} onCheckedChange={toggleSelectAll} />
+                    <Checkbox checked={selectedIds.length === (orders?.length || 0) && (orders?.length || 0) > 0} onCheckedChange={(checked) => setSelectedIds(checked ? (orders?.map(o => o.id) || []) : [])} />
                   </TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Estatus IA</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Clasificación IA</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-right">Monto</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-center">Acciones</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center">IA</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={6} className="text-center py-24"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
-                ) : pagedOrders.length === 0 ? (
-                  <TableRow><TableCell colSpan={6} className="text-center py-24 text-slate-400 font-bold uppercase italic text-xs">Sin registros que coincidan con el filtro</TableCell></TableRow>
-                ) : pagedOrders.map((order) => (
+                ) : !orders || orders.length === 0 ? (
+                  <TableRow><TableCell colSpan={6} className="text-center py-24 text-slate-400 font-bold uppercase text-xs italic">Sin registros en este bloque</TableCell></TableRow>
+                ) : orders.map((order) => (
                   <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
                     <TableCell className="text-center">
-                      <Checkbox checked={selectedIds.includes(order.id)} onCheckedChange={() => toggleSelectOne(order.id)} />
+                      <Checkbox checked={selectedIds.includes(order.id)} onCheckedChange={(checked) => setSelectedIds(prev => checked ? [...prev, order.id] : prev.filter(id => id !== order.id))} />
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        {order.classification_status === 'reviewed' ? (
-                          <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black">REVIEWED</Badge>
-                        ) : (order.classification_status === 'auto' || order.classification_status === 'classified') ? (
-                          <Badge className="bg-primary/10 text-primary border-none text-[8px] font-black">AUTO IA</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400">PENDING</Badge>
-                        )}
-                      </div>
+                      {order.classification_status === 'auto' ? (
+                        <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black">AUTO IA</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400">PENDING</Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col">
@@ -465,35 +371,26 @@ export default function AnalysisPage() {
 
             <div className="flex items-center justify-between px-6 py-4 bg-slate-50/50 border-t">
               <div className="text-[10px] font-black text-slate-400 uppercase">
-                Mostrando {((currentPage - 1) * pageSize) + 1} – {Math.min(currentPage * pageSize, filteredOrdersFull.length)} de {filteredOrdersFull.length} (Universo Cargado: {orders?.length})
+                Página {currentPage} • Bloque de {pageSize} • Universo: {totalGlobal.toLocaleString()}
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black">ANTERIOR</Button>
-                <div className="bg-white border rounded px-4 h-8 flex items-center text-[10px] font-black text-primary">PÁGINA {currentPage}</div>
-                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={currentPage * pageSize >= filteredOrdersFull.length} className="text-[9px] font-black">SIGUIENTE</Button>
+                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black px-4">
+                  <ChevronLeft className="h-4 w-4 mr-1" /> ANTERIOR
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={!orders || orders.length < pageSize} className="text-[9px] font-black px-4">
+                  SIGUIENTE <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
               </div>
             </div>
           </Card>
-
-          {orders && orders.length === 10000 && (
-            <div className="p-10 border-2 border-dashed rounded-3xl text-center bg-white space-y-4">
-               <Database className="h-10 w-10 text-primary mx-auto opacity-20" />
-               <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Has alcanzado el límite de carga por bloque (10,000 registros)</p>
-               <p className="text-[10px] text-slate-400 italic">Para ver los {totalInDb ? totalInDb - 10000 : 'registros restantes'}, utiliza los filtros de PID o Formato.</p>
-            </div>
-          )}
         </main>
 
         <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
           <DialogContent className="max-w-md rounded-3xl p-8 text-center space-y-6">
-            <div className="h-20 w-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
-              <RefreshCcw className="h-10 w-10 text-primary animate-spin" />
-            </div>
+            <RefreshCcw className="h-12 w-12 text-primary animate-spin mx-auto" />
             <div>
-              <DialogTitle className="text-xl font-bold uppercase">Procesando Universo de Datos</DialogTitle>
-              <DialogDescription className="text-slate-500 mt-2">
-                Clasificando {selectedIds.length} registros con el motor Gemini Forense.
-              </DialogDescription>
+              <DialogTitle className="text-xl font-bold uppercase">Procesando Universo IA</DialogTitle>
+              <DialogDescription className="text-slate-500 mt-2">Clasificando {selectedIds.length} registros con el motor Gemini Forense.</DialogDescription>
             </div>
             <div className="space-y-2">
               <div className="flex justify-between text-[10px] font-black text-primary">
