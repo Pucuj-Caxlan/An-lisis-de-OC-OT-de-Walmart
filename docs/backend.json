@@ -65,8 +65,18 @@
     "providers": ["password", "anonymous"]
   },
   "firestore": {
-    "/orders/{orderId}": { "schema": "Order", "description": "Universo de registros OC/OT" },
+    "/orders/{orderId}": { 
+      "schema": "Order", 
+      "description": "Universo de registros OC/OT. Requiere índices compuestos para filtros por estatus y PID." 
+    },
     "/aggregates/{aggId}": { "schema": "GlobalAggregate", "description": "Metadatos materializados para dashboards" },
     "/audit_logs/{logId}": { "schema": "AuditLog", "description": "Logs de auditoría" }
-  }
+  },
+  "indexes": [
+    {
+      "collection": "orders",
+      "fields": ["classification_status", "projectId", "projectName"],
+      "description": "Optimización para búsqueda paginada de registros clasificados."
+    }
+  ]
 }

@@ -70,16 +70,15 @@ const AI_BATCH_SIZE = 5;
 export default function AnalysisPage() {
   const { toast } = useToast();
   const db = useFirestore();
-  const { user } = useUser();
+  const { user, isAuthReady } = useUser();
   const [searchTerm, setSearchTerm] = useState('');
   const [aiFilter, setAiFilter] = useState<string>('all');
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   
-  // Paginación Real
-  const [pageSize, setPageSize] = useState(100);
+  // Paginación Real por Cursores
+  const [pageSize, setPageSize] = useState(500); // Límite optimizado
   const [currentPage, setCurrentPage] = useState(1);
-  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [pageHistory, setPageHistory] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
   const [totalGlobal, setTotalGlobal] = useState<number>(0);
 
@@ -91,9 +90,9 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Fetch Total Global real-time
+  // Fetch Total Global SSOT
   useEffect(() => {
-    if (!db || !user?.uid) return;
+    if (!db || !user?.uid || !isAuthReady) return;
     const fetchCount = async () => {
       try {
         const q = query(collection(db, 'orders'));
@@ -104,23 +103,32 @@ export default function AnalysisPage() {
       }
     };
     fetchCount();
-  }, [db, user?.uid]);
+  }, [db, user?.uid, isAuthReady]);
 
-  // Query Paginada con cursores
+  // Query Paginada con Índices Compuestos
   const ordersQuery = useMemoFirebase(() => {
-    if (!db || !user?.uid) return null;
+    if (!db || !user?.uid || !isAuthReady) return null;
     
-    let q = query(
-      collection(db, 'orders'),
-      orderBy('projectId', 'desc'),
-      limit(pageSize)
-    );
-
-    // Aplicar filtros de servidor si es posible (solo estatus para optimizar)
-    if (aiFilter === 'not_classified') {
-      q = query(q, where('classification_status', '==', 'pending'));
-    } else if (aiFilter === 'classified') {
-      q = query(q, where('classification_status', '==', 'auto'));
+    // Base de la query: Siempre requiere ordenamiento estable para paginación
+    let q;
+    
+    if (aiFilter === 'all') {
+      q = query(
+        collection(db, 'orders'),
+        orderBy('projectId', 'asc'),
+        orderBy('projectName', 'asc'),
+        limit(pageSize)
+      );
+    } else {
+      // Queries filtradas que requieren el índice compuesto: classification_status + projectId + projectName
+      const statusValue = aiFilter === 'classified' ? 'auto' : 'pending';
+      q = query(
+        collection(db, 'orders'),
+        where('classification_status', '==', statusValue),
+        orderBy('projectId', 'asc'),
+        orderBy('projectName', 'asc'),
+        limit(pageSize)
+      );
     }
 
     const currentCursor = pageHistory[currentPage - 1];
@@ -129,7 +137,7 @@ export default function AnalysisPage() {
     }
 
     return q;
-  }, [db, user?.uid, pageSize, currentPage, aiFilter, pageHistory]);
+  }, [db, user?.uid, isAuthReady, pageSize, currentPage, aiFilter, pageHistory]);
 
   const { data: orders, isLoading, snapshot, error } = useCollection(ordersQuery);
 
@@ -273,8 +281,8 @@ export default function AnalysisPage() {
             <Card className="border-rose-200 bg-rose-50 p-4 flex items-center gap-3">
               <ShieldAlert className="h-5 w-5 text-rose-600" />
               <div>
-                <p className="text-sm font-bold text-rose-800">Error de Conectividad</p>
-                <p className="text-xs text-rose-600">{(error as any).code === 'permission-denied' ? 'Falta de permisos en Firestore.' : (error as any).message}</p>
+                <p className="text-sm font-bold text-rose-800">Error de Conectividad o Índices</p>
+                <p className="text-xs text-rose-600">{(error as any).message}</p>
               </div>
             </Card>
           )}

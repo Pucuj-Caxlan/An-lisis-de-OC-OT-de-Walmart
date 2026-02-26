@@ -1,0 +1,31 @@
+
+{
+  "indexes": [
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "classification_status", "order": "ASCENDING" },
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "projectName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "classification_status", "order": "ASCENDING" },
+        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
+        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
