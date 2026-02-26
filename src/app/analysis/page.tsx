@@ -20,9 +20,7 @@ import {
   CheckCircle2,
   Clock,
   Zap,
-  Info,
-  Layers,
-  SearchCode
+  Layers
 } from 'lucide-react';
 import {
   Table,
@@ -45,7 +43,8 @@ import {
   startAfter, 
   QueryDocumentSnapshot, 
   DocumentData,
-  where
+  where,
+  getDocs
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -93,25 +92,46 @@ export default function AnalysisPage() {
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
   const [bulkAiProgress, setBulkAiProgress] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
+  const [discoveredDisciplines, setDiscoveredDisciplines] = useState<string[]>([]);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Leer Agregados Globales para el Selector de Disciplinas y Stats Reales
+  // 1. Leer Agregados Globales
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  const availableDisciplines = useMemo(() => {
-    if (!globalAgg?.disciplines) return [];
-    return Object.keys(globalAgg.disciplines).sort();
-  }, [globalAgg]);
+  // 2. Fallback de descubrimiento de disciplinas si el aggregate no existe
+  useEffect(() => {
+    if (!db || !isAuthReady) return;
+    const discover = async () => {
+      if (globalAgg?.disciplines) return;
+      try {
+        const q = query(collection(db, 'orders'), where('disciplina_normalizada', '!=', ''), limit(500));
+        const snap = await getDocs(q);
+        const unique = new Set<string>();
+        snap.forEach(d => {
+          const disc = d.data().disciplina_normalizada;
+          if (disc) unique.add(disc);
+        });
+        setDiscoveredDisciplines(Array.from(unique).sort());
+      } catch (e) {
+        console.warn("Discovery failed (index might be missing):", e);
+      }
+    };
+    discover();
+  }, [db, isAuthReady, globalAgg]);
 
+  const availableDisciplines = useMemo(() => {
+    if (globalAgg?.disciplines) return Object.keys(globalAgg.disciplines).sort();
+    return discoveredDisciplines;
+  }, [globalAgg, discoveredDisciplines]);
+
+  // 3. Estadísticas de Avance Real
   const fetchStats = async () => {
     if (!db || !isAuthReady) return;
     try {
       const coll = collection(db, 'orders');
-      
-      // Conteo basado en la existencia de disciplina_normalizada
       const [totalSnap, withDataSnap] = await Promise.all([
         getCountFromServer(query(coll)),
         getCountFromServer(query(coll, where('disciplina_normalizada', '!=', '')))
@@ -134,17 +154,16 @@ export default function AnalysisPage() {
     fetchStats();
   }, [db, isAuthReady, globalAgg]);
 
+  // 4. Query Paginada con Filtros
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
     let q = collection(db, 'orders');
     let baseQuery;
 
-    // Lógica de Filtrado por Disciplina Real
     if (disciplineFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else if (disciplineFilter === 'unclassified') {
-      // Registros sin clasificación (campo vacío)
       baseQuery = query(
         q, 
         where('disciplina_normalizada', '==', ''), 
@@ -152,7 +171,6 @@ export default function AnalysisPage() {
         limit(pageSize)
       );
     } else {
-      // Filtrar por una disciplina específica
       baseQuery = query(
         q, 
         where('disciplina_normalizada', '==', disciplineFilter), 
@@ -291,9 +309,9 @@ export default function AnalysisPage() {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
               <Select value={disciplineFilter} onValueChange={(v) => { setDisciplineFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
-                <SelectTrigger className="h-8 w-48 text-[9px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
+                <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
                   <Filter className="h-3 w-3 mr-2 text-primary" />
-                  <SelectValue placeholder="Filtrar Disciplina" />
+                  <SelectValue placeholder="Filtrar por Disciplina" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">TODAS LAS DISCIPLINAS</SelectItem>
@@ -312,7 +330,7 @@ export default function AnalysisPage() {
                 className="bg-accent hover:bg-accent/90 text-white gap-2 shadow-lg h-10 px-6 rounded-xl animate-in fade-in zoom-in"
               >
                 <Sparkles className="h-4 w-4" />
-                <span className="text-[10px] font-black uppercase tracking-widest">Procesar ({selectedIds.length})</span>
+                <span className="text-[10px] font-black uppercase tracking-widest">Procesar IA ({selectedIds.length})</span>
               </Button>
             )}
           </div>
@@ -324,9 +342,9 @@ export default function AnalysisPage() {
               <AlertTriangle className="h-5 w-5" />
               <AlertTitle className="text-sm font-black uppercase tracking-tight">Índice Compuesto Requerido</AlertTitle>
               <AlertDescription className="text-xs mt-1">
-                Para filtrar por "{disciplineFilter}" manteniendo el orden por PID, Firestore requiere un índice.
+                Firestore requiere un índice para filtrar por "{disciplineFilter}" y ordenar por PID.
                 <Button asChild variant="link" size="sm" className="h-auto p-0 ml-2 text-rose-600 font-bold">
-                  <a href="https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes" target="_blank">Activar en Consola</a>
+                  <a href={`https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes?create_composite=ClZwcm9qZWN0cy9zdHVkaW8tNTUxOTE2NTkzOS0yNDdlMS9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvb3JkZXJzL2luZGV4ZXMvXxABGhoKFmRpc2NpcGxpbmFfbm9ybWFsaXphZGEQARoNCglwcm9qZWN0SWQQARoMCghfX25hbWVfXxAB`} target="_blank">Activar Índice Manualmente</a>
                 </Button>
               </AlertDescription>
             </Alert>
