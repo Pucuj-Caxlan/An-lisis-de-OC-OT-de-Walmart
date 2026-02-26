@@ -147,32 +147,21 @@ export default function AnalysisPage() {
       });
     }
 
-    orders?.forEach(o => {
-      if (o.disciplina_normalizada) {
-        let name = o.disciplina_normalizada;
-        let normalized = String(name).trim().toUpperCase();
-        if (normalized.endsWith('S') && normalized.length > 4) normalized = normalized.substring(0, normalized.length - 1);
-        
-        if (!groups[normalized]) {
-          groups[normalized] = { count: 0, impact: 0, rawNames: [name] };
-        } else if (!groups[normalized].rawNames.includes(name)) {
-          groups[normalized].rawNames.push(name);
-        }
-      }
-    });
-    
     return groups;
-  }, [globalAgg, orders]);
+  }, [globalAgg]);
 
-  // 4. Actualizar KPIs Dinámicos (Sincronizados con 4,290+)
+  // 4. Actualizar KPIs Dinámicos (Sincronizados con 4,290+ e Impacto)
   useEffect(() => {
     if (!mounted) return;
 
     const totalInDb = globalAgg?.totalOrders || 0;
-    const totalImpactInDb = globalAgg?.totalImpact || 0;
     
-    // Usar el conteo de integridad guardado o el calculado por suma
-    const totalWithDataInDb = globalAgg?.totalProcessed || Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.count || 0), 0);
+    // PRIORIDAD: totalProcessed del SSOT que ahora guarda los 4,290
+    const totalWithDataInDb = globalAgg?.totalProcessed || Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0);
+
+    // CÁLCULO DE IMPACTO: Si el totalImpact global es 0, sumamos el impacto de las disciplinas agrupadas
+    const sumDisciplinesImpact = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.impact || 0), 0);
+    const totalImpactInDb = (globalAgg?.totalImpact && globalAgg.totalImpact > 0) ? globalAgg.totalImpact : sumDisciplinesImpact;
 
     if (disciplineFilter === 'all') {
       setStats({
@@ -182,11 +171,12 @@ export default function AnalysisPage() {
         totalImpact: totalImpactInDb
       });
     } else if (disciplineFilter === 'unclassified') {
+      // Para pendientes, el impacto es la diferencia o simplemente lo que hay en la vista si no hay agregados de pendientes
       setStats({
         total: Math.max(0, totalInDb - totalWithDataInDb),
         withData: 0,
         pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: 0 // Se podría calcular localmente si es necesario
+        totalImpact: 0 
       });
     } else {
       const group = groupedDisciplines[disciplineFilter];
@@ -197,7 +187,7 @@ export default function AnalysisPage() {
         totalImpact: group?.impact || 0
       });
     }
-  }, [disciplineFilter, globalAgg, groupedDisciplines, orders, mounted]);
+  }, [disciplineFilter, globalAgg, groupedDisciplines, mounted]);
 
   const isIndexError = error && (error as any).code === 'failed-precondition';
 
@@ -330,24 +320,26 @@ export default function AnalysisPage() {
       const colRef = collection(db, 'orders');
       
       const totalSnapshot = await getCountFromServer(colRef);
-      const total = totalSnapshot.data().count;
+      const totalCount = totalSnapshot.data().count;
 
       const processedQuery = query(colRef, where('classification_status', '!=', 'pending'));
       const processedSnapshot = await getCountFromServer(processedQuery);
       const processedCountVal = processedSnapshot.data().count;
       
-      // Intentar recuperar el impacto total acumulado si existe
-      const currentImpact = globalAgg?.totalImpact || 0;
+      // Intentar recuperar el impacto total acumulado sumando el desglose si el top-level falta
+      const sumImpactFromDisciplines = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.impact || 0), 0);
+      const currentImpact = (globalAgg?.totalImpact && globalAgg.totalImpact > 0) ? globalAgg.totalImpact : sumImpactFromDisciplines;
 
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
-        totalOrders: total,
+        totalOrders: totalCount,
         totalProcessed: processedCountVal,
+        totalImpact: currentImpact,
         lastUpdate: new Date().toISOString()
       }, { merge: true });
       
       toast({ 
         title: "Universo Sincronizado", 
-        description: `Total: ${total.toLocaleString()} | Integridad: ${processedCountVal.toLocaleString()} registros.` 
+        description: `Total: ${totalCount.toLocaleString()} | Integridad: ${processedCountVal.toLocaleString()} registros.` 
       });
     } catch (e: any) {
       console.error("Error syncing universe:", e);
