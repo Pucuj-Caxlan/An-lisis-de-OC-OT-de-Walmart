@@ -17,7 +17,12 @@ import {
   Filter,
   ListOrdered,
   AlertTriangle,
-  Search
+  Search,
+  Trash2,
+  FileText,
+  BarChart4,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 import {
   Table,
@@ -41,7 +46,8 @@ import {
   startAfter, 
   QueryDocumentSnapshot, 
   DocumentData,
-  where
+  where,
+  deleteDoc
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -51,7 +57,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
+import { updateDocumentNonBlocking, deleteDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 import {
   Select,
   SelectContent,
@@ -62,6 +68,17 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -70,7 +87,7 @@ export default function AnalysisPage() {
   const [pageSize, setPageSize] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageHistory, setPageHistory] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
-  const [totalGlobal, setTotalGlobal] = useState<number>(0);
+  const [stats, setStats] = useState({ total: 0, processed: 0, pending: 0 });
   const [aiFilter, setAiFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
@@ -81,19 +98,30 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // SSOT: Total real del servidor (Garantiza ver los 11,150)
-  useEffect(() => {
+  // Fetch Estadísticas Globales (SSOT)
+  const fetchStats = async () => {
     if (!db || !isAuthReady) return;
-    const fetchCount = async () => {
-      try {
-        const q = query(collection(db, 'orders'));
-        const snapshot = await getCountFromServer(q);
-        setTotalGlobal(snapshot.data().count);
-      } catch (e) {
-        console.error("Count Error:", e);
-      }
-    };
-    fetchCount();
+    try {
+      const coll = collection(db, 'orders');
+      
+      const [totalSnap, processedSnap, pendingSnap] = await Promise.all([
+        getCountFromServer(query(coll)),
+        getCountFromServer(query(coll, where('classification_status', '==', 'auto'))),
+        getCountFromServer(query(coll, where('classification_status', '==', 'pending')))
+      ]);
+
+      setStats({
+        total: totalSnap.data().count,
+        processed: processedSnap.data().count,
+        pending: pendingSnap.data().count
+      });
+    } catch (e) {
+      console.error("Stats Error:", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
   }, [db, isAuthReady]);
 
   // Query Paginada Optimizada
@@ -103,12 +131,10 @@ export default function AnalysisPage() {
     let q = collection(db, 'orders');
     let baseQuery;
 
-    // Si el filtro es ALL, usamos un ordenamiento simple para maximizar visibilidad
     if (aiFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else {
       const statusValue = aiFilter === 'classified' ? 'auto' : 'pending';
-      // Filtros específicos requieren índices compuestos
       baseQuery = query(
         q, 
         where('classification_status', '==', statusValue), 
@@ -117,7 +143,6 @@ export default function AnalysisPage() {
       );
     }
 
-    // Aplicar Cursor de Paginación
     const currentCursor = pageHistory[currentPage - 1];
     if (currentCursor) {
       baseQuery = query(baseQuery, startAfter(currentCursor));
@@ -172,6 +197,7 @@ export default function AnalysisPage() {
       });
 
       toast({ title: "Registro Procesado", description: result.disciplina_normalizada });
+      fetchStats();
     } catch (e) {
       toast({ variant: "destructive", title: "Error IA", description: "Fallo en motor Gemini." });
     } finally {
@@ -179,43 +205,19 @@ export default function AnalysisPage() {
     }
   };
 
-  const handleBulkAiAnalysis = async () => {
-    if (selectedIds.length === 0 || !db) return;
-    setShowBulkAiDialog(true);
-    setBulkAiProgress(0);
-    setProcessedCount(0);
-
-    const BATCH_SIZE = 5;
-    const selectedOrders = orders?.filter(o => selectedIds.includes(o.id)) || [];
-    
-    for (let i = 0; i < selectedOrders.length; i += BATCH_SIZE) {
-      const chunk = selectedOrders.slice(i, i + BATCH_SIZE);
-      const batch = writeBatch(db);
-
-      for (const order of chunk) {
-        try {
-          const result = await analyzeOrderSemantically({
-            descripcion: String(order.descripcion || "").substring(0, 250),
-            monto: order.impactoNeto
-          });
-          const ref = doc(db, 'orders', order.id);
-          batch.update(ref, {
-            disciplina_normalizada: result.disciplina_normalizada,
-            causa_raiz_normalizada: result.causa_raiz_normalizada,
-            classification_status: 'auto',
-            processedAt: new Date().toISOString()
-          });
-        } catch (e) {}
-      }
-      await batch.commit();
-      setProcessedCount(prev => prev + chunk.length);
-      setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
+  const handleDeleteRecord = async (id: string) => {
+    if (!db) return;
+    try {
+      const orderRef = doc(db, 'orders', id);
+      deleteDocumentNonBlocking(orderRef);
+      toast({ title: "Registro eliminado" });
+      fetchStats();
+    } catch (e) {
+      toast({ variant: "destructive", title: "Error al eliminar" });
     }
-    
-    toast({ title: "Lote Procesado" });
-    setShowBulkAiDialog(false);
-    setSelectedIds([]);
   };
+
+  const progressPercentage = stats.total > 0 ? Math.round((stats.processed / stats.total) * 100) : 0;
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50/30">
@@ -225,8 +227,8 @@ export default function AnalysisPage() {
           <div className="flex items-center gap-4">
             <SidebarTrigger />
             <div className="flex items-center gap-2">
-              <Database className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-headline font-bold text-slate-800 uppercase">Universo de Registros</h1>
+              <BarChart4 className="h-6 w-6 text-primary" />
+              <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Consola de Control de Universo</h1>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -235,9 +237,9 @@ export default function AnalysisPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="100">100</SelectItem>
-                <SelectItem value="300">300</SelectItem>
-                <SelectItem value="500">500</SelectItem>
+                <SelectItem value="100">100 filas</SelectItem>
+                <SelectItem value="300">300 filas</SelectItem>
+                <SelectItem value="500">500 filas</SelectItem>
               </SelectContent>
             </Select>
             <Select value={aiFilter} onValueChange={(v) => { setAiFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
@@ -254,48 +256,59 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6 space-y-6">
-          {error && (
-            <Alert variant="destructive" className="bg-rose-50 border-rose-200 text-rose-900 rounded-2xl">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle className="text-xs font-black uppercase">Error de Sincronización</AlertTitle>
-              <AlertDescription className="text-[10px] font-bold opacity-80">
-                {error.message.includes('index') 
-                  ? "Firestore está construyendo los índices compuestos para tus 11,150 registros. Esto puede tardar unos minutos." 
-                  : "Error al recuperar datos. Verifica tu conexión institucional."}
-              </AlertDescription>
-            </Alert>
-          )}
+          {/* Dashboard de Indicadores Superiores */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black text-slate-400 uppercase">Universo Total</p>
+                <Database className="h-4 w-4 text-primary opacity-20" />
+              </div>
+              <h4 className="text-3xl font-headline font-bold text-slate-800">{stats.total.toLocaleString()}</h4>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Registros en Base</p>
+            </Card>
+            
+            <Card className="p-5 border-none shadow-sm bg-white border-l-4 border-l-emerald-500 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black text-emerald-600 uppercase">Procesados IA</p>
+                <CheckCircle2 className="h-4 w-4 text-emerald-500 opacity-20" />
+              </div>
+              <h4 className="text-3xl font-headline font-bold text-emerald-600">{stats.processed.toLocaleString()}</h4>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Clasificación Automática</p>
+            </Card>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card className="p-4 flex items-center justify-between border-none shadow-sm bg-white">
-              <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase">Universo Total Real</p>
-                <h4 className="text-2xl font-headline font-bold">{totalGlobal.toLocaleString()}</h4>
+            <Card className="p-5 border-none shadow-sm bg-white border-l-4 border-l-amber-500 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black text-amber-600 uppercase">Por Procesar</p>
+                <Clock className="h-4 w-4 text-amber-500 opacity-20" />
               </div>
-              <Database className="h-8 w-8 text-primary/10" />
+              <h4 className="text-3xl font-headline font-bold text-amber-600">{stats.pending.toLocaleString()}</h4>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Pendientes de Análisis</p>
             </Card>
-            <Card className="p-4 flex items-center justify-between border-none shadow-sm bg-white">
-              <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase">Página Actual</p>
-                <h4 className="text-2xl font-headline font-bold text-emerald-600">{currentPage}</h4>
+
+            <Card className="p-5 border-none shadow-sm bg-slate-900 text-white flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Avance Global</p>
+                <Sparkles className="h-4 w-4 text-accent" />
               </div>
-              <ListOrdered className="h-8 w-8 text-emerald-100" />
-            </Card>
-            <Card className="p-4 border-none shadow-sm bg-slate-900 text-white">
-              <p className="text-[10px] font-black text-slate-400 uppercase">Registros en Vista</p>
-              <h4 className="text-2xl font-headline font-bold text-accent">{orders?.length || 0}</h4>
+              <div className="space-y-2">
+                <div className="flex items-end justify-between">
+                  <h4 className="text-3xl font-headline font-bold text-accent">{progressPercentage}%</h4>
+                  <span className="text-[9px] text-slate-500 font-black mb-1 uppercase">Integridad</span>
+                </div>
+                <Progress value={progressPercentage} className="h-1.5 bg-slate-800" />
+              </div>
             </Card>
           </div>
 
           {selectedIds.length > 0 && (
-            <Card className="p-4 flex items-center justify-between border-none shadow-xl bg-primary text-white animate-in slide-in-from-top-2">
+            <Card className="p-4 flex items-center justify-between border-none shadow-xl bg-primary text-white animate-in slide-in-from-top-2 rounded-2xl">
               <div className="flex items-center gap-4">
                 <LayoutGrid className="h-5 w-5" />
                 <h4 className="text-lg font-bold">{selectedIds.length} Seleccionados</h4>
               </div>
               <div className="flex items-center gap-2">
-                <Button onClick={handleBulkAiAnalysis} variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20">
-                  <Sparkles className="h-4 w-4 mr-2" /> Clasificar Lote con IA
+                <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20">
+                  <Sparkles className="h-4 w-4 mr-2" /> Clasificar Lote
                 </Button>
                 <Button onClick={() => setSelectedIds([])} variant="ghost" className="text-white/60"><X className="h-5 w-5" /></Button>
               </div>
@@ -314,21 +327,20 @@ export default function AnalysisPage() {
                   </TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Estatus IA</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase">Clasificación IA</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase">Disciplina & Causa</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-right">Monto</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-center">Acciones</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center w-[120px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow><TableCell colSpan={6} className="text-center py-24"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-center py-32"><RefreshCcw className="h-10 w-10 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
                 ) : !orders || orders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-24">
+                    <TableCell colSpan={6} className="text-center py-32">
                       <div className="space-y-2">
-                        <Search className="h-8 w-8 mx-auto text-slate-200" />
-                        <p className="text-slate-400 font-bold uppercase text-xs italic">No se encontraron registros en este bloque.</p>
-                        <Button variant="link" onClick={() => { setAiFilter('all'); setCurrentPage(1); }} className="text-[10px] font-black uppercase text-primary">Ver Universo Completo</Button>
+                        <Search className="h-10 w-10 mx-auto text-slate-200" />
+                        <p className="text-slate-400 font-bold uppercase text-xs">No se encontraron registros en este bloque.</p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -342,28 +354,50 @@ export default function AnalysisPage() {
                     </TableCell>
                     <TableCell>
                       {order.classification_status === 'auto' ? (
-                        <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black">AUTO IA</Badge>
+                        <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2">AUTO IA</Badge>
                       ) : (
-                        <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400">PENDIENTE</Badge>
+                        <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2">PENDIENTE</Badge>
                       )}
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col">
-                        <span className="font-black text-primary text-sm">{order.projectId}</span>
-                        <span className="text-[9px] text-slate-400 uppercase truncate max-w-[150px]">{order.projectName}</span>
+                        <span className="font-black text-primary text-sm tracking-tighter">{order.projectId}</span>
+                        <span className="text-[9px] text-slate-400 uppercase truncate max-w-[180px] font-bold">{order.projectName}</span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col">
                          <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
-                         <span className="text-[9px] text-slate-400 uppercase font-bold">{order.causa_raiz_normalizada || order.causaRaiz || "Sin definir"}</span>
+                         <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight">{order.causa_raiz_normalizada || order.causaRaiz || "Sin definir"}</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
-                    <TableCell className="text-center">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing}>
-                        {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
-                      </Button>
+                    <TableCell>
+                      <div className="flex items-center justify-center gap-1">
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing}>
+                          {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
+                        </Button>
+                        
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-300 hover:text-rose-500">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent className="rounded-3xl">
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="font-headline uppercase">¿Eliminar registro?</AlertDialogTitle>
+                              <AlertDialogDescription className="text-xs">
+                                Esta acción eliminará permanentemente la orden <strong>{order.projectId}</strong> del universo operativo.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel className="rounded-xl text-[10px] font-black uppercase">Cancelar</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDeleteRecord(order.id)} className="bg-rose-600 rounded-xl text-[10px] font-black uppercase">Eliminar</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -371,14 +405,14 @@ export default function AnalysisPage() {
             </Table>
 
             <div className="flex items-center justify-between px-6 py-4 bg-slate-50/50 border-t">
-              <div className="text-[10px] font-black text-slate-400 uppercase">
-                Página {currentPage} • Bloque de {pageSize} • Universo: {totalGlobal.toLocaleString()}
+              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                PÁGINA {currentPage} • BLOQUE DE {pageSize} • UNIVERSO: {stats.total.toLocaleString()}
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black px-4">
+                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black px-4 rounded-xl">
                   <ChevronLeft className="h-4 w-4 mr-1" /> ANTERIOR
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={!orders || orders.length < pageSize} className="text-[9px] font-black px-4">
+                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={!orders || orders.length < pageSize} className="text-[9px] font-black px-4 rounded-xl">
                   SIGUIENTE <ChevronRight className="h-4 w-4 ml-1" />
                 </Button>
               </div>
