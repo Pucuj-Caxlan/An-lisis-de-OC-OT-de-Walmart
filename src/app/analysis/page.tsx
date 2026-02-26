@@ -18,7 +18,6 @@ import {
   Trash2,
   BarChart4,
   CheckCircle2,
-  Clock,
   Zap,
   Target,
   DollarSign,
@@ -41,12 +40,11 @@ import {
   limit, 
   doc, 
   orderBy, 
-  getCountFromServer, 
   startAfter, 
   QueryDocumentSnapshot, 
   DocumentData,
   where,
-  getDocs
+  setDoc
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -98,21 +96,22 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Leer Agregados Globales (Single Source of Truth)
+  // 1. Leer Agregados Globales
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // 2. Lógica de Agrupación de Disciplinas (Eliminar duplicados por singular/plural)
+  // 2. Normalización de Disciplinas para el Filtro
   const groupedDisciplines = useMemo(() => {
     if (!globalAgg?.disciplines) return {};
     const groups: Record<string, { count: number, impact: number, rawNames: string[] }> = {};
     
     Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
       let normalized = name.trim().toUpperCase();
-      // Normalización básica: quitar 'S' final si es plural común y mapear variaciones
+      // Agrupar singulares y plurales básicos
       if (normalized.endsWith('S') && normalized.length > 4) {
         normalized = normalized.substring(0, normalized.length - 1);
       }
+      // Mapeos específicos de Walmart
       if (normalized === 'INGENIERIA') normalized = 'INGENIERÍA';
       if (normalized === 'ELECTRICA') normalized = 'ELÉCTRICA';
       if (normalized === 'MECANICA') normalized = 'MECÁNICA';
@@ -128,30 +127,28 @@ export default function AnalysisPage() {
     return groups;
   }, [globalAgg]);
 
-  // 3. Actualizar KPIs de la Consola basados en el Filtro
+  // 3. Actualizar KPIs de la Consola basados en el Filtro y Agregados
   useEffect(() => {
     if (!globalAgg) return;
 
+    const totalInDb = globalAgg.totalOrders || 0;
+    const totalImpactInDb = globalAgg.totalImpact || 0;
+
     if (disciplineFilter === 'all') {
       setStats({
-        total: globalAgg.totalOrders || 0,
+        total: totalInDb,
         withData: Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0),
-        pending: Math.max(0, (globalAgg.totalOrders || 0) - Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0)),
-        totalImpact: globalAgg.totalImpact || 0
+        pending: Math.max(0, totalInDb - Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0)),
+        totalImpact: totalImpactInDb
       });
     } else if (disciplineFilter === 'unclassified') {
-      const fetchUnclassified = async () => {
-        if (!db) return;
-        const q = query(collection(db, 'orders'), where('classification_status', '==', 'pending'));
-        const snap = await getCountFromServer(q);
-        setStats({
-          total: snap.data().count,
-          withData: 0,
-          pending: snap.data().count,
-          totalImpact: 0 // El impacto de pendientes se calcula bajo demanda si es necesario
-        });
-      };
-      fetchUnclassified();
+      const pendingCount = Math.max(0, totalInDb - Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0));
+      setStats({
+        total: pendingCount,
+        withData: 0,
+        pending: pendingCount,
+        totalImpact: 0 // El impacto de pendientes se calcula bajo demanda
+      });
     } else {
       const group = groupedDisciplines[disciplineFilter];
       if (group) {
@@ -163,9 +160,9 @@ export default function AnalysisPage() {
         });
       }
     }
-  }, [disciplineFilter, globalAgg, groupedDisciplines, db]);
+  }, [disciplineFilter, globalAgg, groupedDisciplines]);
 
-  // 4. Query Paginada con Filtros Robustos (Usando el grupo de nombres crudos)
+  // 4. Query Paginada con Filtros Robustos
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
@@ -175,11 +172,11 @@ export default function AnalysisPage() {
     if (disciplineFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else if (disciplineFilter === 'unclassified') {
+      // Usando el campo classification_status para mayor precisión con el índice
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
       const group = groupedDisciplines[disciplineFilter];
-      // Si el grupo tiene pocos nombres, podemos usar 'in'. Si no, usamos el primero del grupo como proxy
-      // Para este volumen, usamos el filtro exacto de disciplina_normalizada si está normalizado
+      // Para este volumen, usamos el filtro por lista de nombres crudos (hasta 30 variaciones)
       baseQuery = query(q, where('disciplina_normalizada', 'in', group.rawNames.slice(0, 30)), orderBy('projectId', 'asc'), limit(pageSize));
     }
 
@@ -275,14 +272,14 @@ export default function AnalysisPage() {
           processedAt: new Date().toISOString()
         });
 
-        setProcessedCount(prev => prev + 1);
+        setProcessedCount(i + 1);
         setBulkAiProgress(Math.round(((i + 1) / targetOrders.length) * 100));
       } catch (e) {
         console.error(`Error processing ${order.id}:`, e);
       }
     }
 
-    toast({ title: "Procesamiento Masivo Completo", description: `${processedCount} registros actualizados.` });
+    toast({ title: "Procesamiento Masivo Completo", description: `${targetOrders.length} registros actualizados.` });
     setIsBulkProcessing(false);
     setSelectedIds([]);
     setTimeout(() => setShowBulkAiDialog(false), 2000);
@@ -293,6 +290,16 @@ export default function AnalysisPage() {
     const orderRef = doc(db, 'orders', id);
     deleteDocumentNonBlocking(orderRef);
     toast({ title: "Registro eliminado" });
+  };
+
+  const syncAggregatesManually = async () => {
+    if (!db || !globalAgg) return;
+    // En una implementación real, esto correría un worker o Cloud Function.
+    // Para el MVP, notificamos que se requiere recalcular desde Carga Excel para ver cambios globales.
+    toast({ 
+      title: "Resumen de Universo", 
+      description: "Las estadísticas globales se refrescan automáticamente al cargar nuevos archivos Excel." 
+    });
   };
 
   const progressPercentage = stats.total > 0 ? Math.round((stats.withData / stats.total) * 100) : 0;
@@ -351,7 +358,7 @@ export default function AnalysisPage() {
               <AlertDescription className="text-xs mt-1">
                 Firestore requiere un índice para este filtro combinado.
                 <Button asChild variant="link" size="sm" className="h-auto p-0 ml-2 text-rose-600 font-bold">
-                  <a href={`https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes?create_composite=ClZwcm9qZWN0cy9zdHVkaW8tNTUxOTE2NTkzOS0yNDdlMS9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvb3JkZXJzL2luZGV4ZXMvXxABGhoKFmRpc2NpcGxpbmFfbm9ybWFsaXphZGEQARoNCglwcm9qZWN0SWQQARoMCghfX25hbWVfXxAB`} target="_blank">Activar Índice Manualmente</a>
+                  <a href={`https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes?create_composite=ClZwcm9qZWN0cy9zdHVkaW8tNTUxOTE2NTkzOS0yNDdlMS9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvb3JkZXJzL2luZGV4ZXMvXxABGhkKFWNsYXNzaWZpY2F0aW9uX3N0YXR1cxABGg0KCXByb2plY3RJZBABGgwKCF9fbmFtZV9fEAE`} target="_blank">Activar Índice Manualmente</a>
                 </Button>
               </AlertDescription>
             </Alert>
@@ -364,7 +371,7 @@ export default function AnalysisPage() {
                 <Database className="h-4 w-4 text-primary opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-slate-800">{stats.total.toLocaleString()}</h4>
-              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Registros Totales</p>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Registros del Filtro</p>
             </Card>
             
             <Card className="p-5 border-none shadow-sm bg-white border-l-4 border-l-emerald-500 flex flex-col justify-between">
@@ -451,7 +458,7 @@ export default function AnalysisPage() {
                           ) : (
                             <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2">PENDIENTE</Badge>
                           )}
-                          {confidence && (
+                          {confidence !== undefined && (
                             <div className="flex items-center gap-1">
                               <Target className="h-2.5 w-2.5 text-slate-400" />
                               <span className="text-[8px] font-bold text-slate-500">{Math.round(confidence * 100)}% Confianza</span>
@@ -535,7 +542,7 @@ export default function AnalysisPage() {
                 </Button>
               </div>
             </div>
-          </Card>
+          </Table>
         </main>
 
         <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
