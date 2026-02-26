@@ -13,7 +13,9 @@ import {
   BrainCircuit,
   FileText,
   CloudLightning,
-  Activity
+  Activity,
+  Shield,
+  Database
 } from "lucide-react"
 
 import {
@@ -31,6 +33,7 @@ import {
 } from "@/components/ui/sidebar"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { firebaseConfig } from "@/firebase/config"
 
 const navigation = [
   {
@@ -146,14 +149,25 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-4">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Ayuda">
-              <HelpCircle className="h-5 w-5" />
-              <span>Soporte Técnico</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <div className="space-y-4">
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 group-data-[collapsible=icon]:hidden">
+            <div className="flex items-center gap-2 mb-1.5">
+              <Shield className="h-3 w-3 text-emerald-600" />
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Entorno Seguro</span>
+            </div>
+            <p className="text-[8px] font-mono text-slate-400 break-all leading-tight opacity-70">
+              PROJECT_ID: {firebaseConfig.projectId}
+            </p>
+          </div>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton tooltip="Ayuda">
+                <HelpCircle className="h-5 w-5" />
+                <span>Soporte Técnico</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </div>
       </SidebarFooter>
     </Sidebar>
   )

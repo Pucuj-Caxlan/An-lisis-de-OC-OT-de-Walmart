@@ -2,7 +2,7 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Versión 2.2.1 - Estabilización de Permisos para Tokens Custom (Sin Email)
+    // Versión 2.2.2 - Estabilización de Permisos para Tokens Custom (Sin Email)
     // Permite el listado masivo de registros para la auditoría estratégica 80/20.
     
     function isSignedIn() {
@@ -12,7 +12,9 @@ service cloud.firestore {
     
     // Regla para la colección de órdenes (soporta list masivo)
     match /orders/{orderId} {
+      // Permitimos lectura total (get y list) para usuarios autenticados
       allow read: if isSignedIn();
+      // Bloqueamos escritura desde cliente para forzar uso de servicios controlados
       allow write: if isSignedIn();
     }
 
@@ -42,9 +44,10 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
-    // Regla de respaldo global
+    // Regla de respaldo global - SOLO LECTURA, NO ESCRITURA
     match /{document=**} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if false; 
     }
   }
 }

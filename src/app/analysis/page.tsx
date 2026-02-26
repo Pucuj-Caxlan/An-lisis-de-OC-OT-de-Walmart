@@ -14,32 +14,19 @@ import {
   Sparkles,
   ShieldAlert,
   Filter,
-  SearchCode,
   FileSearch,
   Trash2,
-  Loader2,
-  Microscope,
-  Activity,
   Database,
   BrainCircuit,
-  AlertTriangle,
   History,
   TrendingUp,
   ShieldCheck,
   CheckCircle2,
   LayoutGrid,
   X,
-  Lock,
-  Flag,
-  Signature,
   Zap,
-  MoreVertical,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ClipboardCheck,
-  ZapOff,
-  Rows,
   Clock
 } from 'lucide-react';
 import {
@@ -53,7 +40,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, query, limit, doc, writeBatch, setDoc, orderBy, startAfter, getCountFromServer, DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
+import { collection, query, limit, doc, writeBatch, setDoc, orderBy, getCountFromServer } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { generateTraceabilityReport, TraceabilityReportOutput } from '@/ai/flows/traceability-report-flow';
 import { analyzeBulkOrders, BulkIntelligenceOutput } from '@/ai/flows/bulk-intelligence-analysis-flow';
@@ -64,15 +51,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogFooter
 } from "@/components/ui/dialog";
 import { updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Separator } from '@/components/ui/separator';
 import {
   Select,
@@ -85,7 +65,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { executeDeletion, DeletionMode } from '@/lib/deletion-service';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const MAX_BULK_AI_RECORDS = 500;
 const AI_BATCH_SIZE = 5; 
@@ -139,9 +118,8 @@ export default function AnalysisPage() {
   }, [db, user]);
 
   const ordersQuery = useMemoFirebase(() => {
-    // CRITICAL: No iniciar consulta hasta que el usuario esté autenticado
-    if (!db || !user) return null;
-    // Buffer ampliado a 20k para cubrir el universo de 11,150 registros
+    // CRITICAL: No iniciar consulta hasta que el usuario esté autenticado para evitar race condition
+    if (!db || !user?.uid) return null;
     return query(
       collection(db, 'orders'), 
       orderBy('projectId', 'desc'),
@@ -470,7 +448,7 @@ export default function AnalysisPage() {
           <div className="flex items-center gap-4">
             <SidebarTrigger />
             <div className="flex items-center gap-2">
-              <Microscope className="h-6 w-6 text-primary" />
+              <Database className="h-6 w-6 text-primary" />
               <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Auditoría & Trazabilidad</h1>
             </div>
           </div>
@@ -616,7 +594,9 @@ export default function AnalysisPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? (
+                {!user ? (
+                  <TableRow><TableCell colSpan={7} className="text-center py-24 text-slate-400 font-bold uppercase italic text-xs">Esperando autenticación institucional...</TableCell></TableRow>
+                ) : isLoading ? (
                   <TableRow><TableCell colSpan={7} className="text-center py-24"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
                 ) : pagedOrders.length === 0 ? (
                   <TableRow><TableCell colSpan={7} className="text-center py-24 text-slate-400 font-bold uppercase italic text-xs">Sin registros que coincidan con el filtro</TableCell></TableRow>

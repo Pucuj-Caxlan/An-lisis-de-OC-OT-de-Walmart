@@ -72,7 +72,7 @@ export default function ControlCenterPage() {
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
-    if (!db || !user) return;
+    if (!db || !user?.uid) return;
     const fetchTotal = async () => {
       try {
         const snapshot = await getCountFromServer(collection(db, 'orders'));
@@ -82,12 +82,11 @@ export default function ControlCenterPage() {
       }
     };
     fetchTotal();
-  }, [db, user]);
+  }, [db, user?.uid]);
 
   const ordersQuery = useMemoFirebase(() => {
-    // CRITICAL: No iniciar consulta hasta que el usuario esté autenticado
-    if (!db || !user) return null;
-    // Buffer ampliado a 20k para cubrir el universo total
+    // CRITICAL: Sincronización de Auth para evitar error de permisos
+    if (!db || !user?.uid) return null;
     return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(20000));
   }, [db, user?.uid]);
 
@@ -180,7 +179,7 @@ export default function ControlCenterPage() {
     return `$${val}`;
   };
 
-  if (isLoading || !user) return (
+  if (!user?.uid || isLoading) return (
     <div className="flex h-screen items-center justify-center bg-slate-100 flex-col gap-4">
       <Activity className="h-12 w-12 text-cyan-500 animate-spin" />
       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Sincronizando Inteligencia Operativa 80/20...</p>
@@ -287,7 +286,7 @@ export default function ControlCenterPage() {
                   <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em]">Operational Impact Monitor</h4>
                   <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
                 </div>
-                <div className="flex bg-slate-100 p-1 rounded-sm gap-1 border border-slate-100">
+                <div className="flex bg-slate-50 p-1 rounded-sm gap-1 border border-slate-100">
                   {[
                     { id: 'volume', label: 'VOLUME', icon: Layers },
                     { id: 'impact', label: 'IMPACT', icon: Target },
@@ -483,7 +482,7 @@ export default function ControlCenterPage() {
           <div className="flex items-center gap-8">
             <span className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-4">
               <div className="h-2.5 w-2.5 rounded-full bg-cyan-500 shadow-[0_0_10px_rgba(0,216,255,0.8)]" />
-              Operational 80/20 Live // System Ver: 2.2.1 Premium
+              Operational 80/20 Live // System Ver: 2.2.2 Premium
             </span>
             <Separator orientation="vertical" className="h-6" />
             <div className="flex gap-4">
