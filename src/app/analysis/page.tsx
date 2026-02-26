@@ -12,14 +12,10 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Sparkles, 
-  LayoutGrid, 
-  X, 
   Filter,
-  ListOrdered,
   AlertTriangle,
   Search,
   Trash2,
-  FileText,
   BarChart4,
   CheckCircle2,
   Clock,
@@ -104,6 +100,7 @@ export default function AnalysisPage() {
     try {
       const coll = collection(db, 'orders');
       
+      // Consultas de conteo separadas para evitar errores de índice compuesto en el dashboard superior
       const [totalSnap, autoSnap, reviewedSnap] = await Promise.all([
         getCountFromServer(query(coll)),
         getCountFromServer(query(coll, where('classification_status', '==', 'auto'))),
@@ -133,6 +130,7 @@ export default function AnalysisPage() {
     let q = collection(db, 'orders');
     let baseQuery;
 
+    // Filtros normalizados para coincidir con firestore.indexes.json
     if (aiFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else {
@@ -155,6 +153,7 @@ export default function AnalysisPage() {
 
   const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
 
+  // Detección de error de índice compuesto (failed-precondition)
   const isIndexError = error && (error.message.includes('requires an index') || (error as any).code === 'failed-precondition');
 
   const handleNextPage = () => {
@@ -318,23 +317,22 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6 space-y-6">
-          {error && (
-            <Alert variant="destructive" className="bg-rose-50 border-rose-200 shadow-sm rounded-2xl">
+          {isIndexError && (
+            <Alert variant="destructive" className="bg-rose-50 border-rose-200 shadow-sm rounded-2xl animate-in slide-in-from-top-2">
               <AlertTriangle className="h-5 w-5" />
               <AlertTitle className="text-sm font-black uppercase tracking-tight">
-                {isIndexError ? "Índice de Base de Datos Requerido" : "Error de Consulta"}
+                Sincronización de Índices Requerida
               </AlertTitle>
               <AlertDescription className="text-xs leading-relaxed mt-1">
-                {isIndexError ? (
-                  <div className="space-y-3">
-                    <p>Esta consulta requiere un índice compuesto en Firestore para funcionar con filtros. El sistema está en proceso de activación.</p>
-                    <div className="flex gap-2">
-                      <Button asChild size="sm" variant="outline" className="h-8 text-[9px] font-black uppercase bg-white border-rose-200 text-rose-600 hover:bg-rose-100">
-                        <a href={error.message.split('here: ')[1]} target="_blank" rel="noreferrer">Activar Índice Manualmente</a>
-                      </Button>
-                    </div>
+                <div className="space-y-3">
+                  <p>Para habilitar los filtros avanzados en el universo de 11,150 registros, Firestore requiere un índice compuesto. Por favor, actívelo usando el enlace de abajo.</p>
+                  <div className="flex gap-2">
+                    <Button asChild size="sm" variant="outline" className="h-8 text-[9px] font-black uppercase bg-white border-rose-200 text-rose-600 hover:bg-rose-100">
+                      <a href="https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes?create_composite=ClZwcm9qZWN0cy9zdHVkaW8tNTUxOTE2NTkzOS0yNDdlMS9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvb3JkZXJzL2luZGV4ZXMvXxABGhkKFWNsYXNzaWZpY2F0aW9uX3N0YXR1cxABGg0KCXByb2plY3RJZBABGgwKCF9fbmFtZV9fEAE" target="_blank" rel="noreferrer">Activar Índice Manualmente</a>
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setAiFilter('all')} className="h-8 text-[9px] font-black uppercase text-slate-500">Volver a Todos</Button>
                   </div>
-                ) : error.message}
+                </div>
               </AlertDescription>
             </Alert>
           )}
@@ -409,7 +407,7 @@ export default function AnalysisPage() {
                       <div className="space-y-4 max-w-sm mx-auto">
                         <Database className="h-12 w-12 mx-auto text-rose-200" />
                         <p className="text-slate-500 font-bold uppercase text-[10px] leading-relaxed">
-                          Base de Datos Sincronizando Índices... Por favor, usa el filtro "Todos" mientras se completa el proceso.
+                          Base de Datos Sincronizando Índices... Por favor, usa el filtro "Todos" mientras se completa el proceso en el servidor.
                         </p>
                         <Button variant="outline" size="sm" onClick={() => setAiFilter('all')} className="rounded-xl text-[9px] font-black uppercase">Volver a vista general</Button>
                       </div>
@@ -426,6 +424,7 @@ export default function AnalysisPage() {
                   </TableRow>
                 ) : orders.map((order) => {
                   const isAuto = order.classification_status === 'auto' || order.classification_status === 'reviewed';
+                  const hasDiscipline = !!order.disciplina_normalizada;
                   
                   return (
                     <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
@@ -438,7 +437,7 @@ export default function AnalysisPage() {
                       <TableCell>
                         {isAuto ? (
                           <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2">AUTO IA</Badge>
-                        ) : order.disciplina_normalizada ? (
+                        ) : hasDiscipline ? (
                           <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2">IMPORTADO</Badge>
                         ) : (
                           <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2">PENDIENTE</Badge>
