@@ -23,7 +23,8 @@ import {
   BarChart4,
   CheckCircle2,
   Clock,
-  Zap
+  Zap,
+  Info
 } from 'lucide-react';
 import {
   Table,
@@ -41,7 +42,6 @@ import {
   query, 
   limit, 
   doc, 
-  writeBatch, 
   orderBy, 
   getCountFromServer, 
   startAfter, 
@@ -99,7 +99,6 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Fetch Estadísticas Globales (Sincronizado con los 3,630+ procesados)
   const fetchStats = async () => {
     if (!db || !isAuthReady) return;
     try {
@@ -128,7 +127,6 @@ export default function AnalysisPage() {
     fetchStats();
   }, [db, isAuthReady]);
 
-  // Query Paginada compatible con índices compuestos
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
@@ -156,6 +154,8 @@ export default function AnalysisPage() {
   }, [db, isAuthReady, pageSize, currentPage, aiFilter, pageHistory]);
 
   const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
+
+  const isIndexError = error && (error.message.includes('requires an index') || (error as any).code === 'failed-precondition');
 
   const handleNextPage = () => {
     if (snapshot && snapshot.docs.length === pageSize) {
@@ -319,11 +319,22 @@ export default function AnalysisPage() {
 
         <main className="p-6 space-y-6">
           {error && (
-            <Alert variant="destructive" className="bg-rose-50 border-rose-200">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle className="text-xs font-black uppercase">Error de Consulta</AlertTitle>
-              <AlertDescription className="text-[10px] leading-relaxed">
-                {error.message}
+            <Alert variant="destructive" className="bg-rose-50 border-rose-200 shadow-sm rounded-2xl">
+              <AlertTriangle className="h-5 w-5" />
+              <AlertTitle className="text-sm font-black uppercase tracking-tight">
+                {isIndexError ? "Índice de Base de Datos Requerido" : "Error de Consulta"}
+              </AlertTitle>
+              <AlertDescription className="text-xs leading-relaxed mt-1">
+                {isIndexError ? (
+                  <div className="space-y-3">
+                    <p>Esta consulta requiere un índice compuesto en Firestore para funcionar con filtros. El sistema está en proceso de activación.</p>
+                    <div className="flex gap-2">
+                      <Button asChild size="sm" variant="outline" className="h-8 text-[9px] font-black uppercase bg-white border-rose-200 text-rose-600 hover:bg-rose-100">
+                        <a href={error.message.split('here: ')[1]} target="_blank" rel="noreferrer">Activar Índice Manualmente</a>
+                      </Button>
+                    </div>
+                  </div>
+                ) : error.message}
               </AlertDescription>
             </Alert>
           )}
@@ -392,6 +403,18 @@ export default function AnalysisPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={6} className="text-center py-32"><RefreshCcw className="h-10 w-10 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
+                ) : isIndexError ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-32">
+                      <div className="space-y-4 max-w-sm mx-auto">
+                        <Database className="h-12 w-12 mx-auto text-rose-200" />
+                        <p className="text-slate-500 font-bold uppercase text-[10px] leading-relaxed">
+                          Base de Datos Sincronizando Índices... Por favor, usa el filtro "Todos" mientras se completa el proceso.
+                        </p>
+                        <Button variant="outline" size="sm" onClick={() => setAiFilter('all')} className="rounded-xl text-[9px] font-black uppercase">Volver a vista general</Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
                 ) : !orders || orders.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-32">
