@@ -16,7 +16,7 @@ import {
   Sparkles,
   Database
 } from 'lucide-react';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, limit, getCountFromServer } from 'firebase/firestore';
 import { chatWithAi } from '@/ai/flows/chat-assistant-flow';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +32,7 @@ type Message = {
 export default function ChatPage() {
   const { toast } = useToast();
   const db = useFirestore();
+  const { user } = useUser();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -40,19 +41,23 @@ export default function ChatPage() {
 
   // SSOT: Conteo global real
   useEffect(() => {
-    if (!db) return;
+    if (!db || !user?.uid) return;
     const fetchTotal = async () => {
-      const snapshot = await getCountFromServer(collection(db, 'orders'));
-      setTotalInDb(snapshot.data().count);
+      try {
+        const snapshot = await getCountFromServer(collection(db, 'orders'));
+        setTotalInDb(snapshot.data().count);
+      } catch (e) {
+        console.warn("Failed to fetch total count:", e);
+      }
     };
     fetchTotal();
-  }, [db]);
+  }, [db, user?.uid]);
 
-  // Consulta de órdenes para el contexto (Expandido a 10k para SSOT)
+  // Consulta de órdenes para el contexto (Sincronizado con UID)
   const ordersQuery = useMemoFirebase(() => {
-    if (!db) return null;
+    if (!db || !user?.uid) return null;
     return query(collection(db, 'orders'), limit(10000));
-  }, [db]);
+  }, [db, user?.uid]);
   const { data: orders } = useCollection(ordersQuery);
 
   useEffect(() => {

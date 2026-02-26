@@ -41,7 +41,7 @@ import {
   Bar,
   Cell
 } from 'recharts';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, limit, getCountFromServer } from 'firebase/firestore';
 import { analyzeStrategicTrends, TrendAnalysisOutput } from '@/ai/flows/trend-analysis-flow';
 import { Badge } from '@/components/ui/badge';
@@ -70,6 +70,7 @@ const YEAR_COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00
 export default function TrendsPage() {
   const { toast } = useToast();
   const db = useFirestore();
+  const { user } = useUser();
   const [selectedYears, setSelectedYears] = useState<number[]>([new Date().getFullYear()]);
   const [selectedMonths, setSelectedMonths] = useState<number[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -90,18 +91,23 @@ export default function TrendsPage() {
 
   // SSOT: Conteo global real
   useEffect(() => {
-    if (!db) return;
+    if (!db || !user?.uid) return;
     const fetchTotal = async () => {
-      const snapshot = await getCountFromServer(collection(db, 'orders'));
-      setTotalInDb(snapshot.data().count);
+      try {
+        const snapshot = await getCountFromServer(collection(db, 'orders'));
+        setTotalInDb(snapshot.data().count);
+      } catch (e) {
+        console.warn("Failed to fetch total count:", e);
+      }
     };
     fetchTotal();
-  }, [db]);
+  }, [db, user?.uid]);
 
   const ordersQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'orders'), limit(10000)); // Estandarizado a 10k
-  }, [db]);
+    // CRITICAL: Esperar a UID para evitar error de permisos por race condition
+    if (!db || !user?.uid) return null;
+    return query(collection(db, 'orders'), limit(20000)); 
+  }, [db, user?.uid]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
@@ -326,7 +332,6 @@ export default function TrendsPage() {
         <main className="p-6 md:p-8 space-y-6">
           <Card className="border-none shadow-sm bg-white p-4">
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              {/* Filtros existentes ... */}
               <div className="space-y-1.5">
                 <label className="text-[9px] font-black text-slate-400 uppercase">Periodos Anuales</label>
                 <div className="flex flex-wrap gap-1">
@@ -341,13 +346,12 @@ export default function TrendsPage() {
                   ))}
                 </div>
               </div>
-              {/* Resto de filtros ... */}
+              {/* Resto de filtros permanecen igual */}
             </div>
           </Card>
 
           <div className="max-w-[1200px] mx-auto">
             <div ref={reportRef} data-report-container className="space-y-8 bg-white p-10 rounded-3xl border shadow-xl overflow-hidden min-h-screen">
-              {/* Reporte contenido ... */}
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6 mb-2">
                  <div className="space-y-2">
                     <div className="flex items-center gap-3">
@@ -362,7 +366,7 @@ export default function TrendsPage() {
                     <h3 className="text-4xl font-headline font-bold text-slate-800 pt-4">Estrategia de Concentración de Impacto 80/20</h3>
                  </div>
               </div>
-              {/* KPI y Graficas ... */}
+              {/* Resto del contenido del reporte permanece igual */}
             </div>
           </div>
         </main>

@@ -51,7 +51,7 @@ import {
   Area,
   LabelList
 } from 'recharts';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, limit, getCountFromServer } from 'firebase/firestore';
 import {
   Select,
@@ -151,6 +151,7 @@ const CustomTooltip = ({ active, payload, label, currencyFormatter }: any) => {
 export default function VpDashboard() {
   const { toast } = useToast();
   const db = useFirestore();
+  const { user } = useUser();
   const [selectedYears, setSelectedYears] = useState<number[]>([2024, 2025]);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [actionPlan, setActionPlan] = useState<TrendAnalysisOutput | null>(null);
@@ -167,7 +168,7 @@ export default function VpDashboard() {
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
-    if (!db) return;
+    if (!db || !user?.uid) return;
     const fetchTotal = async () => {
       try {
         const snapshot = await getCountFromServer(collection(db, 'orders'));
@@ -177,13 +178,13 @@ export default function VpDashboard() {
       }
     };
     fetchTotal();
-  }, [db]);
+  }, [db, user?.uid]);
 
   const ordersQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    // Buffer ampliado a 20k para cubrir el universo total
+    // CRITICAL: Solo iniciar suscripción cuando el usuario esté autenticado para evitar race condition
+    if (!db || !user?.uid) return null;
     return query(collection(db, 'orders'), limit(20000)); 
-  }, [db]);
+  }, [db, user?.uid]);
 
   const { data: rawOrders, isLoading } = useCollection(ordersQuery);
 

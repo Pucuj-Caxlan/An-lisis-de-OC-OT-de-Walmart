@@ -2,49 +2,44 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Versión 2.2.2 - Estabilización de Permisos para Tokens Custom (Sin Email)
-    // Permite el listado masivo de registros para la auditoría estratégica 80/20.
+    // Versión 2.3.0 - Restauración de Compatibilidad Feb-20 + Estabilización Custom Auth
     
     function isSignedIn() {
-      // Validamos la existencia de UID, ignorando si el email es null (Tokens Custom)
+      // Validamos UID para soportar Custom Tokens sin email (Walmart Standard)
       return request.auth != null && request.auth.uid != null;
     }
     
-    // Regla para la colección de órdenes (soporta list masivo)
+    // Colección Principal de Órdenes
     match /orders/{orderId} {
-      // Permitimos lectura total (get y list) para usuarios autenticados
+      // Permite listado masivo y lectura individual
       allow read: if isSignedIn();
-      // Bloqueamos escritura desde cliente para forzar uso de servicios controlados
+      // Permite escritura para procesos de ingesta y clasificación IA
       allow write: if isSignedIn();
     }
 
-    // Regla para auditorías e informes forenses
-    match /audits/{auditId} {
-      allow read, write: if isSignedIn();
-    }
+    // Soporte para Taxonomías e Inteligencia Semántica
+    match /taxonomy_disciplines/{id} { allow read: if isSignedIn(); }
+    match /taxonomy_causes/{id} { allow read: if isSignedIn(); }
+    match /classification_overrides/{id} { allow read, write: if isSignedIn(); }
     
-    match /audit_logs/{logId} {
-      allow read, create: if isSignedIn();
+    // Soporte para Agregados y Dashboards de Alto Nivel
+    match /aggregates/{document=**} {
+      allow read: if isSignedIn();
     }
 
-    match /deletion_jobs/{jobId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /word_cloud_snapshots/{snapshotId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /importBatches/{batchId} {
-      allow read, write: if isSignedIn();
-    }
+    // Procesos Operativos y Auditoría
+    match /audits/{id} { allow read, write: if isSignedIn(); }
+    match /audit_logs/{id} { allow read, write: if isSignedIn(); }
+    match /deletion_jobs/{id} { allow read, write: if isSignedIn(); }
+    match /word_cloud_snapshots/{id} { allow read, write: if isSignedIn(); }
+    match /importBatches/{id} { allow read, write: if isSignedIn(); }
     
-    // Perfiles de usuario: Seguridad por ID de recurso
+    // Perfiles de Usuario
     match /users/{userId} {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
-    // Regla de respaldo global - SOLO LECTURA, NO ESCRITURA
+    // Regla de Respaldo de Seguridad - SOLO LECTURA
     match /{document=**} {
       allow read: if isSignedIn();
       allow write: if false; 
