@@ -21,8 +21,7 @@ import {
   Zap,
   Target,
   DollarSign,
-  Layers,
-  LayoutGrid
+  Layers
 } from 'lucide-react';
 import {
   Table,
@@ -48,7 +47,8 @@ import {
   setDoc,
   increment,
   updateDoc,
-  getCountFromServer
+  getCountFromServer,
+  getDocs
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -66,7 +66,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from '@/checkbox';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -128,7 +128,7 @@ export default function AnalysisPage() {
     return groups;
   }, [globalAgg]);
 
-  // 3. Actualizar KPIs Dinámicos
+  // 3. Actualizar KPIs Dinámicos basados en la selección
   useEffect(() => {
     if (!globalAgg) return;
 
@@ -164,7 +164,7 @@ export default function AnalysisPage() {
     }
   }, [disciplineFilter, globalAgg, groupedDisciplines]);
 
-  // 4. Query Paginada
+  // 4. Query Paginada con Cursor
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
@@ -178,6 +178,7 @@ export default function AnalysisPage() {
     } else {
       const group = groupedDisciplines[disciplineFilter];
       const names = group?.rawNames || [disciplineFilter];
+      // Limitamos a 30 variantes para el filtro 'in' de Firestore
       baseQuery = query(q, where('disciplina_normalizada', 'in', names.slice(0, 30)), orderBy('projectId', 'asc'), limit(pageSize));
     }
 
@@ -229,7 +230,6 @@ export default function AnalysisPage() {
       [impactPath]: increment(impact),
       lastUpdate: new Date().toISOString()
     }).catch(() => {
-      // Si falla por no existir el campo anidado, inicializamos
       setDoc(ref, {
         disciplines: {
           [discName]: { count: 1, impact: impact }
@@ -257,9 +257,7 @@ export default function AnalysisPage() {
         processedAt: new Date().toISOString()
       });
 
-      // Actualizar agregado localmente para feedback inmediato
       await updateGlobalStatsIncrementally(result.disciplina_normalizada, order.impactoNeto || 0);
-
       toast({ title: "Registro Clasificado", description: result.disciplina_normalizada });
     } catch (e) {
       toast({ variant: "destructive", title: "Error IA", description: "Fallo en motor Gemini." });
@@ -301,11 +299,11 @@ export default function AnalysisPage() {
         setProcessedCount(i + 1);
         setBulkAiProgress(Math.round(((i + 1) / targetOrders.length) * 100));
       } catch (e) {
-        console.error(`Error processing ${order.id}:`, e);
+        console.error(`Error bulk processing:`, e);
       }
     }
 
-    toast({ title: "Procesamiento Masivo Completo", description: `${targetOrders.length} registros actualizados.` });
+    toast({ title: "Procesamiento Completo", description: `${targetOrders.length} registros actualizados.` });
     setIsBulkProcessing(false);
     setSelectedIds([]);
     setTimeout(() => setShowBulkAiDialog(false), 2000);
@@ -323,7 +321,7 @@ export default function AnalysisPage() {
         lastUpdate: new Date().toISOString()
       });
       
-      toast({ title: "Universo Sincronizado", description: `Total real: ${total.toLocaleString()} registros.` });
+      toast({ title: "Universo Sincronizado", description: `Total: ${total.toLocaleString()} registros.` });
     } catch (e) {
       toast({ variant: "destructive", title: "Error al sincronizar" });
     } finally {
@@ -416,7 +414,7 @@ export default function AnalysisPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase">Universo {disciplineFilter !== 'all' ? disciplineFilter : 'Walmart'}</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Universo {disciplineFilter !== 'all' ? (disciplineFilter === 'unclassified' ? 'Pendiente' : disciplineFilter) : 'Walmart'}</p>
                 <Database className="h-4 w-4 text-primary opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-slate-800">{stats.total.toLocaleString()}</h4>
