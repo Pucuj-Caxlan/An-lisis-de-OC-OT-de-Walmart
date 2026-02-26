@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -84,7 +85,8 @@ export default function ControlCenterPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(5000));
+    // Buffer ampliado a 20k para cubrir el universo total
+    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(20000));
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -198,7 +200,7 @@ export default function ControlCenterPage() {
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant="outline" className="text-[10px] font-black border-slate-300 bg-slate-50 text-cyan-600 px-2 py-0">STRATEGIC FOCUS 80/20</Badge>
                 <div className="h-1 w-1 rounded-full bg-slate-300" />
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Global SSOT: {totalInDb || 0} Records</span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Global SSOT: {totalInDb || orders?.length || 0} Records</span>
               </div>
             </div>
           </div>
@@ -283,10 +285,10 @@ export default function ControlCenterPage() {
                   <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em]">Operational Impact Monitor</h4>
                   <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
                 </div>
-                <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+                <div className="flex bg-slate-100 p-1 rounded-sm gap-1 border border-slate-100">
                   {[
-                    { id: 'impact', label: 'IMPACT ($)', icon: Target },
-                    { id: 'volume', label: 'VOLUME (#)', icon: Layers },
+                    { id: 'volume', label: 'VOLUME', icon: Layers },
+                    { id: 'impact', label: 'IMPACT', icon: Target },
                     { id: 'concentration', label: '80/20 CONC.', icon: Focus }
                   ].map((t) => (
                     <button 
@@ -341,7 +343,7 @@ export default function ControlCenterPage() {
               </div>
               <div className="mt-6 flex justify-between items-center bg-slate-50 p-4 rounded-xl">
                 <p className="text-[10px] text-slate-500 font-bold uppercase italic flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-amber-500" /> Alta concentración de impacto detectada en la semana 2. Se recomienda auditoría estratégica.
+                  <AlertTriangle className="h-4 w-4 text-amber-500" /> Alta concentración de impacto detectada en la muestra actual. Se recomienda auditoría estratégica.
                 </p>
                 <div className="flex items-center gap-6">
                   <div className="flex items-center gap-2">

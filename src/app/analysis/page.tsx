@@ -87,8 +87,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const MAX_BULK_AI_RECORDS = 300;
-const AI_BATCH_SIZE = 3; 
+const MAX_BULK_AI_RECORDS = 500;
+const AI_BATCH_SIZE = 5; 
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -127,20 +127,24 @@ export default function AnalysisPage() {
   useEffect(() => {
     if (!db) return;
     const fetchTotal = async () => {
-      const coll = collection(db, 'orders');
-      const snapshot = await getCountFromServer(coll);
-      setTotalInDb(snapshot.data().count);
+      try {
+        const coll = collection(db, 'orders');
+        const snapshot = await getCountFromServer(coll);
+        setTotalInDb(snapshot.data().count);
+      } catch (e) {
+        console.warn("Failed to fetch total count:", e);
+      }
     };
     fetchTotal();
   }, [db]);
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    // Buffer SSOT de 10k para búsqueda instantánea
+    // Buffer ampliado a 20k para cubrir el universo de 11,150 registros
     return query(
       collection(db, 'orders'), 
       orderBy('projectId', 'desc'),
-      limit(10000)
+      limit(20000)
     );
   }, [db]);
 
@@ -149,7 +153,6 @@ export default function AnalysisPage() {
   const classificationCounts = useMemo(() => {
     if (!orders) return { classified: 0, pending: 0, needs_review: 0, low_confidence: 0 };
     return {
-      // Estricto: Debe tener estatus auto/reviewed Y el objeto de análisis semántico real
       classified: orders.filter(o => (o.classification_status === 'auto' || o.classification_status === 'reviewed') && o.semanticAnalysis).length,
       pending: orders.filter(o => !o.classification_status || o.classification_status === 'pending' || !o.semanticAnalysis).length,
       needs_review: orders.filter(o => o.needs_review === true).length,
@@ -158,11 +161,11 @@ export default function AnalysisPage() {
   }, [orders]);
 
   const stats = useMemo(() => {
-    const total = totalInDb || 0;
+    const total = totalInDb || orders?.length || 0;
     const classified = classificationCounts.classified;
     const coverage = total > 0 ? (classified / total) * 100 : 0;
     return { total, audited: classified, coverage };
-  }, [totalInDb, classificationCounts]);
+  }, [totalInDb, classificationCounts, orders]);
 
   const formatAmount = (amount: number) => {
     if (!mounted) return "0.00";
@@ -188,7 +191,6 @@ export default function AnalysisPage() {
     });
   }, [orders, searchTerm, aiFilter]);
 
-  // Paginación reactiva basada en el estado pageSize
   const pagedOrders = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
     return filteredOrdersFull.slice(start, start + pageSize);
@@ -482,7 +484,7 @@ export default function AnalysisPage() {
                   <SelectValue placeholder="Seleccionar estado..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos ({totalInDb || 0})</SelectItem>
+                  <SelectItem value="all">Todos ({totalInDb || orders?.length || 0})</SelectItem>
                   <SelectItem value="classified" className="text-emerald-600">Clasificados IA ({classificationCounts.classified})</SelectItem>
                   <SelectItem value="not_classified" className="text-amber-600">Pendientes de Procesar ({classificationCounts.pending})</SelectItem>
                   <SelectItem value="needs_review" className="text-rose-600">Pendientes de revisión ({classificationCounts.needs_review})</SelectItem>
@@ -508,7 +510,7 @@ export default function AnalysisPage() {
             <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Universo Total</p>
-                <h4 className="text-2xl font-headline font-bold text-slate-800">{totalInDb === null ? '--' : totalInDb}</h4>
+                <h4 className="text-2xl font-headline font-bold text-slate-800">{totalInDb === null ? (orders?.length || '--') : totalInDb}</h4>
               </div>
               <Database className="h-8 w-8 text-primary/10" />
             </Card>

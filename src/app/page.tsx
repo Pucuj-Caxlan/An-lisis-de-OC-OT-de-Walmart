@@ -101,7 +101,6 @@ const normalizeCauseString = (cause: string): string => {
   if (!cause) return "Errores / Omisiones";
   const c = cause.toLowerCase().trim();
   
-  // Mapeo estricto a las 8 categorías oficiales de Walmart
   if (c.includes("alcance") && c.includes("plan")) return "Alta de alcance en plan";
   if (c.includes("error") || c.includes("omision") || c.includes("omisión") || c.includes("humano") || c.includes("diseño") || c.includes("ingeniería")) return "Errores / Omisiones";
   if (c.includes("cumplimiento") || c.includes("autoridad") || c.includes("regulatorio") || c.includes("normativa")) return "Solicitud de Cumplimiento / Autoridad";
@@ -111,7 +110,7 @@ const normalizeCauseString = (cause: string): string => {
   if (c.includes("siniestro") || c.includes("siniestros") || c.includes("inundación") || c.includes("desastre")) return "Imprevistos por siniestro";
   if (c.includes("hallazgo") || c.includes("sitio") || c.includes("subsuelo") || c.includes("terreno") || c.includes("construcción") || c.includes("roca") || c.includes("freático")) return "Hallazgos / imprevistos en sitio durante proceso de Construcción";
   
-  return "Errores / Omisiones"; // Default fallback
+  return "Errores / Omisiones";
 };
 
 const CustomTooltip = ({ active, payload, label, currencyFormatter }: any) => {
@@ -170,15 +169,20 @@ export default function VpDashboard() {
   useEffect(() => {
     if (!db) return;
     const fetchTotal = async () => {
-      const snapshot = await getCountFromServer(collection(db, 'orders'));
-      setTotalInDb(snapshot.data().count);
+      try {
+        const snapshot = await getCountFromServer(collection(db, 'orders'));
+        setTotalInDb(snapshot.data().count);
+      } catch (e) {
+        console.warn("Failed to fetch total count:", e);
+      }
     };
     fetchTotal();
   }, [db]);
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), limit(10000)); 
+    // Buffer ampliado a 20k para cubrir el universo total
+    return query(collection(db, 'orders'), limit(20000)); 
   }, [db]);
 
   const { data: rawOrders, isLoading } = useCollection(ordersQuery);
@@ -221,7 +225,7 @@ export default function VpDashboard() {
       const monthIdx = date.getMonth();
 
       const yearMatch = selectedYears.includes(yr!);
-      const monthMatch = filters.month === 'all' || monthMatch === parseInt(filters.month);
+      const monthMatch = filters.month === 'all' || monthIdx === parseInt(filters.month);
       const discMatch = filters.discipline === 'all' || (o.disciplina_normalizada || o.semanticAnalysis?.disciplina_normalizada) === filters.discipline;
       const formatMatch = filters.storeFormat === 'all' || o.format === filters.storeFormat;
       const searchMatch = !filters.search || 
@@ -368,7 +372,7 @@ export default function VpDashboard() {
                 onClick={() => handleToggleYear('all')} 
                 className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-1.5 ${selectedYears.length === YEARS.length ? 'bg-primary text-white shadow-lg' : 'text-slate-500 hover:bg-white'}`}
               >
-                TODO <span className="opacity-60">({totalInDb || 0})</span>
+                TODO <span className="opacity-60">({totalInDb || rawOrders?.length || 0})</span>
               </button>
               {YEARS.map(y => (
                 <button 
@@ -604,7 +608,7 @@ export default function VpDashboard() {
                           <LabelList 
                             dataKey="impact" 
                             position="right" 
-                            formatter={(v: any) => `${Math.round((v / metrics.totalImpact) * 100)}%`}
+                            formatter={(v: any) => `${Math.round((v / (metrics.totalImpact || 1)) * 100)}%`}
                             style={{ fontSize: '9px', fontWeight: 'bold', fill: '#94a3b8' }}
                           />
                         </Bar>
@@ -680,7 +684,7 @@ export default function VpDashboard() {
                 <CardTitle className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
                   <LayoutGrid className="h-4 w-4" /> Muestra de Registros para el Periodo {selectedYears.length === YEARS.length ? 'TOTAL' : selectedYears.join(', ')}
                 </CardTitle>
-                <CardDescription className="text-[9px] font-medium uppercase text-slate-400">Exhibiendo {filteredData.length} registros que alimentan los KPIs actuales</CardDescription>
+                <CardDescription className="text-[9px] font-medium uppercase text-slate-400">Exhibiendo hasta 100 registros de la muestra filtrada</CardDescription>
               </div>
               <Badge className="bg-emerald-50 text-emerald-700 text-[9px] font-black border-none px-4 py-1.5 uppercase flex items-center gap-2">
                 <CheckCircle2 className="h-3.5 w-3.5" /> Sincronización Certificada
@@ -858,7 +862,7 @@ export default function VpDashboard() {
 
             <footer className="p-8 bg-white border-t sticky bottom-0 z-20 flex justify-between items-center rounded-b-[2.5rem]">
               <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase">
-                <AlertCircle className="h-4 w-4 text-amber-500" /> Basado en el universo de {filteredData.length} registros auditados.
+                <AlertCircle className="h-4 w-4 text-amber-500" /> Basado en el universo de registros auditados en el periodo.
               </div>
               <div className="flex gap-3">
                 <Button variant="outline" className="rounded-xl h-11 px-6 uppercase text-[10px] font-black gap-2" onClick={handleCopySummary}>

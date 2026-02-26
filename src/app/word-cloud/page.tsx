@@ -83,15 +83,20 @@ export default function WordCloudPage() {
   useEffect(() => {
     if (!db) return;
     const fetchTotal = async () => {
-      const snapshot = await getCountFromServer(collection(db, 'orders'));
-      setTotalInDb(snapshot.data().count);
+      try {
+        const snapshot = await getCountFromServer(collection(db, 'orders'));
+        setTotalInDb(snapshot.data().count);
+      } catch (e) {
+        console.warn("Failed to fetch total count:", e);
+      }
     };
     fetchTotal();
   }, [db]);
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(10000)); // Estandarizado a 10k
+    // Buffer ampliado a 20k
+    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(20000));
   }, [db]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -365,7 +370,7 @@ export default function WordCloudPage() {
                 </div>
                 <div>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Universo Global (SSOT)</p>
-                  <h4 className="text-xl font-headline font-bold text-slate-800 leading-none">{totalInDb || 0} Registros</h4>
+                  <h4 className="text-xl font-headline font-bold text-slate-800 leading-none">{totalInDb || orders?.length || 0} Registros</h4>
                 </div>
               </div>
               <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-100 text-[9px] font-black">ACTIVO</Badge>
@@ -389,7 +394,7 @@ export default function WordCloudPage() {
                 </div>
                 <div>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Pendientes IA</p>
-                  <h4 className="text-xl font-headline font-bold text-amber-600 leading-none">{(totalInDb || 0) - classifiedCount}</h4>
+                  <h4 className="text-xl font-headline font-bold text-amber-600 leading-none">{(totalInDb || orders?.length || 0) - classifiedCount}</h4>
                 </div>
               </div>
               <Badge variant="outline" className="text-[8px] font-black uppercase">REQUERIDO</Badge>
@@ -397,9 +402,7 @@ export default function WordCloudPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Visualización Cloud ... */}
             <Card className="lg:col-span-3 border-none shadow-xl bg-white rounded-3xl overflow-hidden min-h-[600px] flex flex-col">
-              {/* Contenido existente del mapa de calor ... */}
               <CardHeader className="bg-slate-900 text-white p-6 shrink-0">
                 <div className="flex justify-between items-center">
                   <div className="space-y-1">
@@ -411,7 +414,6 @@ export default function WordCloudPage() {
                 </div>
               </CardHeader>
               <CardContent className="flex-1 p-10 flex flex-wrap items-center justify-center gap-x-8 gap-y-6 relative bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px]">
-                {/* Lógica de renderizado de palabras ... */}
                 {isLoading ? (
                   <RefreshCcw className="h-12 w-12 animate-spin text-primary opacity-20" />
                 ) : cloudData?.concepts?.map((word, i) => (
@@ -461,7 +463,6 @@ export default function WordCloudPage() {
                   )}
                 </CardContent>
               </Card>
-              {/* Detalle del concepto seleccionado ... */}
             </aside>
           </div>
         </main>
