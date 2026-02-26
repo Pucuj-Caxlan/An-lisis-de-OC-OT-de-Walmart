@@ -48,7 +48,6 @@ import {
   increment,
   updateDoc,
   getCountFromServer,
-  getDocs
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -105,65 +104,6 @@ export default function AnalysisPage() {
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // 2. Normalización de Disciplinas para el Filtro
-  const groupedDisciplines = useMemo(() => {
-    if (!globalAgg?.disciplines) return {};
-    const groups: Record<string, { count: number, impact: number, rawNames: string[] }> = {};
-    
-    Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
-      let normalized = String(name).trim().toUpperCase();
-      // Agrupar singulares y plurales básicos
-      if (normalized.endsWith('S') && normalized.length > 4) {
-        normalized = normalized.substring(0, normalized.length - 1);
-      }
-      
-      if (!groups[normalized]) {
-        groups[normalized] = { count: 0, impact: 0, rawNames: [] };
-      }
-      groups[normalized].count += s.count || 0;
-      groups[normalized].impact += s.impact || 0;
-      groups[normalized].rawNames.push(name);
-    });
-    
-    return groups;
-  }, [globalAgg]);
-
-  // 3. Actualizar KPIs Dinámicos basados en la selección
-  useEffect(() => {
-    if (!globalAgg) return;
-
-    const totalInDb = globalAgg.totalOrders || 0;
-    const totalImpactInDb = globalAgg.totalImpact || 0;
-    const totalWithData = Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0);
-
-    if (disciplineFilter === 'all') {
-      setStats({
-        total: totalInDb,
-        withData: totalWithData,
-        pending: Math.max(0, totalInDb - totalWithData),
-        totalImpact: totalImpactInDb
-      });
-    } else if (disciplineFilter === 'unclassified') {
-      const pendingCount = Math.max(0, totalInDb - totalWithData);
-      setStats({
-        total: pendingCount,
-        withData: 0,
-        pending: pendingCount,
-        totalImpact: 0 
-      });
-    } else {
-      const group = groupedDisciplines[disciplineFilter];
-      if (group) {
-        setStats({
-          total: group.count,
-          withData: group.count,
-          pending: 0,
-          totalImpact: group.impact
-        });
-      }
-    }
-  }, [disciplineFilter, globalAgg, groupedDisciplines]);
-
   // 4. Query Paginada con Cursor
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
@@ -176,10 +116,8 @@ export default function AnalysisPage() {
     } else if (disciplineFilter === 'unclassified') {
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
-      const group = groupedDisciplines[disciplineFilter];
-      const names = group?.rawNames || [disciplineFilter];
-      // Limitamos a 30 variantes para el filtro 'in' de Firestore
-      baseQuery = query(q, where('disciplina_normalizada', 'in', names.slice(0, 30)), orderBy('projectId', 'asc'), limit(pageSize));
+      // Filtrar por disciplina específica
+      baseQuery = query(q, where('disciplina_normalizada', '==', disciplineFilter), orderBy('projectId', 'asc'), limit(pageSize));
     }
 
     const currentCursor = pageHistory[currentPage - 1];
@@ -188,9 +126,78 @@ export default function AnalysisPage() {
     }
 
     return baseQuery;
-  }, [db, isAuthReady, pageSize, currentPage, disciplineFilter, pageHistory, groupedDisciplines]);
+  }, [db, isAuthReady, pageSize, currentPage, disciplineFilter, pageHistory]);
 
   const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
+
+  // 2. Normalización de Disciplinas para el Filtro
+  const groupedDisciplines = useMemo(() => {
+    const groups: Record<string, { count: number, impact: number, rawNames: string[] }> = {};
+    
+    // Cargar desde agregados globales
+    if (globalAgg?.disciplines) {
+      Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
+        let normalized = String(name).trim().toUpperCase();
+        if (normalized.endsWith('S') && normalized.length > 4) {
+          normalized = normalized.substring(0, normalized.length - 1);
+        }
+        
+        if (!groups[normalized]) {
+          groups[normalized] = { count: 0, impact: 0, rawNames: [] };
+        }
+        groups[normalized].count += s.count || 0;
+        groups[normalized].impact += s.impact || 0;
+        groups[normalized].rawNames.push(name);
+      });
+    }
+
+    // Autodescubrimiento desde los registros cargados actualmente
+    orders?.forEach(o => {
+      if (o.disciplina_normalizada) {
+        let name = o.disciplina_normalizada;
+        let normalized = String(name).trim().toUpperCase();
+        if (!groups[normalized]) {
+          groups[normalized] = { count: 0, impact: 0, rawNames: [name] };
+        } else if (!groups[normalized].rawNames.includes(name)) {
+          groups[normalized].rawNames.push(name);
+        }
+      }
+    });
+    
+    return groups;
+  }, [globalAgg, orders]);
+
+  // 3. Actualizar KPIs Dinámicos basados en la selección
+  useEffect(() => {
+    const totalInDb = globalAgg?.totalOrders || 0;
+    const totalImpactInDb = globalAgg?.totalImpact || 0;
+    const totalWithDataInDb = globalAgg?.totalImpact ? Object.values(globalAgg.disciplines || {}).reduce((acc: number, g: any) => acc + (g.count || 0), 0) : 0;
+
+    if (disciplineFilter === 'all') {
+      setStats({
+        total: totalInDb || (orders?.length || 0),
+        withData: totalWithDataInDb,
+        pending: Math.max(0, totalInDb - totalWithDataInDb),
+        totalImpact: totalImpactInDb
+      });
+    } else if (disciplineFilter === 'unclassified') {
+      const pendingCount = Math.max(0, totalInDb - totalWithDataInDb);
+      setStats({
+        total: pendingCount || (orders?.length || 0),
+        withData: 0,
+        pending: pendingCount || (orders?.length || 0),
+        totalImpact: 0 
+      });
+    } else {
+      const group = groupedDisciplines[disciplineFilter];
+      setStats({
+        total: group?.count || (orders?.length || 0),
+        withData: group?.count || (orders?.length || 0),
+        pending: 0,
+        totalImpact: group?.impact || orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0
+      });
+    }
+  }, [disciplineFilter, globalAgg, groupedDisciplines, orders]);
 
   const isIndexError = error && (error as any).code === 'failed-precondition';
 
@@ -225,17 +232,21 @@ export default function AnalysisPage() {
     const path = `disciplines.${discName}.count`;
     const impactPath = `disciplines.${discName}.impact`;
     
-    updateDoc(ref, {
-      [path]: increment(1),
-      [impactPath]: increment(impact),
-      lastUpdate: new Date().toISOString()
-    }).catch(() => {
-      setDoc(ref, {
+    try {
+      await updateDoc(ref, {
+        [path]: increment(1),
+        [impactPath]: increment(impact),
+        lastUpdate: new Date().toISOString()
+      });
+    } catch {
+      // Si el campo o documento no existe, inicializarlo con setDoc
+      await setDoc(ref, {
         disciplines: {
           [discName]: { count: 1, impact: impact }
-        }
+        },
+        lastUpdate: new Date().toISOString()
       }, { merge: true });
-    });
+    }
   };
 
   const handleSingleSemanticAnalysis = async (order: any) => {
@@ -313,16 +324,19 @@ export default function AnalysisPage() {
     if (!db) return;
     setIsRefreshingStats(true);
     try {
-      const snapshot = await getCountFromServer(collection(db, 'orders'));
+      const colRef = collection(db, 'orders');
+      const snapshot = await getCountFromServer(colRef);
       const total = snapshot.data().count;
       
-      await updateDoc(doc(db, 'aggregates', 'global_stats'), {
+      // Corregido: Usar setDoc con merge para crear el documento si no existe
+      await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: total,
         lastUpdate: new Date().toISOString()
-      });
+      }, { merge: true });
       
       toast({ title: "Universo Sincronizado", description: `Total: ${total.toLocaleString()} registros.` });
     } catch (e) {
+      console.error("Error syncing universe:", e);
       toast({ variant: "destructive", title: "Error al sincronizar" });
     } finally {
       setIsRefreshingStats(false);
@@ -364,7 +378,7 @@ export default function AnalysisPage() {
                     .sort((a, b) => b[1].count - a[1].count)
                     .map(([name, group]) => (
                     <SelectItem key={name} value={name}>
-                      {name} ({group.count})
+                      {name} ({group.count || 'NUEVA'})
                     </SelectItem>
                   ))}
                 </SelectContent>
