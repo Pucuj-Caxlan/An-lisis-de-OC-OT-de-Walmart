@@ -1,25 +1,20 @@
 
 "use client"
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { 
-  Search, 
-  RefreshCcw,
-  Sparkles,
-  ShieldAlert,
+  Database, 
+  RefreshCcw, 
+  ChevronLeft, 
+  ChevronRight, 
+  Sparkles, 
+  LayoutGrid, 
+  X, 
   Filter,
-  Database,
-  LayoutGrid,
-  X,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  CheckCircle2,
   ListOrdered
 } from 'lucide-react';
 import {
@@ -65,34 +60,27 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 
-const AI_BATCH_SIZE = 5;
-
 export default function AnalysisPage() {
   const { toast } = useToast();
   const db = useFirestore();
   const { user, isAuthReady } = useUser();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [aiFilter, setAiFilter] = useState<string>('all');
-  const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
-  
-  // Paginación Real por Cursores
-  const [pageSize, setPageSize] = useState(500); // Límite optimizado
+  const [pageSize, setPageSize] = useState(500);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageHistory, setPageHistory] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
   const [totalGlobal, setTotalGlobal] = useState<number>(0);
-
+  const [aiFilter, setAiFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
-  const [isBulkAiProcessing, setIsBulkAiProcessing] = useState(false);
   const [bulkAiProgress, setBulkAiProgress] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Fetch Total Global SSOT
+  // SSOT: Total real del servidor
   useEffect(() => {
-    if (!db || !user?.uid || !isAuthReady) return;
+    if (!db || !isAuthReady) return;
     const fetchCount = async () => {
       try {
         const q = query(collection(db, 'orders'));
@@ -103,43 +91,33 @@ export default function AnalysisPage() {
       }
     };
     fetchCount();
-  }, [db, user?.uid, isAuthReady]);
+  }, [db, isAuthReady]);
 
-  // Query Paginada con Índices Compuestos
+  // Query Paginada por Cursores
   const ordersQuery = useMemoFirebase(() => {
-    if (!db || !user?.uid || !isAuthReady) return null;
+    if (!db || !isAuthReady) return null;
     
-    // Base de la query: Siempre requiere ordenamiento estable para paginación
-    let q;
+    let q = collection(db, 'orders');
     
+    // Filtros
+    let baseQuery;
     if (aiFilter === 'all') {
-      q = query(
-        collection(db, 'orders'),
-        orderBy('projectId', 'asc'),
-        orderBy('projectName', 'asc'),
-        limit(pageSize)
-      );
+      baseQuery = query(q, orderBy('projectId', 'asc'), orderBy('projectName', 'asc'), limit(pageSize));
     } else {
-      // Queries filtradas que requieren el índice compuesto: classification_status + projectId + projectName
       const statusValue = aiFilter === 'classified' ? 'auto' : 'pending';
-      q = query(
-        collection(db, 'orders'),
-        where('classification_status', '==', statusValue),
-        orderBy('projectId', 'asc'),
-        orderBy('projectName', 'asc'),
-        limit(pageSize)
-      );
+      baseQuery = query(q, where('classification_status', '==', statusValue), orderBy('projectId', 'asc'), orderBy('projectName', 'asc'), limit(pageSize));
     }
 
+    // Cursor
     const currentCursor = pageHistory[currentPage - 1];
     if (currentCursor) {
-      q = query(q, startAfter(currentCursor));
+      baseQuery = query(baseQuery, startAfter(currentCursor));
     }
 
-    return q;
-  }, [db, user?.uid, isAuthReady, pageSize, currentPage, aiFilter, pageHistory]);
+    return baseQuery;
+  }, [db, isAuthReady, pageSize, currentPage, aiFilter, pageHistory]);
 
-  const { data: orders, isLoading, snapshot, error } = useCollection(ordersQuery);
+  const { data: orders, isLoading, snapshot } = useCollection(ordersQuery);
 
   const handleNextPage = () => {
     if (snapshot && snapshot.docs.length === pageSize) {
@@ -163,7 +141,7 @@ export default function AnalysisPage() {
 
   const formatAmount = (amount: number) => {
     if (!mounted) return "0.00";
-    return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+    return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2 }).format(amount);
   };
 
   const handleSingleSemanticAnalysis = async (order: any) => {
@@ -193,45 +171,41 @@ export default function AnalysisPage() {
   };
 
   const handleBulkAiAnalysis = async () => {
-    if (selectedIds.length === 0) return;
+    if (selectedIds.length === 0 || !db) return;
     setShowBulkAiDialog(true);
-    setIsBulkAiProcessing(true);
     setBulkAiProgress(0);
     setProcessedCount(0);
 
-    try {
-      const selectedOrders = orders?.filter(o => selectedIds.includes(o.id)) || [];
-      for (let i = 0; i < selectedOrders.length; i += AI_BATCH_SIZE) {
-        const chunk = selectedOrders.slice(i, i + AI_BATCH_SIZE);
-        const batch = writeBatch(db!);
+    const BATCH_SIZE = 5;
+    const selectedOrders = orders?.filter(o => selectedIds.includes(o.id)) || [];
+    
+    for (let i = 0; i < selectedOrders.length; i += BATCH_SIZE) {
+      const chunk = selectedOrders.slice(i, i + BATCH_SIZE);
+      const batch = writeBatch(db);
 
-        for (const order of chunk) {
-          try {
-            const result = await analyzeOrderSemantically({
-              descripcion: String(order.descripcion || "").substring(0, 250),
-              monto: order.impactoNeto
-            });
-            const ref = doc(db!, 'orders', order.id);
-            batch.update(ref, {
-              disciplina_normalizada: result.disciplina_normalizada,
-              causa_raiz_normalizada: result.causa_raiz_normalizada,
-              classification_status: 'auto',
-              processedAt: new Date().toISOString()
-            });
-          } catch (e) {}
-        }
-        await batch.commit();
-        setProcessedCount(prev => prev + chunk.length);
-        setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
+      for (const order of chunk) {
+        try {
+          const result = await analyzeOrderSemantically({
+            descripcion: String(order.descripcion || "").substring(0, 250),
+            monto: order.impactoNeto
+          });
+          const ref = doc(db, 'orders', order.id);
+          batch.update(ref, {
+            disciplina_normalizada: result.disciplina_normalizada,
+            causa_raiz_normalizada: result.causa_raiz_normalizada,
+            classification_status: 'auto',
+            processedAt: new Date().toISOString()
+          });
+        } catch (e) {}
       }
-      toast({ title: "Lote Procesado con Éxito" });
-      setShowBulkAiDialog(false);
-      setSelectedIds([]);
-    } catch (e) {
-      toast({ variant: "destructive", title: "Error de Lote" });
-    } finally {
-      setIsBulkAiProcessing(false);
+      await batch.commit();
+      setProcessedCount(prev => prev + chunk.length);
+      setBulkAiProgress(Math.round(((i + chunk.length) / selectedOrders.length) * 100));
     }
+    
+    toast({ title: "Lote Procesado" });
+    setShowBulkAiDialog(false);
+    setSelectedIds([]);
   };
 
   return (
@@ -243,73 +217,57 @@ export default function AnalysisPage() {
             <SidebarTrigger />
             <div className="flex items-center gap-2">
               <Database className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Universo de Registros</h1>
+              <h1 className="text-xl font-headline font-bold text-slate-800 uppercase">Universo de Registros</h1>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <div className="bg-slate-100 p-1 rounded-xl border flex items-center gap-2">
-              <span className="text-[10px] font-black text-slate-500 uppercase px-2">Bloque:</span>
-              <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(parseInt(v)); setCurrentPage(1); setPageHistory([null]); }}>
-                <SelectTrigger className="h-8 w-24 bg-white border-none shadow-sm text-[10px] font-bold">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="100">100</SelectItem>
-                  <SelectItem value="300">300</SelectItem>
-                  <SelectItem value="500">500</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="bg-slate-100 p-1 rounded-xl border flex items-center gap-2">
-              <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
-              <Select value={aiFilter} onValueChange={(v) => { setAiFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
-                <SelectTrigger className="h-8 min-w-[180px] bg-white border-none shadow-sm text-[10px] font-bold uppercase">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los registros</SelectItem>
-                  <SelectItem value="classified">Procesados IA</SelectItem>
-                  <SelectItem value="not_classified">Pendientes</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(parseInt(v)); setCurrentPage(1); setPageHistory([null]); }}>
+              <SelectTrigger className="h-8 w-24 text-[10px] font-bold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="100">100</SelectItem>
+                <SelectItem value="300">300</SelectItem>
+                <SelectItem value="500">500</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={aiFilter} onValueChange={(v) => { setAiFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
+              <SelectTrigger className="h-8 min-w-[180px] text-[10px] font-bold uppercase">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los registros</SelectItem>
+                <SelectItem value="classified">Procesados IA</SelectItem>
+                <SelectItem value="not_classified">Pendientes</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </header>
 
         <main className="p-6 space-y-6">
-          {error && (
-            <Card className="border-rose-200 bg-rose-50 p-4 flex items-center gap-3">
-              <ShieldAlert className="h-5 w-5 text-rose-600" />
-              <div>
-                <p className="text-sm font-bold text-rose-800">Error de Conectividad o Índices</p>
-                <p className="text-xs text-rose-600">{(error as any).message}</p>
-              </div>
-            </Card>
-          )}
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
+            <Card className="p-4 flex items-center justify-between border-none shadow-sm bg-white">
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Universo Total Real</p>
-                <h4 className="text-2xl font-headline font-bold text-slate-800">{totalGlobal.toLocaleString()}</h4>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Universo Total Real</p>
+                <h4 className="text-2xl font-headline font-bold">{totalGlobal.toLocaleString()}</h4>
               </div>
               <Database className="h-8 w-8 text-primary/10" />
             </Card>
-            <Card className="border-none shadow-sm bg-white p-4 flex items-center justify-between">
+            <Card className="p-4 flex items-center justify-between border-none shadow-sm bg-white">
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Página Actual</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Página Actual</p>
                 <h4 className="text-2xl font-headline font-bold text-emerald-600">{currentPage}</h4>
               </div>
               <ListOrdered className="h-8 w-8 text-emerald-100" />
             </Card>
-            <Card className="border-none shadow-sm bg-slate-900 text-white p-4">
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Registros en Vista</p>
+            <Card className="p-4 border-none shadow-sm bg-slate-900 text-white">
+              <p className="text-[10px] font-black text-slate-400 uppercase">Registros en Vista</p>
               <h4 className="text-2xl font-headline font-bold text-accent">{orders?.length || 0}</h4>
             </Card>
           </div>
 
           {selectedIds.length > 0 && (
-            <Card className="border-none shadow-xl bg-primary text-white p-4 flex items-center justify-between animate-in slide-in-from-top-2">
+            <Card className="p-4 flex items-center justify-between border-none shadow-xl bg-primary text-white animate-in slide-in-from-top-2">
               <div className="flex items-center gap-4">
                 <LayoutGrid className="h-5 w-5" />
                 <h4 className="text-lg font-bold">{selectedIds.length} Seleccionados</h4>
@@ -328,13 +286,16 @@ export default function AnalysisPage() {
               <TableHeader className="bg-slate-50/50">
                 <TableRow>
                   <TableHead className="w-12 text-center">
-                    <Checkbox checked={selectedIds.length === (orders?.length || 0) && (orders?.length || 0) > 0} onCheckedChange={(checked) => setSelectedIds(checked ? (orders?.map(o => o.id) || []) : [])} />
+                    <Checkbox 
+                      checked={selectedIds.length === (orders?.length || 0) && (orders?.length || 0) > 0} 
+                      onCheckedChange={(checked) => setSelectedIds(checked ? (orders?.map(o => o.id) || []) : [])} 
+                    />
                   </TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Estatus IA</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Clasificación IA</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-right">Monto</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-center">IA</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -345,7 +306,10 @@ export default function AnalysisPage() {
                 ) : orders.map((order) => (
                   <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
                     <TableCell className="text-center">
-                      <Checkbox checked={selectedIds.includes(order.id)} onCheckedChange={(checked) => setSelectedIds(prev => checked ? [...prev, order.id] : prev.filter(id => id !== order.id))} />
+                      <Checkbox 
+                        checked={selectedIds.includes(order.id)} 
+                        onCheckedChange={(checked) => setSelectedIds(prev => checked ? [...prev, order.id] : prev.filter(id => id !== order.id))} 
+                      />
                     </TableCell>
                     <TableCell>
                       {order.classification_status === 'auto' ? (
@@ -368,7 +332,7 @@ export default function AnalysisPage() {
                     </TableCell>
                     <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
                     <TableCell className="text-center">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleSingleSemanticAnalysis(order)} disabled={isAnalyzing === order.id}>
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing}>
                         {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
                       </Button>
                     </TableCell>
@@ -398,7 +362,7 @@ export default function AnalysisPage() {
             <RefreshCcw className="h-12 w-12 text-primary animate-spin mx-auto" />
             <div>
               <DialogTitle className="text-xl font-bold uppercase">Procesando Universo IA</DialogTitle>
-              <DialogDescription className="text-slate-500 mt-2">Clasificando {selectedIds.length} registros con el motor Gemini Forense.</DialogDescription>
+              <DialogDescription className="text-slate-500 mt-2">Clasificando {selectedIds.length} registros con motor Gemini.</DialogDescription>
             </div>
             <div className="space-y-2">
               <div className="flex justify-between text-[10px] font-black text-primary">

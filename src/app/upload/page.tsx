@@ -13,10 +13,7 @@ import {
   CheckCircle2, 
   Loader2,
   X,
-  Database,
-  ShieldCheck,
   Zap,
-  Layers,
   BrainCircuit,
   SearchCode
 } from 'lucide-react';
@@ -36,7 +33,7 @@ export default function UploadPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isCorrelating, setIsCorrelating] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [stats, setStats] = useState({ total: 0, avgQuality: 0 });
+  const [stats, setStats] = useState({ total: 0 });
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -50,8 +47,9 @@ export default function UploadPage() {
     setIsUploading(true);
     setProgress(5);
     let totalProcessed = 0;
-    let totalImpact = 0;
-    let qualitySum = 0;
+    let totalImpactAcc = 0;
+    const disciplineMap: Record<string, { impact: number, count: number }> = {};
+    const causeMap: Record<string, { impact: number, count: number }> = {};
 
     try {
       for (const file of selectedFiles) {
@@ -74,47 +72,59 @@ export default function UploadPage() {
         const buffer = await file.arrayBuffer();
         const { data } = processExcelFile(buffer);
         
-        totalProcessed += data.length;
-        const fileQuality = data.reduce((acc, curr) => acc + curr.structural_quality_score, 0) / (data.length || 1);
-        qualitySum += fileQuality;
-
         const batchId = crypto.randomUUID();
-        const chunkSize = 100;
+        const chunkSize = 400; // Optimizado para Firestore
+        
         for (let i = 0; i < data.length; i += chunkSize) {
           const chunk = data.slice(i, i + chunkSize);
           const firestoreBatch = writeBatch(db);
           
           chunk.forEach((row) => {
-            totalImpact += (row.impactoNeto || 0);
-            const orderId = `${batchId}_${row.sheetName}_${row.rowNumber}`;
+            const impact = row.impactoNeto || 0;
+            totalImpactAcc += impact;
+            
+            // Agregación local para metadatos
+            const disc = row.disciplina_normalizada || 'Indefinida';
+            const cause = row.causaRaiz || 'Errores / Omisiones';
+            
+            if (!disciplineMap[disc]) disciplineMap[disc] = { impact: 0, count: 0 };
+            disciplineMap[disc].impact += impact;
+            disciplineMap[disc].count += 1;
+
+            if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
+            causeMap[cause].impact += impact;
+            causeMap[cause].count += 1;
+
+            const orderId = `${batchId}_${row.rowNumber}`;
             const orderRef = doc(db, 'orders', orderId);
             firestoreBatch.set(orderRef, {
               ...row,
               id: orderId,
               importBatchId: batchId,
-              dataSource: 'EXCEL_HISTORIC',
               classification_status: 'pending',
               processedAt: new Date().toISOString()
             });
           });
 
           await firestoreBatch.commit();
-          setProgress(Math.min(90, 10 + (i / data.length) * 80));
+          totalProcessed += chunk.length;
+          setProgress(Math.min(95, (totalProcessed / data.length) * 100));
         }
       }
 
-      // Materializar Agregados Globales para Dashboards
+      // Materializar Agregados Globales (Single Source of Truth)
       const globalSnapshot = await getCountFromServer(collection(db, 'orders'));
-      const finalCount = globalSnapshot.data().count;
+      const finalTotalCount = globalSnapshot.data().count;
 
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
-        totalOrders: finalCount,
-        totalImpact: totalImpact, // Simplificado para MVP
-        lastUpdate: new Date().toISOString(),
-        dataSource: 'BATCH_INGEST'
+        totalOrders: finalTotalCount,
+        totalImpact: totalImpactAcc,
+        disciplines: disciplineMap,
+        rootCauses: causeMap,
+        lastUpdate: new Date().toISOString()
       }, { merge: true });
 
-      setStats({ total: totalProcessed, avgQuality: Math.round(qualitySum / selectedFiles.length) });
+      setStats({ total: totalProcessed });
       setProgress(100);
       toast({ title: "Universo Normalizado", description: `Se han cargado ${totalProcessed} registros.` });
       setSelectedFiles([]);
@@ -132,27 +142,25 @@ export default function UploadPage() {
         <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6">
           <div className="flex items-center gap-2">
             <SidebarTrigger />
-            <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Normalización de Bitácoras</h1>
+            <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Carga de Bitácoras Masivas</h1>
           </div>
           {stats.total > 0 && (
-            <div className="flex items-center gap-4">
-              <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-1.5 py-1 px-3">
-                <CheckCircle2 className="h-3 w-3" /> {stats.total} Homologados
-              </Badge>
-            </div>
+            <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-1.5 py-1 px-3">
+              <CheckCircle2 className="h-3 w-3" /> {stats.total} Homologados
+            </Badge>
           )}
         </header>
 
         <main className="p-6 md:p-8 max-w-5xl mx-auto w-full space-y-8">
           <Card className="border-none shadow-xl bg-white overflow-hidden rounded-3xl">
             <CardHeader className="bg-slate-900 text-white p-8">
-              <div className="flex items-center gap-4 mb-2">
+              <div className="flex items-center gap-4">
                 <div className="p-3 bg-white/10 rounded-2xl">
                   <SearchCode className="h-8 w-8 text-accent" />
                 </div>
                 <div>
-                  <CardTitle className="text-2xl font-headline font-bold uppercase tracking-tight">Motor de Inferencia de Encabezados</CardTitle>
-                  <CardDescription className="text-slate-400">Normaliza miles de registros históricos sin truncamiento</CardDescription>
+                  <CardTitle className="text-2xl font-headline font-bold uppercase">Motor de Ingesta Institucional</CardTitle>
+                  <CardDescription className="text-slate-400">Normaliza el universo completo de 11,150+ registros sin truncamiento</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -165,7 +173,7 @@ export default function UploadPage() {
                   <Upload className="h-10 w-10 text-primary" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 uppercase">Subir Archivo de Gran Volumen</h3>
-                <p className="text-sm text-slate-500 mt-2">Compatible con el universo total de 11,150+ registros.</p>
+                <p className="text-sm text-slate-500 mt-2">Compatible con archivos de más de 10,000 filas.</p>
                 <Input id="file-upload" type="file" className="hidden" multiple accept=".xlsx,.xls" onChange={handleFileChange} />
               </div>
 
@@ -188,7 +196,7 @@ export default function UploadPage() {
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-black text-primary uppercase flex items-center gap-2">
                       {isCorrelating ? <BrainCircuit className="h-4 w-4 animate-pulse" /> : <Loader2 className="h-4 w-4 animate-spin" />}
-                      {isCorrelating ? "Correlacionando con IA..." : "Sincronizando Universo Total..."}
+                      {isCorrelating ? "Mapeando Esquema con IA..." : "Sincronizando Universo Total..."}
                     </span>
                     <span className="text-2xl font-headline font-bold text-primary">{Math.round(progress)}%</span>
                   </div>
@@ -196,7 +204,7 @@ export default function UploadPage() {
                 </div>
               ) : (
                 <Button 
-                  className="w-full bg-primary h-16 text-lg font-headline font-bold uppercase tracking-widest rounded-2xl shadow-xl shadow-primary/20"
+                  className="w-full bg-primary h-16 text-lg font-headline font-bold uppercase tracking-widest rounded-2xl shadow-xl"
                   disabled={selectedFiles.length === 0}
                   onClick={startAnalysis}
                 >

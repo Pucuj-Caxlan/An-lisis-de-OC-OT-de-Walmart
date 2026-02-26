@@ -57,7 +57,7 @@
         "totalImpact": { "type": "number" },
         "lastUpdate": { "type": "string", "format": "date-time" },
         "disciplines": { "type": "object" },
-        "formats": { "type": "object" }
+        "rootCauses": { "type": "object" }
       }
     }
   },
@@ -71,12 +71,5 @@
     },
     "/aggregates/{aggId}": { "schema": "GlobalAggregate", "description": "Metadatos materializados para dashboards" },
     "/audit_logs/{logId}": { "schema": "AuditLog", "description": "Logs de auditoría" }
-  },
-  "indexes": [
-    {
-      "collection": "orders",
-      "fields": ["classification_status", "projectId", "projectName"],
-      "description": "Optimización para búsqueda paginada de registros clasificados."
-    }
-  ]
+  }
 }
