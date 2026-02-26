@@ -20,7 +20,7 @@ import {
   CheckCircle2,
   Clock,
   Zap,
-  Layers
+  Target
 } from 'lucide-react';
 import {
   Table,
@@ -97,7 +97,7 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Leer Agregados Globales
+  // 1. Leer Agregados Globales (Single Source of Truth para Filtros)
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
@@ -116,15 +116,19 @@ export default function AnalysisPage() {
         });
         setDiscoveredDisciplines(Array.from(unique).sort());
       } catch (e) {
-        console.warn("Discovery failed (index might be missing):", e);
+        console.warn("Discovery failed:", e);
       }
     };
     discover();
   }, [db, isAuthReady, globalAgg]);
 
-  const availableDisciplines = useMemo(() => {
-    if (globalAgg?.disciplines) return Object.keys(globalAgg.disciplines).sort();
-    return discoveredDisciplines;
+  const disciplineOptions = useMemo(() => {
+    if (globalAgg?.disciplines) {
+      return Object.entries(globalAgg.disciplines)
+        .map(([name, s]: any) => ({ name, count: s.count || 0 }))
+        .sort((a, b) => b.count - a.count);
+    }
+    return discoveredDisciplines.map(d => ({ name: d, count: 0 }));
   }, [globalAgg, discoveredDisciplines]);
 
   // 3. Estadísticas de Avance Real
@@ -154,7 +158,7 @@ export default function AnalysisPage() {
     fetchStats();
   }, [db, isAuthReady, globalAgg]);
 
-  // 4. Query Paginada con Filtros
+  // 4. Query Paginada con Filtros Robustos
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
@@ -164,9 +168,10 @@ export default function AnalysisPage() {
     if (disciplineFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else if (disciplineFilter === 'unclassified') {
+      // Usar classification_status como proxy confiable para "Sin Clasificar"
       baseQuery = query(
         q, 
-        where('disciplina_normalizada', '==', ''), 
+        where('classification_status', '==', 'pending'), 
         orderBy('projectId', 'asc'), 
         limit(pageSize)
       );
@@ -231,6 +236,7 @@ export default function AnalysisPage() {
         causa_raiz_normalizada: result.causa_raiz_normalizada,
         subcausa_normalizada: result.subcausa_normalizada,
         classification_status: 'auto',
+        semanticAnalysis: result, // Guardar objeto completo para score
         processedAt: new Date().toISOString()
       });
 
@@ -267,6 +273,7 @@ export default function AnalysisPage() {
           causa_raiz_normalizada: result.causa_raiz_normalizada,
           subcausa_normalizada: result.subcausa_normalizada,
           classification_status: 'auto',
+          semanticAnalysis: result,
           processedAt: new Date().toISOString()
         });
 
@@ -298,7 +305,7 @@ export default function AnalysisPage() {
     <div className="flex min-h-screen w-full bg-slate-50/30">
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10 shadow-sm">
           <div className="flex items-center gap-4">
             <SidebarTrigger />
             <div className="flex items-center gap-2">
@@ -309,15 +316,17 @@ export default function AnalysisPage() {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
               <Select value={disciplineFilter} onValueChange={(v) => { setDisciplineFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
-                <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
+                <SelectTrigger className="h-8 w-64 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
                   <Filter className="h-3 w-3 mr-2 text-primary" />
                   <SelectValue placeholder="Filtrar por Disciplina" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">TODAS LAS DISCIPLINAS</SelectItem>
                   <SelectItem value="unclassified" className="text-rose-600 font-bold">SIN CLASIFICAR</SelectItem>
-                  {availableDisciplines.map(d => (
-                    <SelectItem key={d} value={d}>{d.toUpperCase()}</SelectItem>
+                  {disciplineOptions.map(d => (
+                    <SelectItem key={d.name} value={d.name}>
+                      {d.name.toUpperCase()} {d.count > 0 ? `(${d.count})` : ''}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -330,7 +339,7 @@ export default function AnalysisPage() {
                 className="bg-accent hover:bg-accent/90 text-white gap-2 shadow-lg h-10 px-6 rounded-xl animate-in fade-in zoom-in"
               >
                 <Sparkles className="h-4 w-4" />
-                <span className="text-[10px] font-black uppercase tracking-widest">Procesar IA ({selectedIds.length})</span>
+                <span className="text-[10px] font-black uppercase tracking-widest">Procesar Masivo ({selectedIds.length})</span>
               </Button>
             )}
           </div>
@@ -342,7 +351,7 @@ export default function AnalysisPage() {
               <AlertTriangle className="h-5 w-5" />
               <AlertTitle className="text-sm font-black uppercase tracking-tight">Índice Compuesto Requerido</AlertTitle>
               <AlertDescription className="text-xs mt-1">
-                Firestore requiere un índice para filtrar por "{disciplineFilter}" y ordenar por PID.
+                Firestore requiere un índice para este filtro combinado.
                 <Button asChild variant="link" size="sm" className="h-auto p-0 ml-2 text-rose-600 font-bold">
                   <a href={`https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes?create_composite=ClZwcm9qZWN0cy9zdHVkaW8tNTUxOTE2NTkzOS0yNDdlMS9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvb3JkZXJzL2luZGV4ZXMvXxABGhoKFmRpc2NpcGxpbmFfbm9ybWFsaXphZGEQARoNCglwcm9qZWN0SWQQARoMCghfX25hbWVfXxAB`} target="_blank">Activar Índice Manualmente</a>
                 </Button>
@@ -425,6 +434,7 @@ export default function AnalysisPage() {
                 ) : orders.map((order) => {
                   const hasDiscipline = !!order.disciplina_normalizada;
                   const isAuto = order.classification_status === 'auto';
+                  const confidence = order.semanticAnalysis?.confidence_score;
                   
                   return (
                     <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
@@ -435,13 +445,21 @@ export default function AnalysisPage() {
                         />
                       </TableCell>
                       <TableCell>
-                        {isAuto ? (
-                          <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2">AUTO IA</Badge>
-                        ) : hasDiscipline ? (
-                          <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2">VALIDADO</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2">PENDIENTE</Badge>
-                        )}
+                        <div className="flex flex-col gap-1">
+                          {isAuto ? (
+                            <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2">AUTO IA</Badge>
+                          ) : hasDiscipline ? (
+                            <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2">VALIDADO</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2">PENDIENTE</Badge>
+                          )}
+                          {confidence && (
+                            <div className="flex items-center gap-1">
+                              <Target className="h-2.5 w-2.5 text-slate-400" />
+                              <span className="text-[8px] font-bold text-slate-500">{Math.round(confidence * 100)}% Confianza</span>
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
