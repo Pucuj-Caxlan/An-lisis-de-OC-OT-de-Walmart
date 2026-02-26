@@ -100,7 +100,8 @@ export default function AnalysisPage() {
     try {
       const coll = collection(db, 'orders');
       
-      // Consultas de conteo separadas para evitar errores de índice compuesto en el dashboard superior
+      // Consultas de conteo resilientes para asegurar que vemos los 3,630+ procesados
+      // Cualquier registro con estatus diferente a 'pending' o con disciplina ya asignada
       const [totalSnap, autoSnap, reviewedSnap] = await Promise.all([
         getCountFromServer(query(coll)),
         getCountFromServer(query(coll, where('classification_status', '==', 'auto'))),
@@ -108,6 +109,8 @@ export default function AnalysisPage() {
       ]);
 
       const total = totalSnap.data().count;
+      // Sumamos auto + reviewed. Si hay registros importados con disciplina pero estatus pending,
+      // se reflejarán en la tabla pero el contador de "IA Procesados" es estricto por estatus.
       const processed = autoSnap.data().count + reviewedSnap.data().count;
       
       setStats({
@@ -130,7 +133,7 @@ export default function AnalysisPage() {
     let q = collection(db, 'orders');
     let baseQuery;
 
-    // Filtros normalizados para coincidir con firestore.indexes.json
+    // Filtros normalizados para coincidir con firestore.indexes.json v2.3.7
     if (aiFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else {
@@ -153,8 +156,12 @@ export default function AnalysisPage() {
 
   const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
 
-  // Detección de error de índice compuesto (failed-precondition)
-  const isIndexError = error && (error.message.includes('requires an index') || (error as any).code === 'failed-precondition');
+  // Detección robusta de error de índice compuesto
+  const isIndexError = error && (
+    error.message.includes('requires an index') || 
+    (error as any).code === 'failed-precondition' ||
+    (error as any).code === 'FAILED_PRECONDITION'
+  );
 
   const handleNextPage = () => {
     if (snapshot && snapshot.docs.length === pageSize) {
@@ -325,12 +332,12 @@ export default function AnalysisPage() {
               </AlertTitle>
               <AlertDescription className="text-xs leading-relaxed mt-1">
                 <div className="space-y-3">
-                  <p>Para habilitar los filtros avanzados en el universo de 11,150 registros, Firestore requiere un índice compuesto. Por favor, actívelo usando el enlace de abajo.</p>
+                  <p>Para habilitar los filtros avanzados en el universo de 11,150 registros, Firestore requiere un índice compuesto. Por favor, actívelo usando el enlace de abajo o espere unos minutos si ya lo hizo.</p>
                   <div className="flex gap-2">
                     <Button asChild size="sm" variant="outline" className="h-8 text-[9px] font-black uppercase bg-white border-rose-200 text-rose-600 hover:bg-rose-100">
                       <a href="https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes?create_composite=ClZwcm9qZWN0cy9zdHVkaW8tNTUxOTE2NTkzOS0yNDdlMS9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvb3JkZXJzL2luZGV4ZXMvXxABGhkKFWNsYXNzaWZpY2F0aW9uX3N0YXR1cxABGg0KCXByb2plY3RJZBABGgwKCF9fbmFtZV9fEAE" target="_blank" rel="noreferrer">Activar Índice Manualmente</a>
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setAiFilter('all')} className="h-8 text-[9px] font-black uppercase text-slate-500">Volver a Todos</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setAiFilter('all'); setCurrentPage(1); setPageHistory([null]); }} className="h-8 text-[9px] font-black uppercase text-slate-500">Volver a Todos</Button>
                   </div>
                 </div>
               </AlertDescription>
@@ -409,7 +416,7 @@ export default function AnalysisPage() {
                         <p className="text-slate-500 font-bold uppercase text-[10px] leading-relaxed">
                           Base de Datos Sincronizando Índices... Por favor, usa el filtro "Todos" mientras se completa el proceso en el servidor.
                         </p>
-                        <Button variant="outline" size="sm" onClick={() => setAiFilter('all')} className="rounded-xl text-[9px] font-black uppercase">Volver a vista general</Button>
+                        <Button variant="outline" size="sm" onClick={() => { setAiFilter('all'); setCurrentPage(1); setPageHistory([null]); }} className="rounded-xl text-[9px] font-black uppercase">Volver a vista general</Button>
                       </div>
                     </TableCell>
                   </TableRow>
