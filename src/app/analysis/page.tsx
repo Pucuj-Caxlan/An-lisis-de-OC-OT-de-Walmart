@@ -15,7 +15,9 @@ import {
   LayoutGrid, 
   X, 
   Filter,
-  ListOrdered
+  ListOrdered,
+  AlertTriangle,
+  Search
 } from 'lucide-react';
 import {
   Table,
@@ -59,12 +61,13 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function AnalysisPage() {
   const { toast } = useToast();
   const db = useFirestore();
   const { user, isAuthReady } = useUser();
-  const [pageSize, setPageSize] = useState(500);
+  const [pageSize, setPageSize] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageHistory, setPageHistory] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
   const [totalGlobal, setTotalGlobal] = useState<number>(0);
@@ -78,7 +81,7 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // SSOT: Total real del servidor
+  // SSOT: Total real del servidor (Garantiza ver los 11,150)
   useEffect(() => {
     if (!db || !isAuthReady) return;
     const fetchCount = async () => {
@@ -93,22 +96,28 @@ export default function AnalysisPage() {
     fetchCount();
   }, [db, isAuthReady]);
 
-  // Query Paginada por Cursores
+  // Query Paginada Optimizada
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
     let q = collection(db, 'orders');
-    
-    // Filtros
     let baseQuery;
+
+    // Si el filtro es ALL, usamos un ordenamiento simple para maximizar visibilidad
     if (aiFilter === 'all') {
-      baseQuery = query(q, orderBy('projectId', 'asc'), orderBy('projectName', 'asc'), limit(pageSize));
+      baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else {
       const statusValue = aiFilter === 'classified' ? 'auto' : 'pending';
-      baseQuery = query(q, where('classification_status', '==', statusValue), orderBy('projectId', 'asc'), orderBy('projectName', 'asc'), limit(pageSize));
+      // Filtros específicos requieren índices compuestos
+      baseQuery = query(
+        q, 
+        where('classification_status', '==', statusValue), 
+        orderBy('projectId', 'asc'), 
+        limit(pageSize)
+      );
     }
 
-    // Cursor
+    // Aplicar Cursor de Paginación
     const currentCursor = pageHistory[currentPage - 1];
     if (currentCursor) {
       baseQuery = query(baseQuery, startAfter(currentCursor));
@@ -117,7 +126,7 @@ export default function AnalysisPage() {
     return baseQuery;
   }, [db, isAuthReady, pageSize, currentPage, aiFilter, pageHistory]);
 
-  const { data: orders, isLoading, snapshot } = useCollection(ordersQuery);
+  const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
 
   const handleNextPage = () => {
     if (snapshot && snapshot.docs.length === pageSize) {
@@ -245,6 +254,18 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6 space-y-6">
+          {error && (
+            <Alert variant="destructive" className="bg-rose-50 border-rose-200 text-rose-900 rounded-2xl">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle className="text-xs font-black uppercase">Error de Sincronización</AlertTitle>
+              <AlertDescription className="text-[10px] font-bold opacity-80">
+                {error.message.includes('index') 
+                  ? "Firestore está construyendo los índices compuestos para tus 11,150 registros. Esto puede tardar unos minutos." 
+                  : "Error al recuperar datos. Verifica tu conexión institucional."}
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card className="p-4 flex items-center justify-between border-none shadow-sm bg-white">
               <div>
@@ -302,7 +323,15 @@ export default function AnalysisPage() {
                 {isLoading ? (
                   <TableRow><TableCell colSpan={6} className="text-center py-24"><RefreshCcw className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
                 ) : !orders || orders.length === 0 ? (
-                  <TableRow><TableCell colSpan={6} className="text-center py-24 text-slate-400 font-bold uppercase text-xs italic">Sin registros en este bloque</TableCell></TableRow>
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-24">
+                      <div className="space-y-2">
+                        <Search className="h-8 w-8 mx-auto text-slate-200" />
+                        <p className="text-slate-400 font-bold uppercase text-xs italic">No se encontraron registros en este bloque.</p>
+                        <Button variant="link" onClick={() => { setAiFilter('all'); setCurrentPage(1); }} className="text-[10px] font-black uppercase text-primary">Ver Universo Completo</Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
                 ) : orders.map((order) => (
                   <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
                     <TableCell className="text-center">
@@ -315,7 +344,7 @@ export default function AnalysisPage() {
                       {order.classification_status === 'auto' ? (
                         <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black">AUTO IA</Badge>
                       ) : (
-                        <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400">PENDING</Badge>
+                        <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400">PENDIENTE</Badge>
                       )}
                     </TableCell>
                     <TableCell>
@@ -327,7 +356,7 @@ export default function AnalysisPage() {
                     <TableCell>
                       <div className="flex flex-col">
                          <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
-                         <span className="text-[9px] text-slate-400 uppercase font-bold">{order.causa_raiz_normalizada || order.causaRaiz}</span>
+                         <span className="text-[9px] text-slate-400 uppercase font-bold">{order.causa_raiz_normalizada || order.causaRaiz || "Sin definir"}</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
@@ -354,7 +383,7 @@ export default function AnalysisPage() {
                 </Button>
               </div>
             </div>
-          </Card>
+          </Table>
         </main>
 
         <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
