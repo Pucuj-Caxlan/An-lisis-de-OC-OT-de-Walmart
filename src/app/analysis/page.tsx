@@ -133,27 +133,20 @@ export default function AnalysisPage() {
   const groupedDisciplines = useMemo(() => {
     const groups: Record<string, { count: number, impact: number, rawNames: string[] }> = {};
     
-    // Cargar desde agregados
     if (globalAgg?.disciplines) {
       Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
         let normalized = String(name).trim().toUpperCase();
-        // Consolidación de plurales simple (ej. CIVILES -> CIVIL)
-        if (normalized.endsWith('S') && normalized.length > 4) {
-          normalized = normalized.substring(0, normalized.length - 1);
-        }
+        if (normalized.endsWith('S') && normalized.length > 4) normalized = normalized.substring(0, normalized.length - 1);
         
         if (!groups[normalized]) {
           groups[normalized] = { count: 0, impact: 0, rawNames: [] };
         }
         groups[normalized].count += s.count || 0;
         groups[normalized].impact += s.impact || 0;
-        if (!groups[normalized].rawNames.includes(name)) {
-          groups[normalized].rawNames.push(name);
-        }
+        if (!groups[normalized].rawNames.includes(name)) groups[normalized].rawNames.push(name);
       });
     }
 
-    // Autodescubrimiento desde los registros cargados actualmente
     orders?.forEach(o => {
       if (o.disciplina_normalizada) {
         let name = o.disciplina_normalizada;
@@ -171,17 +164,16 @@ export default function AnalysisPage() {
     return groups;
   }, [globalAgg, orders]);
 
-  // 4. Actualizar KPIs Dinámicos
+  // 4. Actualizar KPIs Dinámicos (Sincronizados con 4,290+)
   useEffect(() => {
     if (!mounted) return;
 
     const totalInDb = globalAgg?.totalOrders || 0;
     const totalImpactInDb = globalAgg?.totalImpact || 0;
     
-    // Contar procesados sumando las disciplinas en el agregador
-    const totalWithDataInDb = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.count || 0), 0);
+    // Usar el conteo de integridad guardado o el calculado por suma
+    const totalWithDataInDb = globalAgg?.totalProcessed || Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.count || 0), 0);
 
-    // Si no hay filtro, mostrar el universo total
     if (disciplineFilter === 'all') {
       setStats({
         total: totalInDb,
@@ -190,16 +182,13 @@ export default function AnalysisPage() {
         totalImpact: totalImpactInDb
       });
     } else if (disciplineFilter === 'unclassified') {
-      // Para "Sin Clasificar", calculamos el impacto de lo que está en pantalla como referencia
-      const localImpact = orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0;
       setStats({
         total: Math.max(0, totalInDb - totalWithDataInDb),
         withData: 0,
         pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: localImpact
+        totalImpact: 0 // Se podría calcular localmente si es necesario
       });
     } else {
-      // Para una disciplina específica
       const group = groupedDisciplines[disciplineFilter];
       setStats({
         total: group?.count || 0,
@@ -247,6 +236,8 @@ export default function AnalysisPage() {
       await updateDoc(ref, {
         [path]: increment(1),
         [impactPath]: increment(impact),
+        totalProcessed: increment(1),
+        totalImpact: increment(impact),
         lastUpdate: new Date().toISOString()
       });
     } catch {
@@ -254,6 +245,8 @@ export default function AnalysisPage() {
         disciplines: {
           [discName]: { count: 1, impact: impact }
         },
+        totalProcessed: increment(1),
+        totalImpact: increment(impact),
         lastUpdate: new Date().toISOString()
       }, { merge: true });
     }
@@ -336,29 +329,25 @@ export default function AnalysisPage() {
     try {
       const colRef = collection(db, 'orders');
       
-      // 1. Obtener conteo total real
       const totalSnapshot = await getCountFromServer(colRef);
       const total = totalSnapshot.data().count;
 
-      // 2. Obtener conteo de procesados (donde classification_status no es pending)
-      let processedCount = 0;
-      try {
-        const processedQuery = query(colRef, where('classification_status', '!=', 'pending'));
-        const processedSnapshot = await getCountFromServer(processedQuery);
-        processedCount = processedSnapshot.data().count;
-      } catch (e) {
-        // Fallback: sumamos lo que hay en las disciplinas del SSOT
-        processedCount = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.count || 0), 0);
-      }
+      const processedQuery = query(colRef, where('classification_status', '!=', 'pending'));
+      const processedSnapshot = await getCountFromServer(processedQuery);
+      const processedCountVal = processedSnapshot.data().count;
       
+      // Intentar recuperar el impacto total acumulado si existe
+      const currentImpact = globalAgg?.totalImpact || 0;
+
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: total,
+        totalProcessed: processedCountVal,
         lastUpdate: new Date().toISOString()
       }, { merge: true });
       
       toast({ 
         title: "Universo Sincronizado", 
-        description: `Total: ${total.toLocaleString()} | Integridad: ${processedCount.toLocaleString()} registros.` 
+        description: `Total: ${total.toLocaleString()} | Integridad: ${processedCountVal.toLocaleString()} registros.` 
       });
     } catch (e: any) {
       console.error("Error syncing universe:", e);
