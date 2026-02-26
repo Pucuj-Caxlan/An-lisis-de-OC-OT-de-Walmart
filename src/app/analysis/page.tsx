@@ -1,7 +1,7 @@
 
 "use client"
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card } from '@/components/ui/card';
@@ -20,7 +20,9 @@ import {
   CheckCircle2,
   Clock,
   Zap,
-  Info
+  Info,
+  Layers,
+  SearchCode
 } from 'lucide-react';
 import {
   Table,
@@ -32,7 +34,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser, useDoc } from '@/firebase';
 import { 
   collection, 
   query, 
@@ -83,8 +85,8 @@ export default function AnalysisPage() {
   const [pageSize, setPageSize] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageHistory, setPageHistory] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
-  const [stats, setStats] = useState({ total: 0, processed: 0, pending: 0 });
-  const [aiFilter, setAiFilter] = useState<string>('all');
+  const [stats, setStats] = useState({ total: 0, withData: 0, pending: 0 });
+  const [disciplineFilter, setDisciplineFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
@@ -95,28 +97,33 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
+  // Leer Agregados Globales para el Selector de Disciplinas y Stats Reales
+  const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
+  const { data: globalAgg } = useDoc(aggRef);
+
+  const availableDisciplines = useMemo(() => {
+    if (!globalAgg?.disciplines) return [];
+    return Object.keys(globalAgg.disciplines).sort();
+  }, [globalAgg]);
+
   const fetchStats = async () => {
     if (!db || !isAuthReady) return;
     try {
       const coll = collection(db, 'orders');
       
-      // Consultas de conteo resilientes para asegurar que vemos los 3,630+ procesados
-      // Cualquier registro con estatus diferente a 'pending' o con disciplina ya asignada
-      const [totalSnap, autoSnap, reviewedSnap] = await Promise.all([
+      // Conteo basado en la existencia de disciplina_normalizada
+      const [totalSnap, withDataSnap] = await Promise.all([
         getCountFromServer(query(coll)),
-        getCountFromServer(query(coll, where('classification_status', '==', 'auto'))),
-        getCountFromServer(query(coll, where('classification_status', '==', 'reviewed')))
+        getCountFromServer(query(coll, where('disciplina_normalizada', '!=', '')))
       ]);
 
       const total = totalSnap.data().count;
-      // Sumamos auto + reviewed. Si hay registros importados con disciplina pero estatus pending,
-      // se reflejarán en la tabla pero el contador de "IA Procesados" es estricto por estatus.
-      const processed = autoSnap.data().count + reviewedSnap.data().count;
+      const withData = withDataSnap.data().count;
       
       setStats({
         total: total,
-        processed: processed,
-        pending: Math.max(0, total - processed)
+        withData: withData,
+        pending: Math.max(0, total - withData)
       });
     } catch (e) {
       console.error("Stats Error:", e);
@@ -125,7 +132,7 @@ export default function AnalysisPage() {
 
   useEffect(() => {
     fetchStats();
-  }, [db, isAuthReady]);
+  }, [db, isAuthReady, globalAgg]);
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
@@ -133,14 +140,22 @@ export default function AnalysisPage() {
     let q = collection(db, 'orders');
     let baseQuery;
 
-    // Filtros normalizados para coincidir con firestore.indexes.json v2.3.7
-    if (aiFilter === 'all') {
+    // Lógica de Filtrado por Disciplina Real
+    if (disciplineFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
-    } else {
-      const statusValue = aiFilter === 'classified' ? 'auto' : 'pending';
+    } else if (disciplineFilter === 'unclassified') {
+      // Registros sin clasificación (campo vacío)
       baseQuery = query(
         q, 
-        where('classification_status', '==', statusValue), 
+        where('disciplina_normalizada', '==', ''), 
+        orderBy('projectId', 'asc'), 
+        limit(pageSize)
+      );
+    } else {
+      // Filtrar por una disciplina específica
+      baseQuery = query(
+        q, 
+        where('disciplina_normalizada', '==', disciplineFilter), 
         orderBy('projectId', 'asc'), 
         limit(pageSize)
       );
@@ -152,16 +167,11 @@ export default function AnalysisPage() {
     }
 
     return baseQuery;
-  }, [db, isAuthReady, pageSize, currentPage, aiFilter, pageHistory]);
+  }, [db, isAuthReady, pageSize, currentPage, disciplineFilter, pageHistory]);
 
   const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
 
-  // Detección robusta de error de índice compuesto
-  const isIndexError = error && (
-    error.message.includes('requires an index') || 
-    (error as any).code === 'failed-precondition' ||
-    (error as any).code === 'FAILED_PRECONDITION'
-  );
+  const isIndexError = error && (error as any).code === 'failed-precondition';
 
   const handleNextPage = () => {
     if (snapshot && snapshot.docs.length === pageSize) {
@@ -193,7 +203,7 @@ export default function AnalysisPage() {
     setIsAnalyzing(order.id);
     try {
       const result = await analyzeOrderSemantically({
-        descripcion: String(order.descripcion || "").substring(0, 250),
+        descripcion: String(order.descripcion || "").substring(0, 300),
         monto: order.impactoNeto
       });
 
@@ -206,7 +216,7 @@ export default function AnalysisPage() {
         processedAt: new Date().toISOString()
       });
 
-      toast({ title: "Registro Procesado", description: result.disciplina_normalizada });
+      toast({ title: "Registro Clasificado", description: result.disciplina_normalizada });
       fetchStats();
     } catch (e) {
       toast({ variant: "destructive", title: "Error IA", description: "Fallo en motor Gemini." });
@@ -229,7 +239,7 @@ export default function AnalysisPage() {
       const order = targetOrders[i];
       try {
         const result = await analyzeOrderSemantically({
-          descripcion: String(order.descripcion || "").substring(0, 250),
+          descripcion: String(order.descripcion || "").substring(0, 300),
           monto: order.impactoNeto
         });
 
@@ -258,17 +268,13 @@ export default function AnalysisPage() {
 
   const handleDeleteRecord = async (id: string) => {
     if (!db) return;
-    try {
-      const orderRef = doc(db, 'orders', id);
-      deleteDocumentNonBlocking(orderRef);
-      toast({ title: "Registro eliminado" });
-      fetchStats();
-    } catch (e) {
-      toast({ variant: "destructive", title: "Error al eliminar" });
-    }
+    const orderRef = doc(db, 'orders', id);
+    deleteDocumentNonBlocking(orderRef);
+    toast({ title: "Registro eliminado" });
+    fetchStats();
   };
 
-  const progressPercentage = stats.total > 0 ? Math.round((stats.processed / stats.total) * 100) : 0;
+  const progressPercentage = stats.total > 0 ? Math.round((stats.withData / stats.total) * 100) : 0;
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50/30">
@@ -283,31 +289,20 @@ export default function AnalysisPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl">
-              <Button 
-                variant={aiFilter === 'all' ? 'default' : 'ghost'} 
-                size="sm" 
-                className="text-[10px] font-black uppercase rounded-lg h-8 px-4"
-                onClick={() => { setAiFilter('all'); setCurrentPage(1); setPageHistory([null]); }}
-              >
-                Todos
-              </Button>
-              <Button 
-                variant={aiFilter === 'classified' ? 'default' : 'ghost'} 
-                size="sm" 
-                className="text-[10px] font-black uppercase rounded-lg h-8 px-4"
-                onClick={() => { setAiFilter('classified'); setCurrentPage(1); setPageHistory([null]); }}
-              >
-                Procesados IA
-              </Button>
-              <Button 
-                variant={aiFilter === 'not_classified' ? 'default' : 'ghost'} 
-                size="sm" 
-                className="text-[10px] font-black uppercase rounded-lg h-8 px-4"
-                onClick={() => { setAiFilter('not_classified'); setCurrentPage(1); setPageHistory([null]); }}
-              >
-                Pendientes
-              </Button>
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+              <Select value={disciplineFilter} onValueChange={(v) => { setDisciplineFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
+                <SelectTrigger className="h-8 w-48 text-[9px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
+                  <Filter className="h-3 w-3 mr-2 text-primary" />
+                  <SelectValue placeholder="Filtrar Disciplina" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">TODAS LAS DISCIPLINAS</SelectItem>
+                  <SelectItem value="unclassified" className="text-rose-600 font-bold">SIN CLASIFICAR</SelectItem>
+                  {availableDisciplines.map(d => (
+                    <SelectItem key={d} value={d}>{d.toUpperCase()}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             
             {selectedIds.length > 0 && (
@@ -325,63 +320,55 @@ export default function AnalysisPage() {
 
         <main className="p-6 space-y-6">
           {isIndexError && (
-            <Alert variant="destructive" className="bg-rose-50 border-rose-200 shadow-sm rounded-2xl animate-in slide-in-from-top-2">
+            <Alert variant="destructive" className="bg-rose-50 border-rose-200 shadow-sm rounded-2xl">
               <AlertTriangle className="h-5 w-5" />
-              <AlertTitle className="text-sm font-black uppercase tracking-tight">
-                Sincronización de Índices Requerida
-              </AlertTitle>
-              <AlertDescription className="text-xs leading-relaxed mt-1">
-                <div className="space-y-3">
-                  <p>Para habilitar los filtros avanzados en el universo de 11,150 registros, Firestore requiere un índice compuesto. Por favor, actívelo usando el enlace de abajo o espere unos minutos si ya lo hizo.</p>
-                  <div className="flex gap-2">
-                    <Button asChild size="sm" variant="outline" className="h-8 text-[9px] font-black uppercase bg-white border-rose-200 text-rose-600 hover:bg-rose-100">
-                      <a href="https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes?create_composite=ClZwcm9qZWN0cy9zdHVkaW8tNTUxOTE2NTkzOS0yNDdlMS9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvb3JkZXJzL2luZGV4ZXMvXxABGhkKFWNsYXNzaWZpY2F0aW9uX3N0YXR1cxABGg0KCXByb2plY3RJZBABGgwKCF9fbmFtZV9fEAE" target="_blank" rel="noreferrer">Activar Índice Manualmente</a>
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setAiFilter('all'); setCurrentPage(1); setPageHistory([null]); }} className="h-8 text-[9px] font-black uppercase text-slate-500">Volver a Todos</Button>
-                  </div>
-                </div>
+              <AlertTitle className="text-sm font-black uppercase tracking-tight">Índice Compuesto Requerido</AlertTitle>
+              <AlertDescription className="text-xs mt-1">
+                Para filtrar por "{disciplineFilter}" manteniendo el orden por PID, Firestore requiere un índice.
+                <Button asChild variant="link" size="sm" className="h-auto p-0 ml-2 text-rose-600 font-bold">
+                  <a href="https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes" target="_blank">Activar en Consola</a>
+                </Button>
               </AlertDescription>
             </Alert>
           )}
 
-          {/* Dashboard de Indicadores */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase">Universo Total</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Universo Walmart</p>
                 <Database className="h-4 w-4 text-primary opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-slate-800">{stats.total.toLocaleString()}</h4>
-              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Registros en Base</p>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Registros Totales</p>
             </Card>
             
             <Card className="p-5 border-none shadow-sm bg-white border-l-4 border-l-emerald-500 flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-emerald-600 uppercase">Procesados IA</p>
+                <p className="text-[10px] font-black text-emerald-600 uppercase">Con Disciplina & Causa</p>
                 <CheckCircle2 className="h-4 w-4 text-emerald-500 opacity-20" />
               </div>
-              <h4 className="text-3xl font-headline font-bold text-emerald-600">{stats.processed.toLocaleString()}</h4>
-              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Clasificación Automática</p>
+              <h4 className="text-3xl font-headline font-bold text-emerald-600">{stats.withData.toLocaleString()}</h4>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Información Técnica Completa</p>
             </Card>
 
             <Card className="p-5 border-none shadow-sm bg-white border-l-4 border-l-amber-500 flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-amber-600 uppercase">Por Procesar</p>
+                <p className="text-[10px] font-black text-amber-600 uppercase">Sin Clasificar</p>
                 <Clock className="h-4 w-4 text-amber-500 opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-amber-600">{stats.pending.toLocaleString()}</h4>
-              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Pendientes de Análisis</p>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Pendientes de IA / Auditoría</p>
             </Card>
 
             <Card className="p-5 border-none shadow-sm bg-slate-900 text-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Avance Global</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Integridad Datos</p>
                 <Zap className="h-4 w-4 text-accent" />
               </div>
               <div className="space-y-2">
                 <div className="flex items-end justify-between">
                   <h4 className="text-3xl font-headline font-bold text-accent">{progressPercentage}%</h4>
-                  <span className="text-[9px] text-slate-500 font-black mb-1 uppercase">Integridad</span>
+                  <span className="text-[9px] text-slate-500 font-black mb-1 uppercase">Avance</span>
                 </div>
                 <Progress value={progressPercentage} className="h-1.5 bg-slate-800" />
               </div>
@@ -398,9 +385,9 @@ export default function AnalysisPage() {
                       onCheckedChange={(checked) => setSelectedIds(checked ? (orders?.map(o => o.id) || []) : [])} 
                     />
                   </TableHead>
-                  <TableHead className="text-[10px] font-black uppercase">Estatus IA</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase">Estatus Datos</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase">Disciplina & Causa</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase">Disciplina & Causa Normalizada</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-right">Monto</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-center w-[120px]">Acciones</TableHead>
                 </TableRow>
@@ -408,30 +395,18 @@ export default function AnalysisPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={6} className="text-center py-32"><RefreshCcw className="h-10 w-10 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
-                ) : isIndexError ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-32">
-                      <div className="space-y-4 max-w-sm mx-auto">
-                        <Database className="h-12 w-12 mx-auto text-rose-200" />
-                        <p className="text-slate-500 font-bold uppercase text-[10px] leading-relaxed">
-                          Base de Datos Sincronizando Índices... Por favor, usa el filtro "Todos" mientras se completa el proceso en el servidor.
-                        </p>
-                        <Button variant="outline" size="sm" onClick={() => { setAiFilter('all'); setCurrentPage(1); setPageHistory([null]); }} className="rounded-xl text-[9px] font-black uppercase">Volver a vista general</Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
                 ) : !orders || orders.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-32">
                       <div className="space-y-2">
                         <Search className="h-10 w-10 mx-auto text-slate-200" />
-                        <p className="text-slate-400 font-bold uppercase text-xs">No se encontraron registros en este bloque.</p>
+                        <p className="text-slate-400 font-bold uppercase text-xs">No se encontraron registros en este filtro.</p>
                       </div>
                     </TableCell>
                   </TableRow>
                 ) : orders.map((order) => {
-                  const isAuto = order.classification_status === 'auto' || order.classification_status === 'reviewed';
                   const hasDiscipline = !!order.disciplina_normalizada;
+                  const isAuto = order.classification_status === 'auto';
                   
                   return (
                     <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
@@ -445,7 +420,7 @@ export default function AnalysisPage() {
                         {isAuto ? (
                           <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2">AUTO IA</Badge>
                         ) : hasDiscipline ? (
-                          <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2">IMPORTADO</Badge>
+                          <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2">VALIDADO</Badge>
                         ) : (
                           <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2">PENDIENTE</Badge>
                         )}
@@ -459,7 +434,7 @@ export default function AnalysisPage() {
                       <TableCell>
                         <div className="flex flex-col">
                            <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
-                           <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight truncate max-w-[200px]">{order.causa_raiz_normalizada || order.causaRaiz || "Sin definir"}</span>
+                           <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight truncate max-w-[200px]">{order.causa_raiz_normalizada || "Sin definir"}</span>
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
@@ -477,9 +452,9 @@ export default function AnalysisPage() {
                             </AlertDialogTrigger>
                             <AlertDialogContent className="rounded-3xl">
                               <AlertDialogHeader>
-                                <AlertDialogTitle className="font-headline uppercase text-slate-900">¿Eliminar registro?</AlertDialogTitle>
+                                <AlertDialogTitle className="font-headline uppercase text-slate-900 text-sm">Eliminar Registro</AlertDialogTitle>
                                 <AlertDialogDescription className="text-xs text-slate-500">
-                                  Esta acción eliminará permanentemente la orden <strong>{order.projectId}</strong>. Los datos no podrán recuperarse.
+                                  ¿Confirmas la eliminación de la orden {order.projectId}?
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
@@ -499,7 +474,7 @@ export default function AnalysisPage() {
             <div className="flex items-center justify-between px-6 py-4 bg-slate-50/50 border-t">
               <div className="flex items-center gap-4">
                 <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  PÁGINA {currentPage} • UNIVERSO: {stats.total.toLocaleString()}
+                  PÁGINA {currentPage} • BLOQUE: {pageSize}
                 </div>
                 <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(parseInt(v)); setCurrentPage(1); setPageHistory([null]); }}>
                   <SelectTrigger className="h-8 w-32 text-[9px] font-black uppercase rounded-xl border-slate-200">
@@ -530,7 +505,7 @@ export default function AnalysisPage() {
             <div>
               <DialogTitle className="text-xl font-bold uppercase text-slate-900">Procesando Universo IA</DialogTitle>
               <DialogDescription className="text-slate-500 mt-2">
-                Analizando y clasificando {selectedIds.length} registros con motor Gemini 2.5 Flash.
+                Analizando {selectedIds.length} registros con motor Gemini 2.5 Flash.
               </DialogDescription>
             </div>
             <div className="space-y-2">
