@@ -14,15 +14,13 @@ interface FirebaseProviderProps {
   auth: Auth;
 }
 
-// Internal state for user authentication
 interface UserAuthState {
   user: User | null;
   isUserLoading: boolean;
   userError: Error | null;
-  isAuthReady: boolean; // Explicit check for first auth event
+  isAuthReady: boolean;
 }
 
-// Combined state for the Firebase context
 export interface FirebaseContextState {
   areServicesAvailable: boolean; 
   firebaseApp: FirebaseApp | null;
@@ -53,9 +51,6 @@ export interface UserHookResult {
 
 export const FirebaseContext = createContext<FirebaseContextState | undefined>(undefined);
 
-/**
- * FirebaseProvider manages and provides Firebase services and user authentication state.
- */
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
   children,
   firebaseApp,
@@ -69,18 +64,22 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
     isAuthReady: false,
   });
 
-  // 1. Runtime Environment Logging
+  // 1. Diagnóstico de Identidad de Proyecto (CRÍTICO PARA DEBUG)
   useEffect(() => {
     if (firebaseApp) {
-      console.log("[Firebase Runtime] Init Config:", {
-        projectId: firebaseApp.options.projectId,
-        appId: firebaseApp.options.appId,
-        authDomain: firebaseApp.options.authDomain
-      });
+      console.log(
+        "%c[Firebase Runtime] IDENTIDAD DE PROYECTO:",
+        "background: #1E3A8A; color: #fff; padding: 4px; font-weight: bold;",
+        {
+          projectId: firebaseApp.options.projectId,
+          appId: firebaseApp.options.appId,
+          authDomain: firebaseApp.options.authDomain
+        }
+      );
     }
   }, [firebaseApp]);
 
-  // 2. Auth State Subscription
+  // 2. Suscripción a Estado de Autenticación
   useEffect(() => {
     if (!auth) {
       setUserAuthState(prev => ({ ...prev, isUserLoading: false, userError: new Error("Auth service missing."), isAuthReady: true }));
@@ -90,6 +89,7 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
     const unsubscribe = onAuthStateChanged(
       auth,
       (firebaseUser) => {
+        console.log("[Firebase Auth] Usuario detectado:", firebaseUser?.uid || "Ninguno");
         setUserAuthState({ 
           user: firebaseUser, 
           isUserLoading: false, 
@@ -110,26 +110,25 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
     return () => unsubscribe();
   }, [auth]);
 
-  // 3. Connectivity Sanity Test
+  // 3. Test de Conectividad a /orders (Validación de Reglas)
   useEffect(() => {
     if (userAuthState.isAuthReady && userAuthState.user && firestore) {
       const testConnectivity = async () => {
         try {
-          console.log("[Firebase Debug] Running connectivity test to /orders...");
           const testQuery = query(collection(firestore, 'orders'), limit(1));
           await getDocs(testQuery);
-          console.log("[Firebase Debug] Connectivity test SUCCESS: Permissions OK");
+          console.log("%c[Firebase Debug] CONECTIVIDAD EXITOSA: Reglas OK para /orders", "color: #10B981; font-weight: bold;");
         } catch (e: any) {
-          console.error("[Firebase Debug] Connectivity test FAILED:", {
+          console.error("%c[Firebase Debug] CONECTIVIDAD FALLIDA: Reglas bloqueadas", "color: #F43F5E; font-weight: bold;", {
             code: e.code,
             message: e.message,
-            path: "orders"
+            projectId: firebaseApp.options.projectId
           });
         }
       };
       testConnectivity();
     }
-  }, [userAuthState.isAuthReady, userAuthState.user, firestore]);
+  }, [userAuthState.isAuthReady, userAuthState.user, firestore, firebaseApp.options.projectId]);
 
   const contextValue = useMemo((): FirebaseContextState => {
     const servicesAvailable = !!(firebaseApp && firestore && auth);

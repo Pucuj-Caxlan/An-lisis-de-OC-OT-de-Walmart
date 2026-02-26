@@ -14,12 +14,8 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { useFirebase } from '@/firebase/provider';
 
-/** Utility type to add an 'id' field to a given type T. */
 export type WithId<T> = T & { id: string };
 
-/**
- * Interface for the return value of the useCollection hook.
- */
 export interface UseCollectionResult<T> {
   data: WithId<T>[] | null;
   isLoading: boolean;
@@ -37,7 +33,7 @@ export interface InternalQuery extends Query<DocumentData> {
 
 /**
  * React hook to subscribe to a Firestore collection or query in real-time.
- * Gated by isAuthReady to prevent premature permission errors.
+ * Gated by isAuthReady and user presence to prevent race conditions.
  */
 export function useCollection<T = any>(
     memoizedTargetRefOrQuery: ((CollectionReference<DocumentData> | Query<DocumentData>) & {__memo?: boolean})  | null | undefined,
@@ -48,8 +44,9 @@ export function useCollection<T = any>(
   const [error, setError] = useState<FirestoreError | Error | null>(null);
 
   useEffect(() => {
-    // Gate: Wait for Auth to be absolutely ready and a valid query to exist
+    // Gate Crítica: No intentar suscripción si Auth no está listo o el usuario es nulo
     if (!isAuthReady || !user || !memoizedTargetRefOrQuery) {
+      if (!isAuthReady) console.log("[useCollection] Esperando inicialización de Auth...");
       setData(null);
       setIsLoading(false);
       setError(null);
@@ -75,6 +72,8 @@ export function useCollection<T = any>(
           memoizedTargetRefOrQuery.type === 'collection'
             ? (memoizedTargetRefOrQuery as CollectionReference).path
             : (memoizedTargetRefOrQuery as unknown as InternalQuery)._query.path.canonicalString()
+
+        console.error(`[useCollection] Error de permisos en: ${path}`, err);
 
         const contextualError = new FirestorePermissionError({
           operation: 'list',
