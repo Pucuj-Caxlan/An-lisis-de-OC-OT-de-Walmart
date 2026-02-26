@@ -294,8 +294,6 @@ export default function AnalysisPage() {
 
   const syncAggregatesManually = async () => {
     if (!db || !globalAgg) return;
-    // En una implementación real, esto correría un worker o Cloud Function.
-    // Para el MVP, notificamos que se requiere recalcular desde Carga Excel para ver cambios globales.
     toast({ 
       title: "Resumen de Universo", 
       description: "Las estadísticas globales se refrescan automáticamente al cargar nuevos archivos Excel." 
@@ -542,7 +540,7 @@ export default function AnalysisPage() {
                 </Button>
               </div>
             </div>
-          </Table>
+          </Card>
         </main>
 
         <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
