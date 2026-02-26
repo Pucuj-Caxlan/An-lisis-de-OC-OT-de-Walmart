@@ -22,7 +22,8 @@ import {
   FileText,
   BarChart4,
   CheckCircle2,
-  Clock
+  Clock,
+  Zap
 } from 'lucide-react';
 import {
   Table,
@@ -46,10 +47,7 @@ import {
   startAfter, 
   QueryDocumentSnapshot, 
   DocumentData,
-  where,
-  deleteDoc,
-  or,
-  and
+  where
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -93,6 +91,7 @@ export default function AnalysisPage() {
   const [aiFilter, setAiFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
   const [bulkAiProgress, setBulkAiProgress] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
@@ -100,13 +99,12 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Fetch Estadísticas Globales (Refinado para detectar los 3,630+ procesados)
+  // Fetch Estadísticas Globales (Sincronizado con los 3,630+ procesados)
   const fetchStats = async () => {
     if (!db || !isAuthReady) return;
     try {
       const coll = collection(db, 'orders');
       
-      // Consultas atómicas para evitar errores de índices en conteos complejos
       const [totalSnap, autoSnap, reviewedSnap] = await Promise.all([
         getCountFromServer(query(coll)),
         getCountFromServer(query(coll, where('classification_status', '==', 'auto'))),
@@ -116,7 +114,6 @@ export default function AnalysisPage() {
       const total = totalSnap.data().count;
       const processed = autoSnap.data().count + reviewedSnap.data().count;
       
-      // El resto se considera pendiente o legacy procesado (que tienen disciplina pero status pending)
       setStats({
         total: total,
         processed: processed,
@@ -131,14 +128,13 @@ export default function AnalysisPage() {
     fetchStats();
   }, [db, isAuthReady]);
 
-  // Query Paginada Optimizada compatible con índices compuestos
+  // Query Paginada compatible con índices compuestos
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
     let q = collection(db, 'orders');
     let baseQuery;
 
-    // Ajuste para usar el índice: classification_status + projectId
     if (aiFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else {
@@ -213,6 +209,47 @@ export default function AnalysisPage() {
     }
   };
 
+  const handleBulkProcess = async () => {
+    if (!db || !user || selectedIds.length === 0) return;
+    
+    setIsBulkProcessing(true);
+    setShowBulkAiDialog(true);
+    setProcessedCount(0);
+    setBulkAiProgress(0);
+
+    const targetOrders = orders?.filter(o => selectedIds.includes(o.id)) || [];
+    
+    for (let i = 0; i < targetOrders.length; i++) {
+      const order = targetOrders[i];
+      try {
+        const result = await analyzeOrderSemantically({
+          descripcion: String(order.descripcion || "").substring(0, 250),
+          monto: order.impactoNeto
+        });
+
+        const orderRef = doc(db, 'orders', order.id);
+        updateDocumentNonBlocking(orderRef, {
+          disciplina_normalizada: result.disciplina_normalizada,
+          causa_raiz_normalizada: result.causa_raiz_normalizada,
+          subcausa_normalizada: result.subcausa_normalizada,
+          classification_status: 'auto',
+          processedAt: new Date().toISOString()
+        });
+
+        setProcessedCount(prev => prev + 1);
+        setBulkAiProgress(Math.round(((i + 1) / targetOrders.length) * 100));
+      } catch (e) {
+        console.error(`Error processing ${order.id}:`, e);
+      }
+    }
+
+    toast({ title: "Procesamiento Masivo Completo", description: `${processedCount} registros actualizados.` });
+    setIsBulkProcessing(false);
+    setSelectedIds([]);
+    setTimeout(() => setShowBulkAiDialog(false), 2000);
+    fetchStats();
+  };
+
   const handleDeleteRecord = async (id: string) => {
     if (!db) return;
     try {
@@ -240,26 +277,43 @@ export default function AnalysisPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(parseInt(v)); setCurrentPage(1); setPageHistory([null]); }}>
-              <SelectTrigger className="h-8 w-24 text-[10px] font-bold">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="100">100 filas</SelectItem>
-                <SelectItem value="300">300 filas</SelectItem>
-                <SelectItem value="500">500 filas</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={aiFilter} onValueChange={(v) => { setAiFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
-              <SelectTrigger className="h-8 min-w-[180px] text-[10px] font-bold uppercase">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los registros</SelectItem>
-                <SelectItem value="classified">Procesados IA</SelectItem>
-                <SelectItem value="not_classified">Pendientes</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+              <Button 
+                variant={aiFilter === 'all' ? 'default' : 'ghost'} 
+                size="sm" 
+                className="text-[10px] font-black uppercase rounded-lg h-8 px-4"
+                onClick={() => { setAiFilter('all'); setCurrentPage(1); setPageHistory([null]); }}
+              >
+                Todos
+              </Button>
+              <Button 
+                variant={aiFilter === 'classified' ? 'default' : 'ghost'} 
+                size="sm" 
+                className="text-[10px] font-black uppercase rounded-lg h-8 px-4"
+                onClick={() => { setAiFilter('classified'); setCurrentPage(1); setPageHistory([null]); }}
+              >
+                Procesados IA
+              </Button>
+              <Button 
+                variant={aiFilter === 'not_classified' ? 'default' : 'ghost'} 
+                size="sm" 
+                className="text-[10px] font-black uppercase rounded-lg h-8 px-4"
+                onClick={() => { setAiFilter('not_classified'); setCurrentPage(1); setPageHistory([null]); }}
+              >
+                Pendientes
+              </Button>
+            </div>
+            
+            {selectedIds.length > 0 && (
+              <Button 
+                onClick={handleBulkProcess} 
+                disabled={isBulkProcessing}
+                className="bg-accent hover:bg-accent/90 text-white gap-2 shadow-lg h-10 px-6 rounded-xl animate-in fade-in zoom-in"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Procesar ({selectedIds.length})</span>
+              </Button>
+            )}
           </div>
         </header>
 
@@ -267,16 +321,14 @@ export default function AnalysisPage() {
           {error && (
             <Alert variant="destructive" className="bg-rose-50 border-rose-200">
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle className="text-xs font-black uppercase">Falta de Índice o Error de Query</AlertTitle>
+              <AlertTitle className="text-xs font-black uppercase">Error de Consulta</AlertTitle>
               <AlertDescription className="text-[10px] leading-relaxed">
-                {(error as any).message?.includes('index') 
-                  ? "Firestore requiere un índice compuesto para este filtro. El sistema lo está habilitando automáticamente." 
-                  : error.message}
+                {error.message}
               </AlertDescription>
             </Alert>
           )}
 
-          {/* Dashboard de Indicadores Superiores */}
+          {/* Dashboard de Indicadores */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
@@ -308,7 +360,7 @@ export default function AnalysisPage() {
             <Card className="p-5 border-none shadow-sm bg-slate-900 text-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Avance Global</p>
-                <Sparkles className="h-4 w-4 text-accent" />
+                <Zap className="h-4 w-4 text-accent" />
               </div>
               <div className="space-y-2">
                 <div className="flex items-end justify-between">
@@ -350,7 +402,7 @@ export default function AnalysisPage() {
                     </TableCell>
                   </TableRow>
                 ) : orders.map((order) => {
-                  const isProcessed = order.classification_status === 'auto' || order.classification_status === 'reviewed' || !!order.disciplina_normalizada;
+                  const isAuto = order.classification_status === 'auto' || order.classification_status === 'reviewed';
                   
                   return (
                     <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
@@ -361,7 +413,7 @@ export default function AnalysisPage() {
                         />
                       </TableCell>
                       <TableCell>
-                        {order.classification_status === 'auto' ? (
+                        {isAuto ? (
                           <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2">AUTO IA</Badge>
                         ) : order.disciplina_normalizada ? (
                           <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2">IMPORTADO</Badge>
@@ -378,7 +430,7 @@ export default function AnalysisPage() {
                       <TableCell>
                         <div className="flex flex-col">
                            <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
-                           <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight">{order.causa_raiz_normalizada || order.causaRaiz || "Sin definir"}</span>
+                           <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight truncate max-w-[200px]">{order.causa_raiz_normalizada || order.causaRaiz || "Sin definir"}</span>
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
@@ -396,9 +448,9 @@ export default function AnalysisPage() {
                             </AlertDialogTrigger>
                             <AlertDialogContent className="rounded-3xl">
                               <AlertDialogHeader>
-                                <AlertDialogTitle className="font-headline uppercase">¿Eliminar registro?</AlertDialogTitle>
-                                <AlertDialogDescription className="text-xs">
-                                  Esta acción eliminará permanentemente la orden <strong>{order.projectId}</strong> del universo operativo.
+                                <AlertDialogTitle className="font-headline uppercase text-slate-900">¿Eliminar registro?</AlertDialogTitle>
+                                <AlertDialogDescription className="text-xs text-slate-500">
+                                  Esta acción eliminará permanentemente la orden <strong>{order.projectId}</strong>. Los datos no podrán recuperarse.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
@@ -416,14 +468,26 @@ export default function AnalysisPage() {
             </Table>
 
             <div className="flex items-center justify-between px-6 py-4 bg-slate-50/50 border-t">
-              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                PÁGINA {currentPage} • BLOQUE DE {pageSize} • UNIVERSO: {stats.total.toLocaleString()}
+              <div className="flex items-center gap-4">
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  PÁGINA {currentPage} • UNIVERSO: {stats.total.toLocaleString()}
+                </div>
+                <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(parseInt(v)); setCurrentPage(1); setPageHistory([null]); }}>
+                  <SelectTrigger className="h-8 w-32 text-[9px] font-black uppercase rounded-xl border-slate-200">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="100">100 por página</SelectItem>
+                    <SelectItem value="300">300 por página</SelectItem>
+                    <SelectItem value="500">500 por página</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black px-4 rounded-xl">
+                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black px-4 rounded-xl shadow-sm">
                   <ChevronLeft className="h-4 w-4 mr-1" /> ANTERIOR
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={!orders || orders.length < pageSize} className="text-[9px] font-black px-4 rounded-xl">
+                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={!orders || orders.length < pageSize} className="text-[9px] font-black px-4 rounded-xl shadow-sm">
                   SIGUIENTE <ChevronRight className="h-4 w-4 ml-1" />
                 </Button>
               </div>
@@ -435,15 +499,17 @@ export default function AnalysisPage() {
           <DialogContent className="max-w-md rounded-3xl p-8 text-center space-y-6">
             <RefreshCcw className="h-12 w-12 text-primary animate-spin mx-auto" />
             <div>
-              <DialogTitle className="text-xl font-bold uppercase">Procesando Universo IA</DialogTitle>
-              <DialogDescription className="text-slate-500 mt-2">Clasificando {selectedIds.length} registros con motor Gemini.</DialogDescription>
+              <DialogTitle className="text-xl font-bold uppercase text-slate-900">Procesando Universo IA</DialogTitle>
+              <DialogDescription className="text-slate-500 mt-2">
+                Analizando y clasificando {selectedIds.length} registros con motor Gemini 2.5 Flash.
+              </DialogDescription>
             </div>
             <div className="space-y-2">
-              <div className="flex justify-between text-[10px] font-black text-primary">
+              <div className="flex justify-between text-[10px] font-black text-primary uppercase">
                 <span>{processedCount} DE {selectedIds.length}</span>
                 <span>{bulkAiProgress}%</span>
               </div>
-              <Progress value={bulkAiProgress} className="h-1.5" />
+              <Progress value={bulkAiProgress} className="h-2 bg-slate-100" />
             </div>
           </DialogContent>
         </Dialog>
