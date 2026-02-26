@@ -383,7 +383,7 @@ export default function AnalysisPage() {
                 </Button>
               </div>
             </div>
-          </Table>
+          </Card>
         </main>
 
         <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
