@@ -125,7 +125,7 @@ export default function AnalysisPage() {
 
   // SSOT: Fetch real total count once
   useEffect(() => {
-    if (!db) return;
+    if (!db || !user) return;
     const fetchTotal = async () => {
       try {
         const coll = collection(db, 'orders');
@@ -136,17 +136,18 @@ export default function AnalysisPage() {
       }
     };
     fetchTotal();
-  }, [db]);
+  }, [db, user]);
 
   const ordersQuery = useMemoFirebase(() => {
-    if (!db) return null;
+    // CRITICAL: No iniciar consulta hasta que el usuario esté autenticado
+    if (!db || !user) return null;
     // Buffer ampliado a 20k para cubrir el universo de 11,150 registros
     return query(
       collection(db, 'orders'), 
       orderBy('projectId', 'desc'),
       limit(20000)
     );
-  }, [db]);
+  }, [db, user?.uid]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
