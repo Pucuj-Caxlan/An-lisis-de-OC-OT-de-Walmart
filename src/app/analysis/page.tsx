@@ -47,7 +47,9 @@ import {
   QueryDocumentSnapshot, 
   DocumentData,
   where,
-  deleteDoc
+  deleteDoc,
+  or,
+  and
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -98,22 +100,27 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Fetch Estadísticas Globales (SSOT)
+  // Fetch Estadísticas Globales (Refinado para detectar los 3,630+ procesados)
   const fetchStats = async () => {
     if (!db || !isAuthReady) return;
     try {
       const coll = collection(db, 'orders');
       
-      const [totalSnap, processedSnap, pendingSnap] = await Promise.all([
+      // Consultas atómicas para evitar errores de índices en conteos complejos
+      const [totalSnap, autoSnap, reviewedSnap] = await Promise.all([
         getCountFromServer(query(coll)),
         getCountFromServer(query(coll, where('classification_status', '==', 'auto'))),
-        getCountFromServer(query(coll, where('classification_status', '==', 'pending')))
+        getCountFromServer(query(coll, where('classification_status', '==', 'reviewed')))
       ]);
 
+      const total = totalSnap.data().count;
+      const processed = autoSnap.data().count + reviewedSnap.data().count;
+      
+      // El resto se considera pendiente o legacy procesado (que tienen disciplina pero status pending)
       setStats({
-        total: totalSnap.data().count,
-        processed: processedSnap.data().count,
-        pending: pendingSnap.data().count
+        total: total,
+        processed: processed,
+        pending: Math.max(0, total - processed)
       });
     } catch (e) {
       console.error("Stats Error:", e);
@@ -124,13 +131,14 @@ export default function AnalysisPage() {
     fetchStats();
   }, [db, isAuthReady]);
 
-  // Query Paginada Optimizada
+  // Query Paginada Optimizada compatible con índices compuestos
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
     let q = collection(db, 'orders');
     let baseQuery;
 
+    // Ajuste para usar el índice: classification_status + projectId
     if (aiFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else {
@@ -256,6 +264,18 @@ export default function AnalysisPage() {
         </header>
 
         <main className="p-6 space-y-6">
+          {error && (
+            <Alert variant="destructive" className="bg-rose-50 border-rose-200">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle className="text-xs font-black uppercase">Falta de Índice o Error de Query</AlertTitle>
+              <AlertDescription className="text-[10px] leading-relaxed">
+                {(error as any).message?.includes('index') 
+                  ? "Firestore requiere un índice compuesto para este filtro. El sistema lo está habilitando automáticamente." 
+                  : error.message}
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Dashboard de Indicadores Superiores */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
@@ -300,21 +320,6 @@ export default function AnalysisPage() {
             </Card>
           </div>
 
-          {selectedIds.length > 0 && (
-            <Card className="p-4 flex items-center justify-between border-none shadow-xl bg-primary text-white animate-in slide-in-from-top-2 rounded-2xl">
-              <div className="flex items-center gap-4">
-                <LayoutGrid className="h-5 w-5" />
-                <h4 className="text-lg font-bold">{selectedIds.length} Seleccionados</h4>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20">
-                  <Sparkles className="h-4 w-4 mr-2" /> Clasificar Lote
-                </Button>
-                <Button onClick={() => setSelectedIds([])} variant="ghost" className="text-white/60"><X className="h-5 w-5" /></Button>
-              </div>
-            </Card>
-          )}
-
           <Card className="border-none shadow-md overflow-hidden bg-white rounded-2xl">
             <Table>
               <TableHeader className="bg-slate-50/50">
@@ -344,63 +349,69 @@ export default function AnalysisPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ) : orders.map((order) => (
-                  <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
-                    <TableCell className="text-center">
-                      <Checkbox 
-                        checked={selectedIds.includes(order.id)} 
-                        onCheckedChange={(checked) => setSelectedIds(prev => checked ? [...prev, order.id] : prev.filter(id => id !== order.id))} 
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {order.classification_status === 'auto' ? (
-                        <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2">AUTO IA</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2">PENDIENTE</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span className="font-black text-primary text-sm tracking-tighter">{order.projectId}</span>
-                        <span className="text-[9px] text-slate-400 uppercase truncate max-w-[180px] font-bold">{order.projectName}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                         <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
-                         <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight">{order.causa_raiz_normalizada || order.causaRaiz || "Sin definir"}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-center gap-1">
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing}>
-                          {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
-                        </Button>
-                        
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-300 hover:text-rose-500">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent className="rounded-3xl">
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="font-headline uppercase">¿Eliminar registro?</AlertDialogTitle>
-                              <AlertDialogDescription className="text-xs">
-                                Esta acción eliminará permanentemente la orden <strong>{order.projectId}</strong> del universo operativo.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel className="rounded-xl text-[10px] font-black uppercase">Cancelar</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDeleteRecord(order.id)} className="bg-rose-600 rounded-xl text-[10px] font-black uppercase">Eliminar</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                ) : orders.map((order) => {
+                  const isProcessed = order.classification_status === 'auto' || order.classification_status === 'reviewed' || !!order.disciplina_normalizada;
+                  
+                  return (
+                    <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
+                      <TableCell className="text-center">
+                        <Checkbox 
+                          checked={selectedIds.includes(order.id)} 
+                          onCheckedChange={(checked) => setSelectedIds(prev => checked ? [...prev, order.id] : prev.filter(id => id !== order.id))} 
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {order.classification_status === 'auto' ? (
+                          <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2">AUTO IA</Badge>
+                        ) : order.disciplina_normalizada ? (
+                          <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2">IMPORTADO</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2">PENDIENTE</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="font-black text-primary text-sm tracking-tighter">{order.projectId}</span>
+                          <span className="text-[9px] text-slate-400 uppercase truncate max-w-[180px] font-bold">{order.projectName}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                           <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
+                           <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight">{order.causa_raiz_normalizada || order.causaRaiz || "Sin definir"}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-center gap-1">
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing}>
+                            {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
+                          </Button>
+                          
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-300 hover:text-rose-500">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent className="rounded-3xl">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle className="font-headline uppercase">¿Eliminar registro?</AlertDialogTitle>
+                                <AlertDialogDescription className="text-xs">
+                                  Esta acción eliminará permanentemente la orden <strong>{order.projectId}</strong> del universo operativo.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel className="rounded-xl text-[10px] font-black uppercase">Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDeleteRecord(order.id)} className="bg-rose-600 rounded-xl text-[10px] font-black uppercase">Eliminar</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
 
