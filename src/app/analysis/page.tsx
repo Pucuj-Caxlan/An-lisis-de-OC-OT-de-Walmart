@@ -21,7 +21,8 @@ import {
   Zap,
   Target,
   DollarSign,
-  Layers
+  Layers,
+  LayoutGrid
 } from 'lucide-react';
 import {
   Table,
@@ -44,7 +45,10 @@ import {
   QueryDocumentSnapshot, 
   DocumentData,
   where,
-  setDoc
+  setDoc,
+  increment,
+  updateDoc,
+  getCountFromServer
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -62,7 +66,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from '@/components/ui/checkbox';
+import { Checkbox } from '@/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -92,11 +96,12 @@ export default function AnalysisPage() {
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
   const [bulkAiProgress, setBulkAiProgress] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
+  const [isRefreshingStats, setIsRefreshingStats] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Leer Agregados Globales
+  // 1. Leer Agregados Globales (Single Source of Truth)
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
@@ -106,15 +111,11 @@ export default function AnalysisPage() {
     const groups: Record<string, { count: number, impact: number, rawNames: string[] }> = {};
     
     Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
-      let normalized = name.trim().toUpperCase();
+      let normalized = String(name).trim().toUpperCase();
       // Agrupar singulares y plurales básicos
       if (normalized.endsWith('S') && normalized.length > 4) {
         normalized = normalized.substring(0, normalized.length - 1);
       }
-      // Mapeos específicos de Walmart
-      if (normalized === 'INGENIERIA') normalized = 'INGENIERÍA';
-      if (normalized === 'ELECTRICA') normalized = 'ELÉCTRICA';
-      if (normalized === 'MECANICA') normalized = 'MECÁNICA';
       
       if (!groups[normalized]) {
         groups[normalized] = { count: 0, impact: 0, rawNames: [] };
@@ -127,27 +128,28 @@ export default function AnalysisPage() {
     return groups;
   }, [globalAgg]);
 
-  // 3. Actualizar KPIs de la Consola basados en el Filtro y Agregados
+  // 3. Actualizar KPIs Dinámicos
   useEffect(() => {
     if (!globalAgg) return;
 
     const totalInDb = globalAgg.totalOrders || 0;
     const totalImpactInDb = globalAgg.totalImpact || 0;
+    const totalWithData = Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0);
 
     if (disciplineFilter === 'all') {
       setStats({
         total: totalInDb,
-        withData: Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0),
-        pending: Math.max(0, totalInDb - Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0)),
+        withData: totalWithData,
+        pending: Math.max(0, totalInDb - totalWithData),
         totalImpact: totalImpactInDb
       });
     } else if (disciplineFilter === 'unclassified') {
-      const pendingCount = Math.max(0, totalInDb - Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0));
+      const pendingCount = Math.max(0, totalInDb - totalWithData);
       setStats({
         total: pendingCount,
         withData: 0,
         pending: pendingCount,
-        totalImpact: 0 // El impacto de pendientes se calcula bajo demanda
+        totalImpact: 0 
       });
     } else {
       const group = groupedDisciplines[disciplineFilter];
@@ -162,7 +164,7 @@ export default function AnalysisPage() {
     }
   }, [disciplineFilter, globalAgg, groupedDisciplines]);
 
-  // 4. Query Paginada con Filtros Robustos
+  // 4. Query Paginada
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
@@ -172,12 +174,11 @@ export default function AnalysisPage() {
     if (disciplineFilter === 'all') {
       baseQuery = query(q, orderBy('projectId', 'asc'), limit(pageSize));
     } else if (disciplineFilter === 'unclassified') {
-      // Usando el campo classification_status para mayor precisión con el índice
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
       const group = groupedDisciplines[disciplineFilter];
-      // Para este volumen, usamos el filtro por lista de nombres crudos (hasta 30 variaciones)
-      baseQuery = query(q, where('disciplina_normalizada', 'in', group.rawNames.slice(0, 30)), orderBy('projectId', 'asc'), limit(pageSize));
+      const names = group?.rawNames || [disciplineFilter];
+      baseQuery = query(q, where('disciplina_normalizada', 'in', names.slice(0, 30)), orderBy('projectId', 'asc'), limit(pageSize));
     }
 
     const currentCursor = pageHistory[currentPage - 1];
@@ -217,6 +218,26 @@ export default function AnalysisPage() {
     return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2 }).format(amount);
   };
 
+  const updateGlobalStatsIncrementally = async (discName: string, impact: number) => {
+    if (!db) return;
+    const ref = doc(db, 'aggregates', 'global_stats');
+    const path = `disciplines.${discName}.count`;
+    const impactPath = `disciplines.${discName}.impact`;
+    
+    updateDoc(ref, {
+      [path]: increment(1),
+      [impactPath]: increment(impact),
+      lastUpdate: new Date().toISOString()
+    }).catch(() => {
+      // Si falla por no existir el campo anidado, inicializamos
+      setDoc(ref, {
+        disciplines: {
+          [discName]: { count: 1, impact: impact }
+        }
+      }, { merge: true });
+    });
+  };
+
   const handleSingleSemanticAnalysis = async (order: any) => {
     if (!db || !user) return;
     setIsAnalyzing(order.id);
@@ -235,6 +256,9 @@ export default function AnalysisPage() {
         semanticAnalysis: result,
         processedAt: new Date().toISOString()
       });
+
+      // Actualizar agregado localmente para feedback inmediato
+      await updateGlobalStatsIncrementally(result.disciplina_normalizada, order.impactoNeto || 0);
 
       toast({ title: "Registro Clasificado", description: result.disciplina_normalizada });
     } catch (e) {
@@ -272,6 +296,8 @@ export default function AnalysisPage() {
           processedAt: new Date().toISOString()
         });
 
+        await updateGlobalStatsIncrementally(result.disciplina_normalizada, order.impactoNeto || 0);
+
         setProcessedCount(i + 1);
         setBulkAiProgress(Math.round(((i + 1) / targetOrders.length) * 100));
       } catch (e) {
@@ -285,19 +311,31 @@ export default function AnalysisPage() {
     setTimeout(() => setShowBulkAiDialog(false), 2000);
   };
 
+  const handleRefreshUniverseStats = async () => {
+    if (!db) return;
+    setIsRefreshingStats(true);
+    try {
+      const snapshot = await getCountFromServer(collection(db, 'orders'));
+      const total = snapshot.data().count;
+      
+      await updateDoc(doc(db, 'aggregates', 'global_stats'), {
+        totalOrders: total,
+        lastUpdate: new Date().toISOString()
+      });
+      
+      toast({ title: "Universo Sincronizado", description: `Total real: ${total.toLocaleString()} registros.` });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Error al sincronizar" });
+    } finally {
+      setIsRefreshingStats(false);
+    }
+  };
+
   const handleDeleteRecord = async (id: string) => {
     if (!db) return;
     const orderRef = doc(db, 'orders', id);
     deleteDocumentNonBlocking(orderRef);
     toast({ title: "Registro eliminado" });
-  };
-
-  const syncAggregatesManually = async () => {
-    if (!db || !globalAgg) return;
-    toast({ 
-      title: "Resumen de Universo", 
-      description: "Las estadísticas globales se refrescan automáticamente al cargar nuevos archivos Excel." 
-    });
   };
 
   const progressPercentage = stats.total > 0 ? Math.round((stats.withData / stats.total) * 100) : 0;
@@ -335,16 +373,29 @@ export default function AnalysisPage() {
               </Select>
             </div>
             
-            {selectedIds.length > 0 && (
+            <div className="flex items-center gap-2">
+              {selectedIds.length > 0 && (
+                <Button 
+                  onClick={handleBulkProcess} 
+                  disabled={isBulkProcessing}
+                  className="bg-accent hover:bg-accent/90 text-white gap-2 shadow-lg h-10 px-6 rounded-xl animate-in fade-in zoom-in"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Procesar Masivo ({selectedIds.length})</span>
+                </Button>
+              )}
+              
               <Button 
-                onClick={handleBulkProcess} 
-                disabled={isBulkProcessing}
-                className="bg-accent hover:bg-accent/90 text-white gap-2 shadow-lg h-10 px-6 rounded-xl animate-in fade-in zoom-in"
+                variant="outline" 
+                size="sm" 
+                onClick={handleRefreshUniverseStats}
+                disabled={isRefreshingStats}
+                className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl"
               >
-                <Sparkles className="h-4 w-4" />
-                <span className="text-[10px] font-black uppercase tracking-widest">Procesar Masivo ({selectedIds.length})</span>
+                <RefreshCcw className={`h-3 w-3 mr-2 ${isRefreshingStats ? 'animate-spin' : ''}`} />
+                Sincronizar Universo
               </Button>
-            )}
+            </div>
           </div>
         </header>
 
@@ -450,11 +501,11 @@ export default function AnalysisPage() {
                       <TableCell>
                         <div className="flex flex-col gap-1">
                           {isAuto ? (
-                            <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2">AUTO IA</Badge>
+                            <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2 w-fit">AUTO IA</Badge>
                           ) : hasDiscipline ? (
-                            <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2">VALIDADO</Badge>
+                            <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2 w-fit">VALIDADO</Badge>
                           ) : (
-                            <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2">PENDIENTE</Badge>
+                            <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2 w-fit">PENDIENTE</Badge>
                           )}
                           {confidence !== undefined && (
                             <div className="flex items-center gap-1">
