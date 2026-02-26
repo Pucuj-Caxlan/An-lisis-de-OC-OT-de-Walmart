@@ -2,32 +2,24 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Versión 2.3.0 - Restauración de Compatibilidad Feb-20 + Estabilización Custom Auth
-    
+    // Función de validación simplificada para máxima compatibilidad con Custom Tokens
     function isSignedIn() {
-      // Validamos UID para soportar Custom Tokens sin email (Walmart Standard)
       return request.auth != null && request.auth.uid != null;
     }
     
-    // Colección Principal de Órdenes
+    // Acceso total a la colección de órdenes para usuarios autenticados
+    // Esto garantiza que el listado de 11,150 registros no sea bloqueado
     match /orders/{orderId} {
-      // Permite listado masivo y lectura individual
-      allow read: if isSignedIn();
-      // Permite escritura para procesos de ingesta y clasificación IA
-      allow write: if isSignedIn();
+      allow read, write: if isSignedIn();
     }
 
-    // Soporte para Taxonomías e Inteligencia Semántica
+    // Colecciones de soporte y taxonomía
     match /taxonomy_disciplines/{id} { allow read: if isSignedIn(); }
     match /taxonomy_causes/{id} { allow read: if isSignedIn(); }
     match /classification_overrides/{id} { allow read, write: if isSignedIn(); }
-    
-    // Soporte para Agregados y Dashboards de Alto Nivel
-    match /aggregates/{document=**} {
-      allow read: if isSignedIn();
-    }
+    match /aggregates/{document=**} { allow read: if isSignedIn(); }
 
-    // Procesos Operativos y Auditoría
+    // Procesos operativos y auditoría
     match /audits/{id} { allow read, write: if isSignedIn(); }
     match /audit_logs/{id} { allow read, write: if isSignedIn(); }
     match /deletion_jobs/{id} { allow read, write: if isSignedIn(); }
@@ -39,7 +31,7 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
-    // Regla de Respaldo de Seguridad - SOLO LECTURA
+    // Regla de respaldo para cualquier otra colección (Solo Lectura)
     match /{document=**} {
       allow read: if isSignedIn();
       allow write: if false; 
