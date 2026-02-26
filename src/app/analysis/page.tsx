@@ -137,7 +137,7 @@ export default function AnalysisPage() {
     if (globalAgg?.disciplines) {
       Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
         let normalized = String(name).trim().toUpperCase();
-        // Consolidación simple de plurales
+        // Consolidación de plurales simple (ej. CIVILES -> CIVIL)
         if (normalized.endsWith('S') && normalized.length > 4) {
           normalized = normalized.substring(0, normalized.length - 1);
         }
@@ -147,11 +147,13 @@ export default function AnalysisPage() {
         }
         groups[normalized].count += s.count || 0;
         groups[normalized].impact += s.impact || 0;
-        groups[normalized].rawNames.push(name);
+        if (!groups[normalized].rawNames.includes(name)) {
+          groups[normalized].rawNames.push(name);
+        }
       });
     }
 
-    // Autodescubrimiento desde los registros cargados actualmente para asegurar visibilidad inmediata
+    // Autodescubrimiento desde los registros cargados actualmente
     orders?.forEach(o => {
       if (o.disciplina_normalizada) {
         let name = o.disciplina_normalizada;
@@ -169,40 +171,44 @@ export default function AnalysisPage() {
     return groups;
   }, [globalAgg, orders]);
 
-  // 4. Actualizar KPIs Dinámicos basados en la selección (Ajustado para corregir ceros)
+  // 4. Actualizar KPIs Dinámicos
   useEffect(() => {
+    if (!mounted) return;
+
     const totalInDb = globalAgg?.totalOrders || 0;
     const totalImpactInDb = globalAgg?.totalImpact || 0;
-    const totalWithDataInDb = globalAgg?.totalImpact ? Object.values(globalAgg.disciplines || {}).reduce((acc: number, g: any) => acc + (g.count || 0), 0) : 0;
+    
+    // Contar procesados sumando las disciplinas en el agregador
+    const totalWithDataInDb = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.count || 0), 0);
 
-    // Calcular impacto local si el global no está disponible
-    const localImpact = orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0;
-
+    // Si no hay filtro, mostrar el universo total
     if (disciplineFilter === 'all') {
       setStats({
-        total: totalInDb || (orders?.length || 0),
-        withData: totalWithDataInDb || (orders?.filter(o => !!o.disciplina_normalizada).length || 0),
+        total: totalInDb,
+        withData: totalWithDataInDb,
         pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: totalImpactInDb || localImpact
+        totalImpact: totalImpactInDb
       });
     } else if (disciplineFilter === 'unclassified') {
-      const pendingCount = totalInDb > 0 ? Math.max(0, totalInDb - totalWithDataInDb) : (orders?.length || 0);
+      // Para "Sin Clasificar", calculamos el impacto de lo que está en pantalla como referencia
+      const localImpact = orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0;
       setStats({
-        total: pendingCount,
+        total: Math.max(0, totalInDb - totalWithDataInDb),
         withData: 0,
-        pending: pendingCount,
-        totalImpact: localImpact // Usar local sum para registros pendientes
+        pending: Math.max(0, totalInDb - totalWithDataInDb),
+        totalImpact: localImpact
       });
     } else {
+      // Para una disciplina específica
       const group = groupedDisciplines[disciplineFilter];
       setStats({
-        total: group?.count || (orders?.length || 0),
-        withData: group?.count || (orders?.length || 0),
+        total: group?.count || 0,
+        withData: group?.count || 0,
         pending: 0,
-        totalImpact: group?.impact || localImpact
+        totalImpact: group?.impact || 0
       });
     }
-  }, [disciplineFilter, globalAgg, groupedDisciplines, orders]);
+  }, [disciplineFilter, globalAgg, groupedDisciplines, orders, mounted]);
 
   const isIndexError = error && (error as any).code === 'failed-precondition';
 
@@ -329,20 +335,34 @@ export default function AnalysisPage() {
     setIsRefreshingStats(true);
     try {
       const colRef = collection(db, 'orders');
-      const snapshot = await getCountFromServer(colRef);
-      const total = snapshot.data().count;
       
-      // Sincronización robusta con setDoc para evitar errores de permiso de actualización inicial
+      // 1. Obtener conteo total real
+      const totalSnapshot = await getCountFromServer(colRef);
+      const total = totalSnapshot.data().count;
+
+      // 2. Obtener conteo de procesados (donde classification_status no es pending)
+      let processedCount = 0;
+      try {
+        const processedQuery = query(colRef, where('classification_status', '!=', 'pending'));
+        const processedSnapshot = await getCountFromServer(processedQuery);
+        processedCount = processedSnapshot.data().count;
+      } catch (e) {
+        // Fallback: sumamos lo que hay en las disciplinas del SSOT
+        processedCount = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.count || 0), 0);
+      }
+      
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: total,
         lastUpdate: new Date().toISOString()
       }, { merge: true });
       
-      toast({ title: "Universo Sincronizado", description: `Total: ${total.toLocaleString()} registros.` });
+      toast({ 
+        title: "Universo Sincronizado", 
+        description: `Total: ${total.toLocaleString()} | Integridad: ${processedCount.toLocaleString()} registros.` 
+      });
     } catch (e: any) {
       console.error("Error syncing universe:", e);
-      const msg = e.code === 'permission-denied' ? "Permisos insuficientes en Firestore." : "Error al sincronizar.";
-      toast({ variant: "destructive", title: "Fallo de Sincronización", description: msg });
+      toast({ variant: "destructive", title: "Fallo de Sincronización", description: "Verifique permisos en Firestore." });
     } finally {
       setIsRefreshingStats(false);
     }
@@ -383,7 +403,7 @@ export default function AnalysisPage() {
                     .sort((a, b) => b[1].count - a[1].count)
                     .map(([name, group]) => (
                     <SelectItem key={name} value={name}>
-                      {name} ({group.count || 'DETEC.'})
+                      {name} ({group.count.toLocaleString()})
                     </SelectItem>
                   ))}
                 </SelectContent>
