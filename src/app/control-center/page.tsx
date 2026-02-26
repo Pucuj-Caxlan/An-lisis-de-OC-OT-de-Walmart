@@ -85,7 +85,7 @@ export default function ControlCenterPage() {
   }, [db, user?.uid]);
 
   const ordersQuery = useMemoFirebase(() => {
-    // CRITICAL: Sincronización de Auth para evitar error de permisos
+    // CRITICAL: Esperar a que el usuario esté autenticado para evitar error de permisos
     if (!db || !user?.uid) return null;
     return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(20000));
   }, [db, user?.uid]);
@@ -97,7 +97,6 @@ export default function ControlCenterPage() {
     const totalImpact = orders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
     const totalCount = orders.length;
     
-    // 1. Pareto Calculation (Discipline Focus)
     const discMap: Record<string, { impact: number, count: number }> = {};
     orders.forEach(o => {
       const d = o.disciplina_normalizada || 'Indefinida';
@@ -122,7 +121,6 @@ export default function ControlCenterPage() {
     const vitalFew = paretoDiscs.filter(d => d.cumulativePct <= 85);
     const concentrationRatio = totalImpact > 0 ? (vitalFew.reduce((a, b) => a + b.impact, 0) / totalImpact) * 100 : 0;
 
-    // 2. Correlation Data (Frequency vs Impact)
     const bubbleData = paretoDiscs.map((d, i) => ({
       name: d.name,
       x: d.count, 
@@ -131,7 +129,6 @@ export default function ControlCenterPage() {
       isVital: d.cumulativePct <= 85
     })).slice(0, 15);
 
-    // 3. Trend Data
     const trendData = Array.from({ length: 15 }).map((_, i) => {
       const vol = Math.floor(Math.random() * 20) + 10;
       const imp = Math.floor(Math.random() * 2000000) + 500000;
@@ -143,7 +140,6 @@ export default function ControlCenterPage() {
       };
     });
 
-    // 4. Stage Intensity
     const stages = ['Diseño', 'Construcción', 'Equipamiento', 'Cierre'];
     const stageData = stages.map(s => ({
       name: s,
@@ -216,7 +212,6 @@ export default function ControlCenterPage() {
         </header>
 
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
-          {/* TOP KPI ROW */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {[
               { label: 'TOTAL IMPACT (MXN)', value: formatCurrency(stats?.totalImpact || 0), color: CYAN_PRIMARY, sub: 'Consolidated Global Cost' },
@@ -243,7 +238,6 @@ export default function ControlCenterPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* LEFT: Vital Few List */}
             <Card className="border-none shadow-md bg-white rounded-2xl p-8 h-full flex flex-col">
               <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
                 <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em] flex items-center gap-3">
@@ -266,7 +260,7 @@ export default function ControlCenterPage() {
                     <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                       <div 
                         className={`h-full transition-all duration-1000 ${d.cumulativePct <= 85 ? 'bg-orange-500 shadow-[0_0_8px_rgba(255,143,0,0.4)]' : 'bg-cyan-500'}`} 
-                        style={{ width: `${(d.impact / stats.totalImpact) * 100 * 3}%` }} 
+                        style={{ width: `${(d.impact / (stats.totalImpact || 1)) * 100 * 3}%` }} 
                       />
                     </div>
                   </div>
@@ -279,7 +273,6 @@ export default function ControlCenterPage() {
               </div>
             </Card>
 
-            {/* RIGHT: Trend Monitor */}
             <Card className="lg:col-span-2 border-none shadow-md bg-white rounded-2xl p-8 overflow-hidden">
               <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
                 <div className="flex items-center gap-4">
@@ -342,162 +335,9 @@ export default function ControlCenterPage() {
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
-              <div className="mt-6 flex justify-between items-center bg-slate-50 p-4 rounded-xl">
-                <p className="text-[10px] text-slate-500 font-bold uppercase italic flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-amber-500" /> Alta concentración de impacto detectada en la muestra actual. Se recomienda auditoría estratégica.
-                </p>
-                <div className="flex items-center gap-6">
-                  <div className="flex items-center gap-2">
-                    <div className="h-2 w-5 rounded-full bg-cyan-500" />
-                    <span className="text-[10px] font-black text-slate-600 uppercase">Impacto Primario</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="h-2 w-5 rounded-full bg-orange-500" />
-                    <span className="text-[10px] font-black text-slate-600 uppercase">Foco Pareto</span>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* BOTTOM LEFT: Intensity Matrix */}
-            <Card className="border-none shadow-md bg-white rounded-2xl p-8">
-              <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
-                <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em] flex items-center gap-3">
-                  <Timer className="h-5 w-5 text-cyan-500" /> Intensity Matrix By Stage
-                </h4>
-                <div className="flex gap-2">
-                  <Badge variant="outline" className="text-[9px] font-black uppercase px-3">ACTIVE PHASES: 4</Badge>
-                </div>
-              </div>
-              <div className="h-[380px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={stats?.stageData} layout="vertical" margin={{ left: 30, right: 30 }}>
-                    <XAxis type="number" hide />
-                    <YAxis 
-                      dataKey="name" 
-                      type="category" 
-                      axisLine={false} 
-                      tickLine={false} 
-                      tick={{ fontSize: 11, fontWeight: '900', fill: '#1E293B' }} 
-                    />
-                    <Tooltip 
-                      cursor={{fill: 'rgba(0,216,255,0.05)'}}
-                      contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0F172A', color: '#fff' }}
-                    />
-                    <Bar dataKey="Impacto Normal" stackId="a" fill="#BDEFFF" barSize={20} radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="Impacto Crítico" stackId="a" fill={CYAN_PRIMARY} radius={[0, 6, 6, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex justify-center gap-8 mt-8 pt-6 border-t border-slate-50">
-                <div className="flex items-center gap-3">
-                  <div className="h-4 w-4 rounded-md bg-[#BDEFFF]" />
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">Debajo del Umbral Pareto</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="h-4 w-4 rounded-md bg-[#00D8FF]" />
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">Pareto Core Impact</span>
-                </div>
-              </div>
-            </Card>
-
-            {/* BOTTOM RIGHT: Correlation Radar */}
-            <Card className="border-none shadow-md bg-white rounded-2xl p-8">
-              <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
-                <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em] flex items-center gap-3">
-                  <Focus className="h-5 w-5 text-orange-500" /> Correlation Radar (80/20)
-                </h4>
-                <Badge className="bg-orange-50 text-orange-600 border-none text-[9px] font-black uppercase px-3 py-1">INCIDENCIAS VS IMPACTO</Badge>
-              </div>
-              <div className="h-[380px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                    <XAxis 
-                      type="number" 
-                      dataKey="x" 
-                      name="Incidencias" 
-                      unit=" ord." 
-                      axisLine={false} 
-                      tick={{fontSize: 10, fill: '#94A3B8', fontWeight: 'bold'}} 
-                    />
-                    <YAxis 
-                      type="number" 
-                      dataKey="y" 
-                      name="Impacto" 
-                      axisLine={false} 
-                      tick={{fontSize: 10, fill: '#94A3B8', fontWeight: 'bold'}} 
-                      tickFormatter={(v) => formatCompactCurrency(v)} 
-                    />
-                    <ZAxis type="number" dataKey="z" range={[600, 8000]} name="Impact Weight" />
-                    <Tooltip cursor={{ strokeDasharray: '3 3' }} content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        return (
-                          <div className="bg-slate-900 text-white p-5 shadow-2xl rounded-xl border-l-4 border-orange-500 min-w-[220px]">
-                            <p className="text-[10px] font-black uppercase text-orange-400 mb-2 tracking-widest">{data.name}</p>
-                            <p className="text-2xl font-black font-headline">{formatCurrency(data.y)}</p>
-                            <div className="mt-3 flex items-center gap-2 border-t border-white/10 pt-3">
-                              <span className="text-[9px] font-bold text-slate-400 uppercase">{data.x} INCIDENCIAS (FRECUENCIA)</span>
-                            </div>
-                            {data.isVital && (
-                              <Badge className="mt-4 bg-orange-500 text-white border-none text-[9px] font-black uppercase tracking-tighter px-3 py-1">VITAL FEW 80/20</Badge>
-                            )}
-                          </div>
-                        );
-                      }
-                      return null;
-                    }} />
-                    <Scatter name="Disciplines" data={stats?.bubbleData}>
-                      {stats?.bubbleData.map((entry, index) => (
-                        <Cell 
-                          key={`cell-${index}`} 
-                          fill={entry.isVital ? PARETO_ORANGE : CYAN_PRIMARY} 
-                          fillOpacity={0.85} 
-                          stroke="#fff"
-                          strokeWidth={2}
-                        />
-                      ))}
-                    </Scatter>
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="grid grid-cols-2 gap-6 mt-8 pt-6 border-t border-slate-50">
-                <div className="text-center group">
-                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1 tracking-widest">Correlation Integrity</p>
-                  <p className="text-base font-black text-slate-900">HIGH POSITIVE</p>
-                </div>
-                <div className="text-center group">
-                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1 tracking-widest">Pareto Accuracy</p>
-                  <p className="text-base font-black text-orange-600">92.4% PRECISION</p>
-                </div>
-              </div>
             </Card>
           </div>
         </main>
-        
-        <footer className="px-10 py-8 bg-white border-t border-slate-200 flex justify-between items-center sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-          <div className="flex items-center gap-8">
-            <span className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-4">
-              <div className="h-2.5 w-2.5 rounded-full bg-cyan-500 shadow-[0_0_10px_rgba(0,216,255,0.8)]" />
-              Operational 80/20 Live // System Ver: 2.2.2 Premium
-            </span>
-            <Separator orientation="vertical" className="h-6" />
-            <div className="flex gap-4">
-              <div className="flex items-center gap-3">
-                <Badge variant="outline" className="text-[9px] font-black border-slate-200 uppercase px-3 py-1">Vital Few Identified</Badge>
-                <Badge variant="outline" className="text-[9px] font-black border-slate-200 uppercase px-3 py-1">Pareto Optimized</Badge>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 text-slate-400">
-            <Button variant="ghost" size="icon" className="h-10 w-10 hover:text-cyan-500 hover:bg-cyan-50 rounded-xl transition-all"><Share2 className="h-5 w-5" /></Button>
-            <Button variant="ghost" size="icon" className="h-10 w-10 hover:text-cyan-500 hover:bg-cyan-50 rounded-xl transition-all"><Download className="h-5 w-5" /></Button>
-            <Button variant="ghost" size="icon" className="h-10 w-10 hover:text-cyan-500 hover:bg-cyan-50 rounded-xl transition-all"><MoreHorizontal className="h-5 w-5" /></Button>
-          </div>
-        </footer>
       </SidebarInset>
     </div>
   );

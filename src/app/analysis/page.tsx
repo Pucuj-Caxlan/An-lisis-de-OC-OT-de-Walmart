@@ -42,8 +42,6 @@ import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, limit, doc, writeBatch, setDoc, orderBy, getCountFromServer } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
-import { generateTraceabilityReport, TraceabilityReportOutput } from '@/ai/flows/traceability-report-flow';
-import { analyzeBulkOrders, BulkIntelligenceOutput } from '@/ai/flows/bulk-intelligence-analysis-flow';
 import {
   Dialog,
   DialogContent,
@@ -62,8 +60,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from '@/components/ui/checkbox';
-import { executeDeletion, DeletionMode } from '@/lib/deletion-service';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 
 const MAX_BULK_AI_RECORDS = 500;
@@ -91,7 +87,6 @@ export default function AnalysisPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Sincronización del conteo real desde el servidor
   useEffect(() => {
     if (!db || !user?.uid) return;
     const fetchTotal = async () => {
@@ -107,18 +102,17 @@ export default function AnalysisPage() {
   }, [db, user?.uid]);
 
   const ordersQuery = useMemoFirebase(() => {
-    // Esperar a que el usuario esté autenticado para evitar error de permisos
+    // CRITICAL: Esperar a que el usuario esté plenamente autenticado antes de suscribirse
     if (!db || !user?.uid) return null;
     return query(
       collection(db, 'orders'), 
       orderBy('projectId', 'desc'),
-      limit(20000) // Buffer ampliado para tus 11,150 registros
+      limit(20000) 
     );
   }, [db, user?.uid]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
-  // Lógica de clasificación unificada para que el frontend vea lo que la IA escribe
   const classificationCounts = useMemo(() => {
     if (!orders) return { classified: 0, pending: 0, needs_review: 0, low_confidence: 0 };
     return {
@@ -427,7 +421,7 @@ export default function AnalysisPage() {
                       <div className="flex items-center gap-1.5">
                         {order.classification_status === 'reviewed' ? (
                           <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black">REVIEWED</Badge>
-                        ) : order.classification_status === 'auto' ? (
+                        ) : (order.classification_status === 'auto' || order.classification_status === 'classified') ? (
                           <Badge className="bg-primary/10 text-primary border-none text-[8px] font-black">AUTO IA</Badge>
                         ) : (
                           <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400">PENDING</Badge>
