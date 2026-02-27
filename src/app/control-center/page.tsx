@@ -1,7 +1,7 @@
-
 "use client"
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card, CardContent } from '@/components/ui/card';
@@ -11,15 +11,12 @@ import {
   Target, 
   Zap, 
   Database,
-  FileSpreadsheet,
   Layers,
   Focus,
-  AlertTriangle,
-  Building2,
   Filter,
   TrendingDown,
-  ChevronRight,
-  ShieldAlert
+  ShieldAlert,
+  ArrowRight
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -29,16 +26,13 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  BarChart,
-  Bar,
-  Cell,
   PieChart,
-  Pie
+  Pie,
+  Cell
 } from 'recharts';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, limit, orderBy, getCountFromServer } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -52,24 +46,8 @@ const CYAN_PRIMARY = "#00D8FF";
 const PARETO_ORANGE = "#FF8F00";
 const ROSE_AUDIT = "#E11D48";
 
-const Sparkline = ({ data, color }: { data: any[], color: string }) => (
-  <div className="h-12 w-28">
-    <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data}>
-        <Area 
-          type="monotone" 
-          dataKey="value" 
-          stroke={color} 
-          fill={color} 
-          fillOpacity={0.15} 
-          strokeWidth={2} 
-        />
-      </AreaChart>
-    </ResponsiveContainer>
-  </div>
-);
-
 export default function ControlCenterPage() {
+  const router = useRouter();
   const db = useFirestore();
   const { user } = useUser();
   const [mounted, setMounted] = useState(false);
@@ -153,17 +131,17 @@ export default function ControlCenterPage() {
       };
     });
 
-    // 2. Inteligencia de Omisiones por Banner (Requerimiento Usuario)
+    // 2. Inteligencia de Omisiones por Formato
     const omissionsMap: Record<string, number> = {};
     filteredOrders.forEach(o => {
       const cause = (o.causa_raiz_normalizada || "").toLowerCase();
       if (cause.includes('omisión') || cause.includes('omision') || cause.includes('error')) {
-        const banner = o.format || o.type || 'Otros';
-        omissionsMap[banner] = (omissionsMap[banner] || 0) + (o.impactoNeto || 0);
+        const formatKey = o.format || o.type || 'Otros';
+        omissionsMap[formatKey] = (omissionsMap[formatKey] || 0) + (o.impactoNeto || 0);
       }
     });
 
-    const omissionsByBanner = Object.entries(omissionsMap)
+    const omissionsByFormat = Object.entries(omissionsMap)
       .map(([name, impact]) => ({ name, impact }))
       .sort((a, b) => b.impact - a.impact);
 
@@ -183,7 +161,7 @@ export default function ControlCenterPage() {
       concentrationRatio, 
       vitalFewCount: vitalFew.length,
       paretoDiscs, 
-      omissionsByBanner,
+      omissionsByFormat,
       trendData,
       sampleSize: filteredOrders.length
     };
@@ -208,7 +186,7 @@ export default function ControlCenterPage() {
   if (!user?.uid || isLoading) return (
     <div className="flex h-screen items-center justify-center bg-slate-100 flex-col gap-4">
       <Activity className="h-12 w-12 text-cyan-500 animate-spin" />
-      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Analizando Pareto 80/20 & Drivers de Falla...</p>
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Analizando Pareto 80/20 por Formato...</p>
     </div>
   );
 
@@ -238,10 +216,10 @@ export default function ControlCenterPage() {
               <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={formatFilter} onValueChange={setFormatFilter}>
                 <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm focus:ring-0">
-                  <SelectValue placeholder="Filtrar por Banner" />
+                  <SelectValue placeholder="Filtrar por Formato" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">TODOS LOS BANNERS</SelectItem>
+                  <SelectItem value="all">TODOS LOS FORMATOS</SelectItem>
                   {availableFormats.map(fmt => (
                     <SelectItem key={fmt} value={fmt}>{fmt.toUpperCase()}</SelectItem>
                   ))}
@@ -255,31 +233,69 @@ export default function ControlCenterPage() {
         </header>
 
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
-          {/* Dashboard KPIs */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {[
-              { label: 'TOTAL SEGMENT IMPACT', value: formatCurrency(stats?.totalImpact || 0), color: CYAN_PRIMARY, sub: 'Impacto Neto Acumulado' },
-              { label: 'PARETO CONCENTRATION', value: (stats?.concentrationRatio || 0).toFixed(1) + '%', color: PARETO_ORANGE, sub: `En Top ${stats?.vitalFewCount} Disciplinas` },
-              { label: 'RECURRENT FAILURES', value: stats?.totalCount || 0, color: ROSE_AUDIT, sub: 'Órdenes de Cambio' },
-              { label: 'OMISSION IMPACT', value: formatCurrency(stats?.omissionsByBanner.reduce((a,b) => a + b.impact, 0) || 0), color: ROSE_AUDIT, sub: 'Causa: Errores / Omisiones' }
-            ].map((kpi, i) => (
-              <Card key={i} className="border-none shadow-md overflow-hidden bg-white rounded-2xl transition-all hover:shadow-lg">
-                <CardContent className="p-0 flex h-32">
-                  <div className="w-2 h-full" style={{ backgroundColor: kpi.color }} />
-                  <div className="flex-1 p-6 flex flex-col justify-between">
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{kpi.label}</p>
-                      <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{kpi.value}</h3>
-                    </div>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">{kpi.sub}</p>
+            <Card className="border-none shadow-md overflow-hidden bg-white rounded-2xl transition-all hover:shadow-lg">
+              <CardContent className="p-0 flex h-32">
+                <div className="w-2 h-full bg-[#00D8FF]" />
+                <div className="flex-1 p-6 flex flex-col justify-between">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">TOTAL SEGMENT IMPACT</p>
+                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{formatCurrency(stats?.totalImpact || 0)}</h3>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Impacto Neto Acumulado</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card 
+              onClick={() => router.push('/analysis')}
+              className="border-none shadow-md overflow-hidden bg-white rounded-2xl transition-all hover:shadow-lg cursor-pointer group"
+            >
+              <CardContent className="p-0 flex h-32">
+                <div className="w-2 h-full bg-[#FF8F00]" />
+                <div className="flex-1 p-6 flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">PARETO CONCENTRATION</p>
+                      <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{(stats?.concentrationRatio || 0).toFixed(1)}%</h3>
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-orange-500 group-hover:translate-x-1 transition-all" />
+                  </div>
+                  <p className="text-[9px] font-bold text-orange-600 uppercase tracking-tight flex items-center gap-1">
+                    Click para ver detalles <Target className="h-2.5 w-2.5" />
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-md overflow-hidden bg-white rounded-2xl transition-all hover:shadow-lg">
+              <CardContent className="p-0 flex h-32">
+                <div className="w-2 h-full bg-[#E11D48]" />
+                <div className="flex-1 p-6 flex flex-col justify-between">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">RECURRENT FAILURES</p>
+                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{stats?.totalCount || 0}</h3>
+                  </div>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Órdenes de Cambio</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-md overflow-hidden bg-white rounded-2xl transition-all hover:shadow-lg">
+              <CardContent className="p-0 flex h-32">
+                <div className="w-2 h-full bg-[#E11D48]" />
+                <div className="flex-1 p-6 flex flex-col justify-between">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">OMISSION IMPACT</p>
+                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{formatCurrency(stats?.omissionsByFormat.reduce((a,b) => a + b.impact, 0) || 0)}</h3>
+                  </div>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Causa: Errores / Omisiones</p>
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Pareto Detail with Sub-disciplines */}
             <Card className="border-none shadow-md bg-white rounded-3xl p-8 h-full flex flex-col">
               <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
                 <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em] flex items-center gap-3">
@@ -319,7 +335,6 @@ export default function ControlCenterPage() {
               </div>
             </Card>
 
-            {/* Recurrent Failures Drilldown (Omissions) */}
             <div className="lg:col-span-2 space-y-8">
               <Card className="border-none shadow-md bg-slate-900 rounded-3xl p-8 overflow-hidden text-white">
                 <div className="flex justify-between items-center mb-8">
@@ -327,7 +342,7 @@ export default function ControlCenterPage() {
                     <h4 className="text-[12px] font-black uppercase tracking-[0.25em] flex items-center gap-3">
                       <ShieldAlert className="h-5 w-5 text-rose-500" /> Spotlight: Omisiones en Catálogos
                     </h4>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase">Importe pagado en adicionales por banner (Causa: Errores / Omisiones)</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">Importe pagado en adicionales por formato (Causa: Errores / Omisiones)</p>
                   </div>
                   <Badge className="bg-rose-500 text-white border-none text-[10px] font-black px-4 py-1 animate-pulse">CRITICAL AUDIT</Badge>
                 </div>
@@ -337,13 +352,13 @@ export default function ControlCenterPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
-                          data={stats?.omissionsByBanner}
+                          data={stats?.omissionsByFormat}
                           innerRadius={60}
                           outerRadius={80}
                           paddingAngle={5}
                           dataKey="impact"
                         >
-                          {stats?.omissionsByBanner.map((entry, index) => (
+                          {stats?.omissionsByFormat.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={[CYAN_PRIMARY, PARETO_ORANGE, '#10B981', '#6366F1', '#A855F7'][index % 5]} />
                           ))}
                         </Pie>
@@ -356,7 +371,7 @@ export default function ControlCenterPage() {
                     </ResponsiveContainer>
                   </div>
                   <div className="space-y-4">
-                    {stats?.omissionsByBanner.slice(0, 5).map((b, i) => (
+                    {stats?.omissionsByFormat.slice(0, 5).map((b, i) => (
                       <div key={i} className="bg-white/5 p-4 rounded-xl border border-white/10 hover:bg-white/10 transition-colors">
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-[10px] font-black uppercase tracking-widest text-cyan-400">{b.name}</span>
@@ -369,7 +384,6 @@ export default function ControlCenterPage() {
                 </div>
               </Card>
 
-              {/* Impact Monitor with Context */}
               <Card className="border-none shadow-md bg-white rounded-3xl p-8 overflow-hidden">
                 <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
                   <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em]">Operational Impact Monitor</h4>
