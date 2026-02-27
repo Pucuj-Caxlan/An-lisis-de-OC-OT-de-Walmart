@@ -61,6 +61,20 @@ const SPOTLIGHT_CONFIG = {
   site_findings: { label: 'IMPREVISTOS EN SITIO', keywords: ['sitio', 'subsuelo', 'roca', 'freático', 'hallazgo'], icon: AlertTriangle }
 };
 
+// Función de normalización institucional de formatos
+const normalizeFormatName = (name: any) => {
+  if (!name) return 'OTROS';
+  const n = String(name).trim().toUpperCase();
+  
+  if (n === 'MI BODEGA' || n === 'MI BODEGA AURRERA') return 'MI BODEGA AURRERA';
+  if (n === 'BODEGA AURRERA' || n === 'BAE' || n === 'BODEGA' || n === 'AURRERA') return 'BODEGA AURRERA';
+  if (n.includes('SAMS') || n.includes("SAM'S")) return "SAM'S CLUB";
+  if (n.includes('SUPERCENTER') || n.includes('WALMART')) return 'WALMART SUPERCENTER';
+  if (n.includes('EXPRESS')) return 'WALMART EXPRESS';
+  
+  return n;
+};
+
 export default function ControlCenterPage() {
   const router = useRouter();
   const db = useFirestore();
@@ -97,8 +111,8 @@ export default function ControlCenterPage() {
     if (!orders) return [];
     const formats = new Set<string>();
     orders.forEach(o => {
-      if (o.format) formats.add(o.format);
-      else if (o.type && (o.type.includes('Sams') || o.type.includes('BAE') || o.type.includes('Supercenter'))) formats.add(o.type);
+      const raw = o.format || o.type || 'OTROS';
+      formats.add(normalizeFormatName(raw));
     });
     return Array.from(formats).sort();
   }, [orders]);
@@ -108,7 +122,8 @@ export default function ControlCenterPage() {
 
     const filteredOrders = orders.filter(o => {
       if (formatFilter === 'all') return true;
-      return o.format === formatFilter || o.type === formatFilter;
+      const normalizedRowFormat = normalizeFormatName(o.format || o.type);
+      return normalizedRowFormat === formatFilter;
     });
 
     const totalImpact = filteredOrders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
@@ -147,7 +162,7 @@ export default function ControlCenterPage() {
       };
     });
 
-    // 2. Inteligencia Dinámica de Spotlight por Formato
+    // 2. Inteligencia Dinámica de Spotlight por Formato (Unificado)
     const spotlightMap: Record<string, number> = {};
     const currentSpotlightConfig = SPOTLIGHT_CONFIG[activeSpotlight];
     
@@ -158,7 +173,7 @@ export default function ControlCenterPage() {
       const isMatch = currentSpotlightConfig.keywords.some(k => cause.includes(k) || desc.includes(k));
       
       if (isMatch) {
-        const formatKey = o.format || o.type || 'Otros';
+        const formatKey = normalizeFormatName(o.format || o.type);
         spotlightMap[formatKey] = (spotlightMap[formatKey] || 0) + (o.impactoNeto || 0);
       }
     });
@@ -333,7 +348,7 @@ export default function ControlCenterPage() {
                     <div className="flex justify-between items-start mb-3">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <p className="text-[11px] font-black text-slate-800 uppercase tracking-tight">{d.name}</p>
+                          <p className="text-xs font-black text-slate-800 uppercase tracking-tight">{d.name}</p>
                           {d.cumulativePct <= 85 && <TrendingDown className="h-3 w-3 text-orange-500" />}
                         </div>
                         <div className="flex items-center gap-1.5">

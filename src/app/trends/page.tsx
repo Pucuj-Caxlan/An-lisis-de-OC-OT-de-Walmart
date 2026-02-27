@@ -65,7 +65,17 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-const YEAR_COLORS = ['#2962FF', '#FF8F00', '#00C853', '#D50000', '#6200EA', '#00B8D4', '#AA00FF'];
+
+// Función de normalización de formatos institucional
+const normalizeFormatName = (name: any) => {
+  if (!name) return 'OTROS';
+  const n = String(name).trim().toUpperCase();
+  if (n === 'MI BODEGA' || n === 'MI BODEGA AURRERA') return 'MI BODEGA AURRERA';
+  if (n === 'BODEGA AURRERA' || n === 'BAE' || n === 'BODEGA' || n === 'AURRERA') return 'BODEGA AURRERA';
+  if (n.includes('SAMS') || n.includes("SAM'S")) return "SAM'S CLUB";
+  if (n.includes('SUPERCENTER') || n.includes('WALMART')) return 'WALMART SUPERCENTER';
+  return n;
+};
 
 export default function TrendsPage() {
   const { toast } = useToast();
@@ -89,7 +99,6 @@ export default function TrendsPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // SSOT: Conteo global real
   useEffect(() => {
     if (!db || !user?.uid) return;
     const fetchTotal = async () => {
@@ -105,7 +114,6 @@ export default function TrendsPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !user?.uid) return null;
-    // Ajustado a 10,000 (Límite máximo de Structured Query)
     return query(collection(db, 'orders'), limit(10000)); 
   }, [db, user?.uid]);
 
@@ -137,6 +145,15 @@ export default function TrendsPage() {
     return Array.from(years).sort((a, b) => b - a);
   }, [orders]);
 
+  const availableFormats = useMemo(() => {
+    if (!orders) return [];
+    const formats = new Set<string>();
+    orders.forEach(o => {
+      formats.add(normalizeFormatName(o.format || o.type));
+    });
+    return Array.from(formats).sort();
+  }, [orders]);
+
   const filteredOrders = useMemo(() => {
     if (!orders) return [];
     return orders.filter(o => {
@@ -147,7 +164,10 @@ export default function TrendsPage() {
       const yearMatch = selectedYears.includes(yr!);
       const monthMatch = selectedMonths.length === 0 || selectedMonths.includes(monthIdx);
       const disciplineMatch = filters.discipline === 'all' || o.disciplina_normalizada === filters.discipline;
-      const formatMatch = filters.format === 'all' || o.format === filters.format || o.type === filters.format;
+      
+      const normalizedRowFormat = normalizeFormatName(o.format || o.type);
+      const formatMatch = filters.format === 'all' || normalizedRowFormat === filters.format;
+      
       const executionMatch = filters.executionType === 'all' || o.executionType === filters.executionType;
       const searchMatch = !filters.search || 
         String(o.projectId).toLowerCase().includes(filters.search.toLowerCase()) || 
@@ -220,12 +240,6 @@ export default function TrendsPage() {
       prev.includes(year) 
         ? (prev.length > 1 ? prev.filter(y => y !== year) : prev) 
         : [...prev, year].sort((a, b) => b - a)
-    );
-  };
-
-  const toggleMonth = (idx: number) => {
-    setSelectedMonths(prev => 
-      prev.includes(idx) ? prev.filter(m => m !== idx) : [...prev, idx].sort((a, b) => a - b)
     );
   };
 
@@ -346,6 +360,21 @@ export default function TrendsPage() {
                   ))}
                 </div>
               </div>
+
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-[9px] font-black text-slate-400 uppercase">Filtrar por Formato (Unificado)</label>
+                <Select value={filters.format} onValueChange={(v) => setFilters({...filters, format: v})}>
+                  <SelectTrigger className="h-8 text-[10px] font-bold uppercase">
+                    <SelectValue placeholder="Todos los formatos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">TODOS LOS FORMATOS</SelectItem>
+                    {availableFormats.map(f => (
+                      <SelectItem key={f} value={f}>{f}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </Card>
 
@@ -359,12 +388,47 @@ export default function TrendsPage() {
                       </div>
                       <div>
                         <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Walmart International</h2>
-                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Single Source of Truth • Universe: {totalInDb || 0} Records</p>
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Single Source of Truth • {filters.format === 'all' ? 'Universo Total' : `Segmento: ${filters.format}`}</p>
                       </div>
                     </div>
                     <h3 className="text-4xl font-headline font-bold text-slate-800 pt-4">Estrategia de Concentración de Impacto 80/20</h3>
                  </div>
               </div>
+              
+              {/* Contenido del reporte... */}
+              {!aiInsight && !isLoading && (
+                <div className="py-32 text-center space-y-4">
+                  <Activity className="h-16 w-16 text-slate-100 mx-auto" />
+                  <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Inicie el análisis estratégico para generar el reporte de impacto</p>
+                </div>
+              )}
+              
+              {aiInsight && (
+                <div className="space-y-10 animate-in fade-in zoom-in duration-500">
+                  <div className="grid md:grid-cols-2 gap-10">
+                    <div className="space-y-4">
+                      <h4 className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
+                        <History className="h-4 w-4" /> Diagnóstico Transversal
+                      </h4>
+                      <p className="text-sm text-slate-600 leading-relaxed text-justify">
+                        {aiInsight.narrative}
+                      </p>
+                    </div>
+                    <div className="space-y-4">
+                      <h4 className="text-xs font-black uppercase text-accent tracking-widest flex items-center gap-2">
+                        <Target className="h-4 w-4" /> Drivers de Costo (Top 80%)
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {aiInsight.keyDrivers.map((d, i) => (
+                          <Badge key={i} variant="outline" className="bg-slate-50 border-slate-200 text-slate-700 text-[10px] font-bold py-1.5 px-3 uppercase">
+                            {d}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </main>
