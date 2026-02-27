@@ -19,7 +19,9 @@ import {
   Download,
   MoreHorizontal,
   AlertTriangle,
-  ShieldCheck
+  ShieldCheck,
+  Building2,
+  Filter
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -40,6 +42,13 @@ import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebas
 import { collection, query, limit, orderBy, getCountFromServer } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const CYAN_PRIMARY = "#00D8FF";
 const CYAN_SECONDARY = "#70EFFF";
@@ -68,6 +77,7 @@ export default function ControlCenterPage() {
   const [mounted, setMounted] = useState(false);
   const [totalInDb, setTotalInDb] = useState<number | null>(null);
   const [activeMetric, setActiveMetric] = useState('impact');
+  const [formatFilter, setFormatFilter] = useState<string>('all');
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -86,19 +96,36 @@ export default function ControlCenterPage() {
 
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !user?.uid) return null;
-    // Ajustado a 10,000 (Límite máximo de Structured Query)
     return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(10000));
   }, [db, user?.uid]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
+  // Extraer formatos únicos para el filtro
+  const availableFormats = useMemo(() => {
+    if (!orders) return [];
+    const formats = new Set<string>();
+    orders.forEach(o => {
+      if (o.format) formats.add(o.format);
+      else if (o.type && (o.type.includes('Sams') || o.type.includes('BAE') || o.type.includes('Supercenter'))) formats.add(o.type);
+    });
+    return Array.from(formats).sort();
+  }, [orders]);
+
   const stats = useMemo(() => {
     if (!orders) return null;
-    const totalImpact = orders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
-    const totalCount = orders.length;
+
+    // Aplicar filtro de formato
+    const filteredOrders = orders.filter(o => {
+      if (formatFilter === 'all') return true;
+      return o.format === formatFilter || o.type === formatFilter;
+    });
+
+    const totalImpact = filteredOrders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
+    const totalCount = filteredOrders.length;
     
     const discMap: Record<string, { impact: number, count: number }> = {};
-    orders.forEach(o => {
+    filteredOrders.forEach(o => {
       const d = o.disciplina_normalizada || 'Indefinida';
       if (!discMap[d]) discMap[d] = { impact: 0, count: 0 };
       discMap[d].impact += (o.impactoNeto || 0);
@@ -121,14 +148,6 @@ export default function ControlCenterPage() {
     const vitalFew = paretoDiscs.filter(d => d.cumulativePct <= 85);
     const concentrationRatio = totalImpact > 0 ? (vitalFew.reduce((a, b) => a + b.impact, 0) / totalImpact) * 100 : 0;
 
-    const bubbleData = paretoDiscs.map((d, i) => ({
-      name: d.name,
-      x: d.count, 
-      y: d.impact, 
-      z: d.impact / (totalImpact / 20), 
-      isVital: d.cumulativePct <= 85
-    })).slice(0, 15);
-
     const trendData = Array.from({ length: 15 }).map((_, i) => {
       const vol = Math.floor(Math.random() * 20) + 10;
       const imp = Math.floor(Math.random() * 2000000) + 500000;
@@ -140,24 +159,16 @@ export default function ControlCenterPage() {
       };
     });
 
-    const stages = ['Diseño', 'Construcción', 'Equipamiento', 'Cierre'];
-    const stageData = stages.map(s => ({
-      name: s,
-      'Impacto Crítico': Math.floor(Math.random() * 1000000),
-      'Impacto Normal': Math.floor(Math.random() * 500000),
-    }));
-
     return { 
       totalImpact, 
       totalCount, 
       concentrationRatio, 
       vitalFewCount: vitalFew.length,
       paretoDiscs, 
-      bubbleData, 
-      trendData, 
-      stageData 
+      trendData,
+      sampleSize: filteredOrders.length
     };
-  }, [orders]);
+  }, [orders, formatFilter]);
 
   const formatCurrency = (val: number) => {
     if (!mounted) return "$0";
@@ -197,11 +208,29 @@ export default function ControlCenterPage() {
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant="outline" className="text-[10px] font-black border-slate-300 bg-slate-50 text-cyan-600 px-2 py-0">STRATEGIC FOCUS 80/20</Badge>
                 <div className="h-1 w-1 rounded-full bg-slate-300" />
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Global SSOT: {totalInDb || orders?.length || 0} Records</span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                  {formatFilter === 'all' ? `Global SSOT: ${totalInDb || 0}` : `Segmento: ${stats?.sampleSize} Registros`}
+                </span>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+              <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
+              <Select value={formatFilter} onValueChange={setFormatFilter}>
+                <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm focus:ring-0">
+                  <SelectValue placeholder="Filtrar por Formato" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">TODOS LOS FORMATOS</SelectItem>
+                  {availableFormats.map(fmt => (
+                    <SelectItem key={fmt} value={fmt}>{fmt.toUpperCase()}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <Button variant="outline" size="sm" className="h-10 gap-2 text-[10px] font-black uppercase rounded-lg border-slate-200 hover:bg-slate-50">
               <FileSpreadsheet className="h-4 w-4" /> Export Pareto
             </Button>
@@ -214,7 +243,7 @@ export default function ControlCenterPage() {
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {[
-              { label: 'TOTAL IMPACT (MXN)', value: formatCurrency(stats?.totalImpact || 0), color: CYAN_PRIMARY, sub: 'Consolidated Global Cost' },
+              { label: 'TOTAL IMPACT (MXN)', value: formatCurrency(stats?.totalImpact || 0), color: CYAN_PRIMARY, sub: 'Consolidated Segment Cost' },
               { label: 'PARETO CONCENTRATION', value: (stats?.concentrationRatio || 0).toFixed(1) + '%', color: PARETO_ORANGE, sub: `Top ${stats?.vitalFewCount} Disciplines` },
               { label: 'INCIDENCIAS (VOLUME)', value: stats?.totalCount || 0, color: CYAN_PRIMARY, sub: 'Total Change Requests' },
               { label: 'DATA RELIABILITY', value: '94.2%', color: '#10B981', sub: 'Structural Governance' }
@@ -245,32 +274,41 @@ export default function ControlCenterPage() {
                 </h4>
                 <Badge className="bg-orange-50 text-orange-600 border-none text-[9px] font-black px-3 py-1">CORE DRIVERS</Badge>
               </div>
-              <div className="flex-1 space-y-8">
-                {stats?.paretoDiscs.slice(0, 5).map((d, i) => (
-                  <div key={i} className="space-y-3">
-                    <div className="flex justify-between items-end">
-                      <div className="space-y-1">
-                        <p className="text-[11px] font-black text-slate-800 uppercase tracking-tight truncate max-w-[200px]">{d.name}</p>
-                        <p className="text-[9px] font-bold text-slate-400 uppercase">{d.count} Incidencias • {formatCurrency(d.impact)}</p>
-                      </div>
-                      <span className={`text-xs font-black ${d.cumulativePct <= 85 ? 'text-orange-600' : 'text-slate-400'}`}>
-                        {Math.round(d.cumulativePct)}%
-                      </span>
-                    </div>
-                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-1000 ${d.cumulativePct <= 85 ? 'bg-orange-500 shadow-[0_0_8px_rgba(255,143,0,0.4)]' : 'bg-cyan-500'}`} 
-                        style={{ width: `${(d.impact / (stats.totalImpact || 1)) * 100 * 3}%` }} 
-                      />
-                    </div>
+              <div className="flex-1 space-y-8 overflow-y-auto max-h-[500px] pr-2">
+                {stats?.paretoDiscs.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full py-20 text-slate-300">
+                    <Database className="h-12 w-12 opacity-20 mb-4" />
+                    <p className="text-xs font-black uppercase tracking-widest">Sin datos en segmento</p>
                   </div>
-                ))}
+                ) : (
+                  stats?.paretoDiscs.slice(0, 8).map((d, i) => (
+                    <div key={i} className="space-y-3">
+                      <div className="flex justify-between items-end">
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-black text-slate-800 uppercase tracking-tight truncate max-w-[200px]">{d.name}</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase">{d.count} Incidencias • {formatCurrency(d.impact)}</p>
+                        </div>
+                        <span className={`text-xs font-black ${d.cumulativePct <= 85 ? 'text-orange-600' : 'text-slate-400'}`}>
+                          {Math.round(d.cumulativePct)}%
+                        </span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-1000 ${d.cumulativePct <= 85 ? 'bg-orange-500 shadow-[0_0_8px_rgba(255,143,0,0.4)]' : 'bg-cyan-500'}`} 
+                          style={{ width: `${(d.impact / (stats.totalImpact || 1)) * 100 * 2.5}%` }} 
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
-              <div className="mt-10 p-5 bg-slate-50 border-l-4 border-orange-500 rounded-r-xl">
-                <p className="text-[11px] font-bold text-slate-600 italic leading-relaxed">
-                  El top {stats?.vitalFewCount} de disciplinas concentra el {Math.round(stats?.concentrationRatio || 0)}% de las desviaciones totales de construcción.
-                </p>
-              </div>
+              {stats && stats.paretoDiscs.length > 0 && (
+                <div className="mt-10 p-5 bg-slate-50 border-l-4 border-orange-500 rounded-r-xl">
+                  <p className="text-[11px] font-bold text-slate-600 italic leading-relaxed">
+                    En el formato <strong>{formatFilter === 'all' ? 'GLOBAL' : formatFilter.toUpperCase()}</strong>, el top {stats?.vitalFewCount} de disciplinas concentra el {Math.round(stats?.concentrationRatio || 0)}% de las desviaciones totales.
+                  </p>
+                </div>
+              )}
             </Card>
 
             <Card className="lg:col-span-2 border-none shadow-md bg-white rounded-2xl p-8 overflow-hidden">
