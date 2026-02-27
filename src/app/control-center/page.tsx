@@ -21,7 +21,8 @@ import {
   SearchCode,
   AlertTriangle,
   HardHat,
-  FileWarning
+  FileWarning,
+  ChevronLeft
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -61,7 +62,7 @@ const SPOTLIGHT_CONFIG = {
   site_findings: { label: 'IMPREVISTOS EN SITIO', keywords: ['sitio', 'subsuelo', 'roca', 'freático', 'hallazgo'], icon: AlertTriangle }
 };
 
-// Función de normalización institucional de formatos - ELIMINADO 'OTROS'
+// Función de normalización institucional de formatos
 const normalizeFormatName = (name: any) => {
   if (!name) return 'FORMATO NO ESPECIFICADO';
   const n = String(name).trim().toUpperCase();
@@ -86,6 +87,7 @@ export default function ControlCenterPage() {
   const [activeMetric, setActiveMetric] = useState('impact');
   const [formatFilter, setFormatFilter] = useState<string>('all');
   const [activeSpotlight, setActiveSpotlight] = useState<SpotlightType>('omissions');
+  const [selectedDiscipline, setSelectedDiscipline] = useState<string>('all');
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -150,7 +152,8 @@ export default function ControlCenterPage() {
           impact: s.impact, 
           count: s.count, 
           topSubName: topSub?.[0], 
-          topSubImpact: topSub?.[1] 
+          topSubImpact: topSub?.[1],
+          subs: Object.entries(s.subs).map(([subName, impact]) => ({ name: subName, impact })).sort((a, b) => b.impact - a.impact)
         };
       })
       .sort((a, b) => b.impact - a.impact);
@@ -230,6 +233,10 @@ export default function ControlCenterPage() {
   );
 
   const CurrentSpotlightIcon = SPOTLIGHT_CONFIG[activeSpotlight].icon;
+
+  const currentDetailedDiscipline = selectedDiscipline !== 'all' 
+    ? stats?.paretoDiscs.find(d => d.name === selectedDiscipline) 
+    : null;
 
   return (
     <div className="flex min-h-screen w-full bg-[#F8FAFC]">
@@ -346,41 +353,90 @@ export default function ControlCenterPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <Card className="border-none shadow-md bg-white rounded-3xl p-8 h-full flex flex-col">
-              <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
-                <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em] flex items-center gap-3">
-                  <Focus className="h-5 w-5 text-cyan-500" /> Vital Few & Sub-Drivers
-                </h4>
-                <Badge className="bg-orange-50 text-orange-600 border-none text-[9px] font-black px-3 py-1 uppercase">80/20 Traceability</Badge>
+              <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 mb-8">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em] flex items-center gap-3">
+                    <Focus className="h-5 w-5 text-cyan-500" /> Vital Few & Sub-Drivers
+                  </h4>
+                  <Badge className="bg-orange-50 text-orange-600 border-none text-[9px] font-black px-3 py-1 uppercase">80/20 Traceability</Badge>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  {selectedDiscipline !== 'all' && (
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedDiscipline('all')} className="h-8 w-8 p-0 text-slate-400 hover:text-primary">
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <Select value={selectedDiscipline} onValueChange={setSelectedDiscipline}>
+                    <SelectTrigger className="h-8 flex-1 text-[10px] font-black uppercase rounded-lg border-slate-100 bg-slate-50">
+                      <SelectValue placeholder="Filtrar por Disciplina" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">TODAS LAS DISCIPLINAS</SelectItem>
+                      {stats?.paretoDiscs.map(d => (
+                        <SelectItem key={d.name} value={d.name}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+
               <div className="flex-1 space-y-8 overflow-y-auto max-h-[600px] pr-2 scrollbar-hide">
-                {stats?.paretoDiscs.map((d, i) => (
-                  <div key={i} className="group cursor-default">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <p className="text-xs font-black text-slate-800 uppercase tracking-tight">{d.name}</p>
-                          {d.cumulativePct <= 85 && <TrendingDown className="h-3 w-3 text-orange-500" />}
+                {selectedDiscipline === 'all' ? (
+                  stats?.paretoDiscs.map((d, i) => (
+                    <div key={i} className="group cursor-default" onClick={() => setSelectedDiscipline(d.name)}>
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs font-black text-slate-800 uppercase tracking-tight group-hover:text-primary transition-colors cursor-pointer">{d.name}</p>
+                            {d.cumulativePct <= 85 && <TrendingDown className="h-3 w-3 text-orange-500" />}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Layers className="h-2.5 w-2.5 text-slate-300" />
+                            <p className="text-[9px] font-bold text-slate-400 uppercase">Falla Crítica: <span className="text-slate-600 italic">{d.topSubName}</span></p>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <Layers className="h-2.5 w-2.5 text-slate-300" />
-                          <p className="text-[9px] font-bold text-slate-400 uppercase">Falla Crítica: <span className="text-slate-600 italic">{d.topSubName}</span></p>
+                        <div className="text-right">
+                          <span className={`text-[11px] font-black ${d.cumulativePct <= 85 ? 'text-orange-600' : 'text-slate-400'}`}>
+                            {formatCompactCurrency(d.impact)}
+                          </span>
+                          <p className="text-[8px] font-bold text-slate-300 uppercase">{Math.round(d.cumulativePct)}% Acum.</p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <span className={`text-[11px] font-black ${d.cumulativePct <= 85 ? 'text-orange-600' : 'text-slate-400'}`}>
-                          {formatCompactCurrency(d.impact)}
-                        </span>
-                        <p className="text-[8px] font-bold text-slate-300 uppercase">{Math.round(d.cumulativePct)}% Acum.</p>
+                      <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-1000 ${d.cumulativePct <= 85 ? 'bg-orange-500 shadow-[0_0_8px_rgba(255,143,0,0.3)]' : 'bg-cyan-500'}`} 
+                          style={{ width: `${(d.impact / (stats.totalImpact || 1)) * 100 * 2}%` }} 
+                        />
                       </div>
                     </div>
-                    <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-1000 ${d.cumulativePct <= 85 ? 'bg-orange-500 shadow-[0_0_8px_rgba(255,143,0,0.3)]' : 'bg-cyan-500'}`} 
-                        style={{ width: `${(d.impact / (stats.totalImpact || 1)) * 100 * 2}%` }} 
-                      />
+                  ))
+                ) : (
+                  <div className="space-y-6">
+                    <div className="bg-slate-900 p-4 rounded-2xl text-white mb-8">
+                      <p className="text-[9px] font-black text-cyan-400 uppercase tracking-widest mb-1">DISCIPLINA SELECCIONADA</p>
+                      <h5 className="text-lg font-black uppercase tracking-tight">{currentDetailedDiscipline?.name}</h5>
+                      <div className="flex justify-between items-end mt-4">
+                        <span className="text-2xl font-black text-white">{formatCurrency(currentDetailedDiscipline?.impact || 0)}</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">{currentDetailedDiscipline?.count} Registros</span>
+                      </div>
                     </div>
+                    
+                    <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Desglose de Sub-disciplinas</h6>
+                    {currentDetailedDiscipline?.subs.map((s, i) => (
+                      <div key={i} className="space-y-2">
+                        <div className="flex justify-between items-end">
+                          <p className="text-[10px] font-bold text-slate-700 uppercase max-w-[70%] leading-tight">{s.name}</p>
+                          <span className="text-[11px] font-black text-slate-900">{formatCompactCurrency(s.impact)}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Progress value={(s.impact / currentDetailedDiscipline.impact) * 100} className="h-1 flex-1" />
+                          <span className="text-[9px] font-bold text-slate-400 w-8 text-right">{Math.round((s.impact / currentDetailedDiscipline.impact) * 100)}%</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             </Card>
 
