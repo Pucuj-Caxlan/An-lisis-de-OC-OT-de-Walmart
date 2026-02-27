@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -35,8 +36,8 @@ import {
   Pie,
   Cell
 } from 'recharts';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, query, limit, orderBy, getCountFromServer } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase, useUser, useDoc } from '@/firebase';
+import { collection, query, limit, orderBy, getCountFromServer, doc } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import {
   Select,
@@ -61,7 +62,6 @@ const SPOTLIGHT_CONFIG = {
   site_findings: { label: 'IMPREVISTOS EN SITIO', keywords: ['sitio', 'subsuelo', 'roca', 'freático', 'hallazgo'], icon: AlertTriangle }
 };
 
-// Función de unificación institucional de formatos
 const normalizeFormatName = (name: any) => {
   if (!name) return 'FORMATO NO ESPECIFICADO';
   const n = String(name).trim().toUpperCase();
@@ -90,6 +90,10 @@ export default function ControlCenterPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
+  // Leer Agregados Globales (SSOT)
+  const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
+  const { data: globalAgg } = useDoc(aggRef);
+
   useEffect(() => {
     if (!db || !user?.uid) return;
     const fetchTotal = async () => {
@@ -103,23 +107,23 @@ export default function ControlCenterPage() {
     fetchTotal();
   }, [db, user?.uid]);
 
-  // Cargamos 15,000 para cubrir el universo total de ~11k sin recortes en KPIs
+  // LIMITADO A 10,000 por restricción de Firebase Firestore
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !user?.uid) return null;
-    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(15000));
+    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(10000));
   }, [db, user?.uid]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
   const availableFormats = useMemo(() => {
+    if (globalAgg?.formats) return Object.keys(globalAgg.formats).sort();
     if (!orders) return [];
     const formats = new Set<string>();
     orders.forEach(o => {
-      const raw = o.format || o.type || 'FORMATO NO ESPECIFICADO';
-      formats.add(normalizeFormatName(raw));
+      formats.add(normalizeFormatName(o.format || o.type));
     });
     return Array.from(formats).sort();
-  }, [orders]);
+  }, [orders, globalAgg]);
 
   const stats = useMemo(() => {
     if (!orders) return null;
@@ -130,11 +134,17 @@ export default function ControlCenterPage() {
       return normalizedRowFormat === formatFilter;
     });
 
-    const totalImpact = filteredOrders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
-    // Usamos el total real de la DB si no hay filtro, de lo contrario el largo del array filtrado
-    const displayCount = (formatFilter === 'all' && totalInDb) ? totalInDb : filteredOrders.length;
+    // Impacto dinámico basado en agregados si es posible, o en la muestra de 10k
+    let totalImpact = 0;
+    if (formatFilter === 'all') {
+      totalImpact = globalAgg?.totalImpact || filteredOrders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
+    } else {
+      totalImpact = globalAgg?.formats?.[formatFilter]?.impact || filteredOrders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
+    }
+
+    const displayCount = (formatFilter === 'all' && totalInDb) ? totalInDb : (globalAgg?.formats?.[formatFilter]?.count || filteredOrders.length);
     
-    // 1. Análisis Pareto por Disciplina y Sub-disciplina
+    // Análisis Pareto por Disciplina
     const discMap: Record<string, { impact: number, count: number, subs: Record<string, number> }> = {};
     filteredOrders.forEach(o => {
       const d = o.disciplina_normalizada || 'Indefinida';
@@ -168,16 +178,14 @@ export default function ControlCenterPage() {
       };
     });
 
-    // 2. Inteligencia Dinámica de Spotlight por Formato
+    // Inteligencia de Spotlight
     const spotlightMap: Record<string, number> = {};
     const currentSpotlightConfig = SPOTLIGHT_CONFIG[activeSpotlight];
     
     filteredOrders.forEach(o => {
       const cause = (o.causa_raiz_normalizada || "").toLowerCase();
       const desc = (o.descripcion || "").toLowerCase();
-      
       const isMatch = currentSpotlightConfig.keywords.some(k => cause.includes(k) || desc.includes(k));
-      
       if (isMatch) {
         const formatKey = normalizeFormatName(o.format || o.type);
         spotlightMap[formatKey] = (spotlightMap[formatKey] || 0) + (o.impactoNeto || 0);
@@ -208,7 +216,7 @@ export default function ControlCenterPage() {
       trendData,
       sampleSize: filteredOrders.length
     };
-  }, [orders, formatFilter, activeSpotlight, totalInDb]);
+  }, [orders, formatFilter, activeSpotlight, totalInDb, globalAgg]);
 
   const formatCurrency = (val: number) => {
     if (!mounted) return "$0";
@@ -229,12 +237,11 @@ export default function ControlCenterPage() {
   if (!user?.uid || isLoading) return (
     <div className="flex h-screen items-center justify-center bg-slate-100 flex-col gap-4">
       <Activity className="h-12 w-12 text-cyan-500 animate-spin" />
-      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Sincronizando Universo Real (&gt;10,900 registros)...</p>
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Sincronizando Universo Real ({totalInDb || '10,900+'} registros)...</p>
     </div>
   );
 
   const CurrentSpotlightIcon = SPOTLIGHT_CONFIG[activeSpotlight].icon;
-
   const currentDetailedDiscipline = selectedDiscipline !== 'all' 
     ? stats?.paretoDiscs.find(d => d.name === selectedDiscipline) 
     : null;
@@ -254,7 +261,7 @@ export default function ControlCenterPage() {
               <div className="flex items-center gap-2 mt-1">
                 <Badge className="bg-cyan-50 text-cyan-700 border-cyan-100 text-[9px] font-black px-2 py-0">GOVERNANCE ENGINE 2.5</Badge>
                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                  {formatFilter === 'all' ? `Universo Total: ${totalInDb || 0}` : `Segmento ${formatFilter}: ${stats?.sampleSize} Reg.`}
+                  {formatFilter === 'all' ? `Universo Total: ${totalInDb || 0}` : `Segmento ${formatFilter}: ${stats?.displayCount} Reg.`}
                 </span>
               </div>
             </div>

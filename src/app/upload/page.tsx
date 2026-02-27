@@ -26,6 +26,20 @@ import { Badge } from '@/components/ui/badge';
 import { correlateHeaders } from '@/ai/flows/header-correlation-flow';
 import * as XLSX from 'xlsx';
 
+// Función de normalización idéntica a la del Dashboard para coherencia en agregados
+const normalizeFormatName = (name: any) => {
+  if (!name) return 'FORMATO NO ESPECIFICADO';
+  const n = String(name).trim().toUpperCase();
+  if (n.includes('MI BODEGA') || n === 'MBA') return 'MI BODEGA AURRERA';
+  if (n.includes('EXPRESS') && (n.includes('BODEGA') || n.includes('BA'))) return 'BODEGA AURRERA EXPRESS';
+  if (n === 'BODEGA AURRERA' || n === 'BAE' || n === 'BODEGA' || n === 'AURRERA' || n === 'BA') return 'BODEGA AURRERA';
+  if (n.includes('SAMS') || n.includes("SAM'S")) return "SAM'S CLUB";
+  if (n.includes('SUPERCENTER') || n.includes('WALMART SC') || n === 'SC' || n === 'WS') return 'WALMART SUPERCENTER';
+  if (n.includes('EXPRESS') || n.includes('SUPERAMA')) return 'WALMART EXPRESS';
+  if (n.includes('WALMART')) return 'WALMART SUPERCENTER';
+  return n;
+};
+
 export default function UploadPage() {
   const { toast } = useToast();
   const db = useFirestore();
@@ -50,6 +64,7 @@ export default function UploadPage() {
     let totalImpactAcc = 0;
     const disciplineMap: Record<string, { impact: number, count: number }> = {};
     const causeMap: Record<string, { impact: number, count: number }> = {};
+    const formatMap: Record<string, { impact: number, count: number }> = {};
 
     try {
       for (const file of selectedFiles) {
@@ -86,6 +101,7 @@ export default function UploadPage() {
             // Agregación local para metadatos
             const disc = row.disciplina_normalizada || 'Indefinida';
             const cause = row.causaRaiz || 'Errores / Omisiones';
+            const fmt = normalizeFormatName(row.format || row.type);
             
             if (!disciplineMap[disc]) disciplineMap[disc] = { impact: 0, count: 0 };
             disciplineMap[disc].impact += impact;
@@ -94,6 +110,10 @@ export default function UploadPage() {
             if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
             causeMap[cause].impact += impact;
             causeMap[cause].count += 1;
+
+            if (!formatMap[fmt]) formatMap[fmt] = { impact: 0, count: 0 };
+            formatMap[fmt].impact += impact;
+            formatMap[fmt].count += 1;
 
             const orderId = `${batchId}_${row.rowNumber}`;
             const orderRef = doc(db, 'orders', orderId);
@@ -121,6 +141,7 @@ export default function UploadPage() {
         totalImpact: totalImpactAcc,
         disciplines: disciplineMap,
         rootCauses: causeMap,
+        formats: formatMap,
         lastUpdate: new Date().toISOString()
       }, { merge: true });
 
