@@ -12,16 +12,14 @@ import {
   Zap, 
   Database,
   FileSpreadsheet,
-  Timer,
   Layers,
   Focus,
-  Share2,
-  Download,
-  MoreHorizontal,
   AlertTriangle,
-  ShieldCheck,
   Building2,
-  Filter
+  Filter,
+  TrendingDown,
+  ChevronRight,
+  ShieldAlert
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -34,9 +32,8 @@ import {
   BarChart,
   Bar,
   Cell,
-  ScatterChart,
-  Scatter,
-  ZAxis
+  PieChart,
+  Pie
 } from 'recharts';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, limit, orderBy, getCountFromServer } from 'firebase/firestore';
@@ -49,10 +46,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Progress } from '@/components/ui/progress';
 
 const CYAN_PRIMARY = "#00D8FF";
-const CYAN_SECONDARY = "#70EFFF";
 const PARETO_ORANGE = "#FF8F00";
+const ROSE_AUDIT = "#E11D48";
 
 const Sparkline = ({ data, color }: { data: any[], color: string }) => (
   <div className="h-12 w-28">
@@ -101,7 +99,6 @@ export default function ControlCenterPage() {
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
 
-  // Extraer formatos únicos para el filtro
   const availableFormats = useMemo(() => {
     if (!orders) return [];
     const formats = new Set<string>();
@@ -115,7 +112,6 @@ export default function ControlCenterPage() {
   const stats = useMemo(() => {
     if (!orders) return null;
 
-    // Aplicar filtro de formato
     const filteredOrders = orders.filter(o => {
       if (formatFilter === 'all') return true;
       return o.format === formatFilter || o.type === formatFilter;
@@ -124,16 +120,28 @@ export default function ControlCenterPage() {
     const totalImpact = filteredOrders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
     const totalCount = filteredOrders.length;
     
-    const discMap: Record<string, { impact: number, count: number }> = {};
+    // 1. Análisis Pareto por Disciplina y Sub-disciplina
+    const discMap: Record<string, { impact: number, count: number, subs: Record<string, number> }> = {};
     filteredOrders.forEach(o => {
       const d = o.disciplina_normalizada || 'Indefinida';
-      if (!discMap[d]) discMap[d] = { impact: 0, count: 0 };
+      const s = o.subcausa_normalizada || 'Sin sub-disciplina';
+      if (!discMap[d]) discMap[d] = { impact: 0, count: 0, subs: {} };
       discMap[d].impact += (o.impactoNeto || 0);
       discMap[d].count += 1;
+      discMap[d].subs[s] = (discMap[d].subs[s] || 0) + (o.impactoNeto || 0);
     });
 
     const sortedDiscs = Object.entries(discMap)
-      .map(([name, s]) => ({ name, ...s }))
+      .map(([name, s]) => {
+        const topSub = Object.entries(s.subs).sort((a, b) => b[1] - a[1])[0];
+        return { 
+          name, 
+          impact: s.impact, 
+          count: s.count, 
+          topSubName: topSub?.[0], 
+          topSubImpact: topSub?.[1] 
+        };
+      })
       .sort((a, b) => b.impact - a.impact);
 
     let cumulative = 0;
@@ -145,19 +153,29 @@ export default function ControlCenterPage() {
       };
     });
 
+    // 2. Inteligencia de Omisiones por Banner (Requerimiento Usuario)
+    const omissionsMap: Record<string, number> = {};
+    filteredOrders.forEach(o => {
+      const cause = (o.causa_raiz_normalizada || "").toLowerCase();
+      if (cause.includes('omisión') || cause.includes('omision') || cause.includes('error')) {
+        const banner = o.format || o.type || 'Otros';
+        omissionsMap[banner] = (omissionsMap[banner] || 0) + (o.impactoNeto || 0);
+      }
+    });
+
+    const omissionsByBanner = Object.entries(omissionsMap)
+      .map(([name, impact]) => ({ name, impact }))
+      .sort((a, b) => b.impact - a.impact);
+
     const vitalFew = paretoDiscs.filter(d => d.cumulativePct <= 85);
     const concentrationRatio = totalImpact > 0 ? (vitalFew.reduce((a, b) => a + b.impact, 0) / totalImpact) * 100 : 0;
 
-    const trendData = Array.from({ length: 15 }).map((_, i) => {
-      const vol = Math.floor(Math.random() * 20) + 10;
-      const imp = Math.floor(Math.random() * 2000000) + 500000;
-      return {
-        day: `${i + 1} Oct`,
-        volume: vol,
-        impact: imp,
-        concentration: 70 + (Math.random() * 15)
-      };
-    });
+    const trendData = Array.from({ length: 15 }).map((_, i) => ({
+      day: `${i + 1} Oct`,
+      volume: Math.floor(Math.random() * 20) + 10,
+      impact: Math.floor(Math.random() * 2000000) + 500000,
+      concentration: 70 + (Math.random() * 15)
+    }));
 
     return { 
       totalImpact, 
@@ -165,6 +183,7 @@ export default function ControlCenterPage() {
       concentrationRatio, 
       vitalFewCount: vitalFew.length,
       paretoDiscs, 
+      omissionsByBanner,
       trendData,
       sampleSize: filteredOrders.length
     };
@@ -189,12 +208,12 @@ export default function ControlCenterPage() {
   if (!user?.uid || isLoading) return (
     <div className="flex h-screen items-center justify-center bg-slate-100 flex-col gap-4">
       <Activity className="h-12 w-12 text-cyan-500 animate-spin" />
-      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Sincronizando Inteligencia Operativa 80/20...</p>
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Analizando Pareto 80/20 & Drivers de Falla...</p>
     </div>
   );
 
   return (
-    <div className="flex min-h-screen w-full bg-[#F3F4F6]">
+    <div className="flex min-h-screen w-full bg-[#F8FAFC]">
       <AppSidebar />
       <SidebarInset>
         <header className="flex h-20 shrink-0 items-center justify-between bg-white px-8 border-b border-slate-200 sticky top-0 z-20 shadow-sm">
@@ -206,60 +225,53 @@ export default function ControlCenterPage() {
                 Operational Control Center
               </h1>
               <div className="flex items-center gap-2 mt-1">
-                <Badge variant="outline" className="text-[10px] font-black border-slate-300 bg-slate-50 text-cyan-600 px-2 py-0">STRATEGIC FOCUS 80/20</Badge>
-                <div className="h-1 w-1 rounded-full bg-slate-300" />
+                <Badge className="bg-cyan-50 text-cyan-700 border-cyan-100 text-[9px] font-black px-2 py-0">GOVERNANCE ENGINE 2.5</Badge>
                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                  {formatFilter === 'all' ? `Global SSOT: ${totalInDb || 0}` : `Segmento: ${stats?.sampleSize} Registros`}
+                  {formatFilter === 'all' ? `Universo Total: ${totalInDb || 0}` : `Segmento ${formatFilter}: ${stats?.sampleSize} Reg.`}
                 </span>
               </div>
             </div>
           </div>
           
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
               <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={formatFilter} onValueChange={setFormatFilter}>
                 <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm focus:ring-0">
-                  <SelectValue placeholder="Filtrar por Formato" />
+                  <SelectValue placeholder="Filtrar por Banner" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">TODOS LOS FORMATOS</SelectItem>
+                  <SelectItem value="all">TODOS LOS BANNERS</SelectItem>
                   {availableFormats.map(fmt => (
                     <SelectItem key={fmt} value={fmt}>{fmt.toUpperCase()}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-
-            <Button variant="outline" size="sm" className="h-10 gap-2 text-[10px] font-black uppercase rounded-lg border-slate-200 hover:bg-slate-50">
-              <FileSpreadsheet className="h-4 w-4" /> Export Pareto
-            </Button>
             <Button size="sm" className="h-10 gap-2 text-[10px] font-black uppercase rounded-lg bg-slate-900 hover:bg-slate-800 shadow-xl px-6">
-              <Zap className="h-4 w-4 text-cyan-400 fill-cyan-400" /> AI Refresh
+              <Zap className="h-4 w-4 text-cyan-400 fill-cyan-400" /> IA Deep Scan
             </Button>
           </div>
         </header>
 
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
+          {/* Dashboard KPIs */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {[
-              { label: 'TOTAL IMPACT (MXN)', value: formatCurrency(stats?.totalImpact || 0), color: CYAN_PRIMARY, sub: 'Consolidated Segment Cost' },
-              { label: 'PARETO CONCENTRATION', value: (stats?.concentrationRatio || 0).toFixed(1) + '%', color: PARETO_ORANGE, sub: `Top ${stats?.vitalFewCount} Disciplines` },
-              { label: 'INCIDENCIAS (VOLUME)', value: stats?.totalCount || 0, color: CYAN_PRIMARY, sub: 'Total Change Requests' },
-              { label: 'DATA RELIABILITY', value: '94.2%', color: '#10B981', sub: 'Structural Governance' }
+              { label: 'TOTAL SEGMENT IMPACT', value: formatCurrency(stats?.totalImpact || 0), color: CYAN_PRIMARY, sub: 'Impacto Neto Acumulado' },
+              { label: 'PARETO CONCENTRATION', value: (stats?.concentrationRatio || 0).toFixed(1) + '%', color: PARETO_ORANGE, sub: `En Top ${stats?.vitalFewCount} Disciplinas` },
+              { label: 'RECURRENT FAILURES', value: stats?.totalCount || 0, color: ROSE_AUDIT, sub: 'Órdenes de Cambio' },
+              { label: 'OMISSION IMPACT', value: formatCurrency(stats?.omissionsByBanner.reduce((a,b) => a + b.impact, 0) || 0), color: ROSE_AUDIT, sub: 'Causa: Errores / Omisiones' }
             ].map((kpi, i) => (
-              <Card key={i} className="border-none shadow-md overflow-hidden bg-white rounded-xl transition-all hover:shadow-lg">
+              <Card key={i} className="border-none shadow-md overflow-hidden bg-white rounded-2xl transition-all hover:shadow-lg">
                 <CardContent className="p-0 flex h-32">
                   <div className="w-2 h-full" style={{ backgroundColor: kpi.color }} />
                   <div className="flex-1 p-6 flex flex-col justify-between">
                     <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-1">{kpi.label}</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{kpi.label}</p>
                       <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{kpi.value}</h3>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">{kpi.sub}</p>
-                      <Sparkline data={Array.from({length: 12}).map(() => ({value: Math.random()}))} color={kpi.color} />
-                    </div>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">{kpi.sub}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -267,113 +279,144 @@ export default function ControlCenterPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <Card className="border-none shadow-md bg-white rounded-2xl p-8 h-full flex flex-col">
+            {/* Pareto Detail with Sub-disciplines */}
+            <Card className="border-none shadow-md bg-white rounded-3xl p-8 h-full flex flex-col">
               <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
                 <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em] flex items-center gap-3">
-                  <Focus className="h-5 w-5 text-cyan-500" /> Vital Few (80/20)
+                  <Focus className="h-5 w-5 text-cyan-500" /> Vital Few & Sub-Drivers
                 </h4>
-                <Badge className="bg-orange-50 text-orange-600 border-none text-[9px] font-black px-3 py-1">CORE DRIVERS</Badge>
+                <Badge className="bg-orange-50 text-orange-600 border-none text-[9px] font-black px-3 py-1 uppercase">80/20 Traceability</Badge>
               </div>
-              <div className="flex-1 space-y-8 overflow-y-auto max-h-[500px] pr-2">
-                {stats?.paretoDiscs.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full py-20 text-slate-300">
-                    <Database className="h-12 w-12 opacity-20 mb-4" />
-                    <p className="text-xs font-black uppercase tracking-widest">Sin datos en segmento</p>
-                  </div>
-                ) : (
-                  stats?.paretoDiscs.slice(0, 8).map((d, i) => (
-                    <div key={i} className="space-y-3">
-                      <div className="flex justify-between items-end">
-                        <div className="space-y-1">
-                          <p className="text-[11px] font-black text-slate-800 uppercase tracking-tight truncate max-w-[200px]">{d.name}</p>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase">{d.count} Incidencias • {formatCurrency(d.impact)}</p>
+              <div className="flex-1 space-y-8 overflow-y-auto max-h-[600px] pr-2 scrollbar-hide">
+                {stats?.paretoDiscs.map((d, i) => (
+                  <div key={i} className="group cursor-default">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-[11px] font-black text-slate-800 uppercase tracking-tight">{d.name}</p>
+                          {d.cumulativePct <= 85 && <TrendingDown className="h-3 w-3 text-orange-500" />}
                         </div>
-                        <span className={`text-xs font-black ${d.cumulativePct <= 85 ? 'text-orange-600' : 'text-slate-400'}`}>
-                          {Math.round(d.cumulativePct)}%
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <Layers className="h-2.5 w-2.5 text-slate-300" />
+                          <p className="text-[9px] font-bold text-slate-400 uppercase">Falla Crítica: <span className="text-slate-600 italic">{d.topSubName}</span></p>
+                        </div>
                       </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full transition-all duration-1000 ${d.cumulativePct <= 85 ? 'bg-orange-500 shadow-[0_0_8px_rgba(255,143,0,0.4)]' : 'bg-cyan-500'}`} 
-                          style={{ width: `${(d.impact / (stats.totalImpact || 1)) * 100 * 2.5}%` }} 
-                        />
+                      <div className="text-right">
+                        <span className={`text-[11px] font-black ${d.cumulativePct <= 85 ? 'text-orange-600' : 'text-slate-400'}`}>
+                          {formatCompactCurrency(d.impact)}
+                        </span>
+                        <p className="text-[8px] font-bold text-slate-300 uppercase">{Math.round(d.cumulativePct)}% Acum.</p>
                       </div>
                     </div>
-                  ))
-                )}
+                    <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-1000 ${d.cumulativePct <= 85 ? 'bg-orange-500 shadow-[0_0_8px_rgba(255,143,0,0.3)]' : 'bg-cyan-500'}`} 
+                        style={{ width: `${(d.impact / (stats.totalImpact || 1)) * 100 * 2}%` }} 
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
-              {stats && stats.paretoDiscs.length > 0 && (
-                <div className="mt-10 p-5 bg-slate-50 border-l-4 border-orange-500 rounded-r-xl">
-                  <p className="text-[11px] font-bold text-slate-600 italic leading-relaxed">
-                    En el formato <strong>{formatFilter === 'all' ? 'GLOBAL' : formatFilter.toUpperCase()}</strong>, el top {stats?.vitalFewCount} de disciplinas concentra el {Math.round(stats?.concentrationRatio || 0)}% de las desviaciones totales.
-                  </p>
-                </div>
-              )}
             </Card>
 
-            <Card className="lg:col-span-2 border-none shadow-md bg-white rounded-2xl p-8 overflow-hidden">
-              <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
-                <div className="flex items-center gap-4">
+            {/* Recurrent Failures Drilldown (Omissions) */}
+            <div className="lg:col-span-2 space-y-8">
+              <Card className="border-none shadow-md bg-slate-900 rounded-3xl p-8 overflow-hidden text-white">
+                <div className="flex justify-between items-center mb-8">
+                  <div className="space-y-1">
+                    <h4 className="text-[12px] font-black uppercase tracking-[0.25em] flex items-center gap-3">
+                      <ShieldAlert className="h-5 w-5 text-rose-500" /> Spotlight: Omisiones en Catálogos
+                    </h4>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">Importe pagado en adicionales por banner (Causa: Errores / Omisiones)</p>
+                  </div>
+                  <Badge className="bg-rose-500 text-white border-none text-[10px] font-black px-4 py-1 animate-pulse">CRITICAL AUDIT</Badge>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                  <div className="h-[250px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={stats?.omissionsByBanner}
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="impact"
+                        >
+                          {stats?.omissionsByBanner.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={[CYAN_PRIMARY, PARETO_ORANGE, '#10B981', '#6366F1', '#A855F7'][index % 5]} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#0F172A', border: 'none', borderRadius: '12px' }}
+                          itemStyle={{ fontSize: '10px', fontWeight: '900', color: '#fff' }}
+                          formatter={(v: number) => formatCurrency(v)}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="space-y-4">
+                    {stats?.omissionsByBanner.slice(0, 5).map((b, i) => (
+                      <div key={i} className="bg-white/5 p-4 rounded-xl border border-white/10 hover:bg-white/10 transition-colors">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-cyan-400">{b.name}</span>
+                          <span className="text-[11px] font-black">{formatCurrency(b.impact)}</span>
+                        </div>
+                        <Progress value={(b.impact / (stats.totalImpact || 1)) * 100 * 5} className="h-1 bg-white/5" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+
+              {/* Impact Monitor with Context */}
+              <Card className="border-none shadow-md bg-white rounded-3xl p-8 overflow-hidden">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
                   <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.25em]">Operational Impact Monitor</h4>
-                  <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <div className="flex bg-slate-50 p-1 rounded-sm gap-1">
+                    {['volume', 'impact', 'concentration'].map((t) => (
+                      <button 
+                        key={t}
+                        onClick={() => setActiveMetric(t)}
+                        className={`px-5 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${activeMetric === t ? 'bg-[#00D8FF] text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                      >
+                        {t === 'concentration' ? '80/20 CONC.' : t.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex bg-slate-50 p-1 rounded-sm gap-1 border border-slate-100">
-                  {[
-                    { id: 'volume', label: 'VOLUME', icon: Layers },
-                    { id: 'impact', label: 'IMPACT', icon: Target },
-                    { id: 'concentration', label: '80/20 CONC.', icon: Focus }
-                  ].map((t) => (
-                    <button 
-                      key={t.id}
-                      onClick={() => setActiveMetric(t.id)}
-                      className={`px-5 py-2 text-[10px] font-black uppercase rounded-lg transition-all flex items-center gap-2 ${activeMetric === t.id ? 'bg-[#00D8FF] text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                      <t.icon className="h-3.5 w-3.5" />
-                      {t.label}
-                    </button>
-                  ))}
+                <div className="h-[350px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={stats?.trendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} stopOpacity={0.2}/>
+                          <stop offset="95%" stopColor={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                      <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94A3B8', fontWeight: 'bold' }} />
+                      <YAxis 
+                        axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94A3B8', fontWeight: 'bold' }} 
+                        tickFormatter={(v) => activeMetric === 'impact' ? formatCompactCurrency(v) : activeMetric === 'concentration' ? `${v}%` : v}
+                      />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0F172A', color: '#fff', padding: '16px' }}
+                        itemStyle={{ fontSize: '11px', fontWeight: '900', textTransform: 'uppercase', color: '#00D8FF' }}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey={activeMetric} 
+                        stroke={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} 
+                        strokeWidth={4} 
+                        fill="url(#colorMetric)" 
+                        dot={{ r: 4, fill: '#fff', strokeWidth: 2, stroke: activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
-              </div>
-              <div className="h-[380px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={stats?.trendData} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorActive" x1="0" x1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} stopOpacity={0.25}/>
-                        <stop offset="95%" stopColor={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                    <XAxis 
-                      dataKey="day" 
-                      axisLine={false} 
-                      tickLine={false} 
-                      tick={{ fontSize: 10, fill: '#94A3B8', fontWeight: 'bold' }} 
-                    />
-                    <YAxis 
-                      axisLine={false} 
-                      tickLine={false} 
-                      tick={{ fontSize: 10, fill: '#94A3B8', fontWeight: 'bold' }} 
-                      tickFormatter={(v) => activeMetric === 'impact' ? formatCompactCurrency(v) : activeMetric === 'concentration' ? `${v}%` : v}
-                    />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0F172A', color: '#fff', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.2)', padding: '16px' }}
-                      itemStyle={{ fontSize: '11px', fontWeight: '900', textTransform: 'uppercase', color: '#00D8FF' }}
-                      labelStyle={{ marginBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '4px', fontSize: '10px', color: '#94A3B8', fontWeight: 'black' }}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey={activeMetric} 
-                      stroke={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} 
-                      strokeWidth={4} 
-                      fill="url(#colorActive)" 
-                      dot={{ r: 6, fill: activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY, strokeWidth: 3, stroke: '#fff' }}
-                      activeDot={{ r: 9, strokeWidth: 0 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
+              </Card>
+            </div>
           </div>
         </main>
       </SidebarInset>
