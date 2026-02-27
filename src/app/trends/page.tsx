@@ -66,14 +66,19 @@ import { jsPDF } from 'jspdf';
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-// Función de normalización de formatos institucional
+// Función de normalización de formatos institucional - ELIMINADO 'OTROS'
 const normalizeFormatName = (name: any) => {
-  if (!name) return 'OTROS';
+  if (!name) return 'FORMATO NO ESPECIFICADO';
   const n = String(name).trim().toUpperCase();
-  if (n === 'MI BODEGA' || n === 'MI BODEGA AURRERA') return 'MI BODEGA AURRERA';
-  if (n === 'BODEGA AURRERA' || n === 'BAE' || n === 'BODEGA' || n === 'AURRERA') return 'BODEGA AURRERA';
+  
+  if (n.includes('MI BODEGA') || n === 'MBA') return 'MI BODEGA AURRERA';
+  if (n.includes('EXPRESS') && (n.includes('BODEGA') || n.includes('BA'))) return 'BODEGA AURRERA EXPRESS';
+  if (n === 'BODEGA AURRERA' || n === 'BAE' || n === 'BODEGA' || n === 'AURRERA' || n === 'BA') return 'BODEGA AURRERA';
   if (n.includes('SAMS') || n.includes("SAM'S")) return "SAM'S CLUB";
-  if (n.includes('SUPERCENTER') || n.includes('WALMART')) return 'WALMART SUPERCENTER';
+  if (n.includes('SUPERCENTER') || n.includes('WALMART SC') || n === 'SC' || n === 'WS') return 'WALMART SUPERCENTER';
+  if (n.includes('EXPRESS') || n.includes('SUPERAMA')) return 'WALMART EXPRESS';
+  if (n.includes('WALMART')) return 'WALMART SUPERCENTER';
+  
   return n;
 };
 
@@ -395,7 +400,6 @@ export default function TrendsPage() {
                  </div>
               </div>
               
-              {/* Contenido del reporte... */}
               {!aiInsight && !isLoading && (
                 <div className="py-32 text-center space-y-4">
                   <Activity className="h-16 w-16 text-slate-100 mx-auto" />

@@ -61,16 +61,18 @@ const SPOTLIGHT_CONFIG = {
   site_findings: { label: 'IMPREVISTOS EN SITIO', keywords: ['sitio', 'subsuelo', 'roca', 'freático', 'hallazgo'], icon: AlertTriangle }
 };
 
-// Función de normalización institucional de formatos
+// Función de normalización institucional de formatos - ELIMINADO 'OTROS'
 const normalizeFormatName = (name: any) => {
-  if (!name) return 'OTROS';
+  if (!name) return 'FORMATO NO ESPECIFICADO';
   const n = String(name).trim().toUpperCase();
   
-  if (n === 'MI BODEGA' || n === 'MI BODEGA AURRERA') return 'MI BODEGA AURRERA';
-  if (n === 'BODEGA AURRERA' || n === 'BAE' || n === 'BODEGA' || n === 'AURRERA') return 'BODEGA AURRERA';
+  if (n.includes('MI BODEGA') || n === 'MBA') return 'MI BODEGA AURRERA';
+  if (n.includes('EXPRESS') && (n.includes('BODEGA') || n.includes('BA'))) return 'BODEGA AURRERA EXPRESS';
+  if (n === 'BODEGA AURRERA' || n === 'BAE' || n === 'BODEGA' || n === 'AURRERA' || n === 'BA') return 'BODEGA AURRERA';
   if (n.includes('SAMS') || n.includes("SAM'S")) return "SAM'S CLUB";
-  if (n.includes('SUPERCENTER') || n.includes('WALMART')) return 'WALMART SUPERCENTER';
-  if (n.includes('EXPRESS')) return 'WALMART EXPRESS';
+  if (n.includes('SUPERCENTER') || n.includes('WALMART SC') || n === 'SC' || n === 'WS') return 'WALMART SUPERCENTER';
+  if (n.includes('EXPRESS') || n.includes('SUPERAMA')) return 'WALMART EXPRESS';
+  if (n.includes('WALMART')) return 'WALMART SUPERCENTER';
   
   return n;
 };
@@ -111,7 +113,7 @@ export default function ControlCenterPage() {
     if (!orders) return [];
     const formats = new Set<string>();
     orders.forEach(o => {
-      const raw = o.format || o.type || 'OTROS';
+      const raw = o.format || o.type || 'FORMATO NO ESPECIFICADO';
       formats.add(normalizeFormatName(raw));
     });
     return Array.from(formats).sort();
