@@ -309,15 +309,23 @@ export default function ControlCenterPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-none shadow-md overflow-hidden bg-white rounded-2xl transition-all hover:shadow-lg">
+            <Card 
+              onClick={() => router.push('/analysis')}
+              className="border-none shadow-md overflow-hidden bg-white rounded-2xl transition-all hover:shadow-lg cursor-pointer group"
+            >
               <CardContent className="p-0 flex h-32">
                 <div className="w-2 h-full bg-[#E11D48]" />
                 <div className="flex-1 p-6 flex flex-col justify-between">
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">RECURRENT FAILURES</p>
-                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{stats?.totalCount || 0}</h3>
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">FALLOS RECURRENTES</p>
+                      <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{stats?.totalCount || 0}</h3>
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-rose-500 group-hover:translate-x-1 transition-all" />
                   </div>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Órdenes de Cambio</p>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight flex items-center gap-1">
+                    Click para ver detalles <Target className="h-2.5 w-2.5" />
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -463,7 +471,7 @@ export default function ControlCenterPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={stats?.trendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                       <defs>
-                        <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient id="colorMetric" x1="0" x1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} stopOpacity={0.2}/>
                           <stop offset="95%" stopColor={activeMetric === 'concentration' ? PARETO_ORANGE : CYAN_PRIMARY} stopOpacity={0}/>
                         </linearGradient>
