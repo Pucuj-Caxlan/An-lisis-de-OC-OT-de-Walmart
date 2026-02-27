@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -16,7 +17,11 @@ import {
   Filter,
   TrendingDown,
   ShieldAlert,
-  ArrowRight
+  ArrowRight,
+  SearchCode,
+  AlertTriangle,
+  HardHat,
+  FileWarning
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -46,6 +51,16 @@ const CYAN_PRIMARY = "#00D8FF";
 const PARETO_ORANGE = "#FF8F00";
 const ROSE_AUDIT = "#E11D48";
 
+type SpotlightType = 'omissions' | 'scope' | 'compliance' | 'prototype' | 'site_findings';
+
+const SPOTLIGHT_CONFIG = {
+  omissions: { label: 'ERRORES / OMISIONES', keywords: ['omisión', 'omision', 'error', 'catalogo'], icon: FileWarning },
+  scope: { label: 'ALTA DE ALCANCE', keywords: ['alcance', 'adicional', 'extra', 'scope'], icon: SearchCode },
+  compliance: { label: 'CUMPLIMIENTO & AUTORIDAD', keywords: ['cumplimiento', 'autoridad', 'legal', 'permiso'], icon: ShieldAlert },
+  prototype: { label: 'ACTUALIZACIÓN PROTOTIPO', keywords: ['prototipo', 'actualización', 'version', 'estandar'], icon: HardHat },
+  site_findings: { label: 'IMPREVISTOS EN SITIO', keywords: ['sitio', 'subsuelo', 'roca', 'freático', 'hallazgo'], icon: AlertTriangle }
+};
+
 export default function ControlCenterPage() {
   const router = useRouter();
   const db = useFirestore();
@@ -54,6 +69,7 @@ export default function ControlCenterPage() {
   const [totalInDb, setTotalInDb] = useState<number | null>(null);
   const [activeMetric, setActiveMetric] = useState('impact');
   const [formatFilter, setFormatFilter] = useState<string>('all');
+  const [activeSpotlight, setActiveSpotlight] = useState<SpotlightType>('omissions');
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -131,17 +147,23 @@ export default function ControlCenterPage() {
       };
     });
 
-    // 2. Inteligencia de Omisiones por Formato
-    const omissionsMap: Record<string, number> = {};
+    // 2. Inteligencia Dinámica de Spotlight por Formato
+    const spotlightMap: Record<string, number> = {};
+    const currentSpotlightConfig = SPOTLIGHT_CONFIG[activeSpotlight];
+    
     filteredOrders.forEach(o => {
       const cause = (o.causa_raiz_normalizada || "").toLowerCase();
-      if (cause.includes('omisión') || cause.includes('omision') || cause.includes('error')) {
+      const desc = (o.descripcion || "").toLowerCase();
+      
+      const isMatch = currentSpotlightConfig.keywords.some(k => cause.includes(k) || desc.includes(k));
+      
+      if (isMatch) {
         const formatKey = o.format || o.type || 'Otros';
-        omissionsMap[formatKey] = (omissionsMap[formatKey] || 0) + (o.impactoNeto || 0);
+        spotlightMap[formatKey] = (spotlightMap[formatKey] || 0) + (o.impactoNeto || 0);
       }
     });
 
-    const omissionsByFormat = Object.entries(omissionsMap)
+    const spotlightByFormat = Object.entries(spotlightMap)
       .map(([name, impact]) => ({ name, impact }))
       .sort((a, b) => b.impact - a.impact);
 
@@ -161,11 +183,11 @@ export default function ControlCenterPage() {
       concentrationRatio, 
       vitalFewCount: vitalFew.length,
       paretoDiscs, 
-      omissionsByFormat,
+      spotlightByFormat,
       trendData,
       sampleSize: filteredOrders.length
     };
-  }, [orders, formatFilter]);
+  }, [orders, formatFilter, activeSpotlight]);
 
   const formatCurrency = (val: number) => {
     if (!mounted) return "$0";
@@ -189,6 +211,8 @@ export default function ControlCenterPage() {
       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Analizando Pareto 80/20 por Formato...</p>
     </div>
   );
+
+  const CurrentSpotlightIcon = SPOTLIGHT_CONFIG[activeSpotlight].icon;
 
   return (
     <div className="flex min-h-screen w-full bg-[#F8FAFC]">
@@ -286,10 +310,10 @@ export default function ControlCenterPage() {
                 <div className="w-2 h-full bg-[#E11D48]" />
                 <div className="flex-1 p-6 flex flex-col justify-between">
                   <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">OMISSION IMPACT</p>
-                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{formatCurrency(stats?.omissionsByFormat.reduce((a,b) => a + b.impact, 0) || 0)}</h3>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">SPOTLIGHT IMPACT</p>
+                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{formatCurrency(stats?.spotlightByFormat.reduce((a,b) => a + b.impact, 0) || 0)}</h3>
                   </div>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Causa: Errores / Omisiones</p>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Análisis: {SPOTLIGHT_CONFIG[activeSpotlight].label}</p>
                 </div>
               </CardContent>
             </Card>
@@ -338,13 +362,28 @@ export default function ControlCenterPage() {
             <div className="lg:col-span-2 space-y-8">
               <Card className="border-none shadow-md bg-slate-900 rounded-3xl p-8 overflow-hidden text-white">
                 <div className="flex justify-between items-center mb-8">
-                  <div className="space-y-1">
-                    <h4 className="text-[12px] font-black uppercase tracking-[0.25em] flex items-center gap-3">
-                      <ShieldAlert className="h-5 w-5 text-rose-500" /> Spotlight: Omisiones en Catálogos
-                    </h4>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase">Importe pagado en adicionales por formato (Causa: Errores / Omisiones)</p>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <CurrentSpotlightIcon className="h-5 w-5 text-rose-500" />
+                      <h4 className="text-[12px] font-black uppercase tracking-[0.25em]">Audit Spotlight: Hallazgos Recurrentes</h4>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Select value={activeSpotlight} onValueChange={(v) => setActiveSpotlight(v as SpotlightType)}>
+                        <SelectTrigger className="h-9 w-72 text-[10px] font-black uppercase rounded-lg border-white/10 bg-white/5 shadow-sm text-white focus:ring-accent">
+                          <SelectValue placeholder="Seleccionar Tipo de Auditoría" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-slate-900 border-white/10 text-white">
+                          {Object.entries(SPOTLIGHT_CONFIG).map(([key, config]) => (
+                            <SelectItem key={key} value={key} className="text-[10px] font-black uppercase hover:bg-white/10 focus:bg-white/10">
+                              {config.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase ml-4">Impacto por Formato (MXN)</p>
+                    </div>
                   </div>
-                  <Badge className="bg-rose-500 text-white border-none text-[10px] font-black px-4 py-1 animate-pulse">CRITICAL AUDIT</Badge>
+                  <Badge className="bg-rose-500 text-white border-none text-[10px] font-black px-4 py-1 animate-pulse uppercase">Critical Audit</Badge>
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
@@ -352,13 +391,13 @@ export default function ControlCenterPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
-                          data={stats?.omissionsByFormat}
+                          data={stats?.spotlightByFormat}
                           innerRadius={60}
                           outerRadius={80}
                           paddingAngle={5}
                           dataKey="impact"
                         >
-                          {stats?.omissionsByFormat.map((entry, index) => (
+                          {stats?.spotlightByFormat.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={[CYAN_PRIMARY, PARETO_ORANGE, '#10B981', '#6366F1', '#A855F7'][index % 5]} />
                           ))}
                         </Pie>
@@ -371,7 +410,11 @@ export default function ControlCenterPage() {
                     </ResponsiveContainer>
                   </div>
                   <div className="space-y-4">
-                    {stats?.omissionsByFormat.slice(0, 5).map((b, i) => (
+                    {stats?.spotlightByFormat.length === 0 ? (
+                      <div className="text-center py-10 opacity-30">
+                        <p className="text-[10px] font-black uppercase">Sin registros en este spotlight</p>
+                      </div>
+                    ) : stats?.spotlightByFormat.slice(0, 5).map((b, i) => (
                       <div key={i} className="bg-white/5 p-4 rounded-xl border border-white/10 hover:bg-white/10 transition-colors">
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-[10px] font-black uppercase tracking-widest text-cyan-400">{b.name}</span>
