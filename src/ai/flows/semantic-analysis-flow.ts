@@ -3,6 +3,7 @@
  * @fileOverview Motor de Inteligencia Semántica Avanzada para Clasificación Automática de OC/OT.
  * 
  * Realiza una clasificación híbrida con explicabilidad y trazabilidad forense.
+ * Incluye lógica de reintento para manejar indisponibilidad temporal del servicio (503).
  */
 
 import {ai} from '@/ai/genkit';
@@ -14,6 +15,7 @@ const SemanticAnalysisInputSchema = z.object({
   contexto: z.object({
     disciplinasVigentes: z.array(z.string()).optional(),
     causasVigentes: z.array(z.string()).optional(),
+    justificacionDetallada: z.string().optional()
   }).optional(),
 });
 export type SemanticAnalysisInput = z.infer<typeof SemanticAnalysisInputSchema>;
@@ -72,14 +74,46 @@ RESPONDE ÚNICAMENTE EN JSON VÁLIDO.`,
 });
 
 export async function analyzeOrderSemantically(input: SemanticAnalysisInput): Promise<SemanticAnalysisOutput> {
-  const {output} = await semanticPrompt(input);
-  if (!output) throw new Error("Fallo en la generación del análisis semántico forense.");
+  const maxRetries = 3;
+  let lastError: any;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const {output} = await semanticPrompt(input);
+      if (!output) throw new Error("Fallo en la generación del análisis semántico forense.");
+      
+      const needsReview = output.confidence_score < 0.75 || output.disciplina_normalizada === 'Indefinida';
+      
+      return {
+        ...output,
+        descripcion_original: input.descripcion,
+        needs_review: needsReview
+      };
+    } catch (error: any) {
+      lastError = error;
+      const errorMsg = error.message || "";
+      const isRetryable = errorMsg.includes('503') || errorMsg.includes('429') || errorMsg.includes('Service Unavailable') || errorMsg.includes('overloaded');
+      
+      if (isRetryable && attempt < maxRetries) {
+        // Espera exponencial con jitter: 2s, 4s, 8s...
+        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      break;
+    }
+  }
   
-  const needsReview = output.confidence_score < 0.75 || output.disciplina_normalizada === 'Indefinida';
-  
-  return {
-    ...output,
-    descripcion_original: input.descripcion,
-    needs_review: needsReview
-  };
+  throw lastError || new Error("Error crítico en el motor Gemini tras múltiples intentos.");
 }
+
+const semanticAnalysisFlow = ai.defineFlow(
+  {
+    name: 'semanticAnalysisFlow',
+    inputSchema: SemanticAnalysisInputSchema,
+    outputSchema: SemanticAnalysisOutputSchema,
+  },
+  async input => {
+    return analyzeOrderSemantically(input);
+  }
+);

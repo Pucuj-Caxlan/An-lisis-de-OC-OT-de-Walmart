@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -48,6 +47,7 @@ import {
   increment,
   updateDoc,
   getCountFromServer,
+  getDoc,
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -155,28 +155,28 @@ export default function AnalysisPage() {
     if (!mounted) return;
 
     const totalInDb = globalAgg?.totalOrders || 0;
-    
-    // PRIORIDAD: totalProcessed del SSOT que ahora guarda los 4,290
     const totalWithDataInDb = globalAgg?.totalProcessed || Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0);
 
-    // CÁLCULO DE IMPACTO: Si el totalImpact global es 0, sumamos el impacto de las disciplinas agrupadas
+    // CÁLCULO DE IMPACTO: Prioridad al campo global, luego a la suma de disciplinas
     const sumDisciplinesImpact = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.impact || 0), 0);
-    const totalImpactInDb = (globalAgg?.totalImpact && globalAgg.totalImpact > 0) ? globalAgg.totalImpact : sumDisciplinesImpact;
+    const globalTotalImpact = (globalAgg?.totalImpact && globalAgg.totalImpact > 0) ? globalAgg.totalImpact : sumDisciplinesImpact;
+    
+    // Impacto de la vista actual (fallback)
+    const currentViewImpact = orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0;
 
     if (disciplineFilter === 'all') {
       setStats({
         total: totalInDb,
         withData: totalWithDataInDb,
         pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: totalImpactInDb
+        totalImpact: globalTotalImpact > 0 ? globalTotalImpact : currentViewImpact
       });
     } else if (disciplineFilter === 'unclassified') {
-      // Para pendientes, el impacto es la diferencia o simplemente lo que hay en la vista si no hay agregados de pendientes
       setStats({
         total: Math.max(0, totalInDb - totalWithDataInDb),
         withData: 0,
         pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: 0 
+        totalImpact: currentViewImpact // Para pendientes mostramos el impacto de lo que hay en la tabla
       });
     } else {
       const group = groupedDisciplines[disciplineFilter];
@@ -187,7 +187,7 @@ export default function AnalysisPage() {
         totalImpact: group?.impact || 0
       });
     }
-  }, [disciplineFilter, globalAgg, groupedDisciplines, mounted]);
+  }, [disciplineFilter, globalAgg, groupedDisciplines, mounted, orders]);
 
   const isIndexError = error && (error as any).code === 'failed-precondition';
 
@@ -263,8 +263,8 @@ export default function AnalysisPage() {
 
       await updateGlobalStatsIncrementally(result.disciplina_normalizada, order.impactoNeto || 0);
       toast({ title: "Registro Clasificado", description: result.disciplina_normalizada });
-    } catch (e) {
-      toast({ variant: "destructive", title: "Error IA", description: "Fallo en motor Gemini." });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error IA", description: e.message || "Fallo en motor Gemini." });
     } finally {
       setIsAnalyzing(null);
     }
@@ -319,6 +319,7 @@ export default function AnalysisPage() {
     try {
       const colRef = collection(db, 'orders');
       
+      // Obtener conteos frescos
       const totalSnapshot = await getCountFromServer(colRef);
       const totalCount = totalSnapshot.data().count;
 
@@ -326,9 +327,11 @@ export default function AnalysisPage() {
       const processedSnapshot = await getCountFromServer(processedQuery);
       const processedCountVal = processedSnapshot.data().count;
       
-      // Intentar recuperar el impacto total acumulado sumando el desglose si el top-level falta
-      const sumImpactFromDisciplines = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.impact || 0), 0);
-      const currentImpact = (globalAgg?.totalImpact && globalAgg.totalImpact > 0) ? globalAgg.totalImpact : sumImpactFromDisciplines;
+      // Intentar recuperar el impacto total de la data existente o del documento previo
+      const freshSnap = await getDoc(doc(db, 'aggregates', 'global_stats'));
+      const freshData = freshSnap.data();
+      const sumImpactFromDisciplines = Object.values(freshData?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.impact || 0), 0);
+      const currentImpact = (freshData?.totalImpact && freshData.totalImpact > 0) ? freshData.totalImpact : sumImpactFromDisciplines;
 
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: totalCount,
