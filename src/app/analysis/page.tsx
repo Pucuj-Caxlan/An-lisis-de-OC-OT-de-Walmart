@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -20,7 +21,15 @@ import {
   Zap,
   Target,
   DollarSign,
-  Layers
+  Layers,
+  Eye,
+  Info,
+  Calendar,
+  FileText,
+  UserCheck,
+  Globe,
+  Coins,
+  ShieldCheck
 } from 'lucide-react';
 import {
   Table,
@@ -79,6 +88,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -93,6 +104,7 @@ export default function AnalysisPage() {
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
+  const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any | null>(null);
   const [bulkAiProgress, setBulkAiProgress] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
   const [isRefreshingStats, setIsRefreshingStats] = useState(false);
@@ -150,18 +162,17 @@ export default function AnalysisPage() {
     return groups;
   }, [globalAgg]);
 
-  // 4. Actualizar KPIs Dinámicos (Sincronizados con 4,290+ e Impacto)
+  // 4. Actualizar KPIs Dinámicos
   useEffect(() => {
     if (!mounted) return;
 
     const totalInDb = globalAgg?.totalOrders || 0;
     const totalWithDataInDb = globalAgg?.totalProcessed || Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0);
 
-    // CÁLCULO DE IMPACTO: Prioridad al campo global, luego a la suma de disciplinas
+    // CÁLCULO DE IMPACTO: Prioridad al campo global consolidado
     const sumDisciplinesImpact = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.impact || 0), 0);
     const globalTotalImpact = (globalAgg?.totalImpact && globalAgg.totalImpact > 0) ? globalAgg.totalImpact : sumDisciplinesImpact;
     
-    // Impacto de la vista actual (fallback)
     const currentViewImpact = orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0;
 
     if (disciplineFilter === 'all') {
@@ -176,7 +187,7 @@ export default function AnalysisPage() {
         total: Math.max(0, totalInDb - totalWithDataInDb),
         withData: 0,
         pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: currentViewImpact // Para pendientes mostramos el impacto de lo que hay en la tabla
+        totalImpact: currentViewImpact
       });
     } else {
       const group = groupedDisciplines[disciplineFilter];
@@ -318,8 +329,6 @@ export default function AnalysisPage() {
     setIsRefreshingStats(true);
     try {
       const colRef = collection(db, 'orders');
-      
-      // Obtener conteos frescos
       const totalSnapshot = await getCountFromServer(colRef);
       const totalCount = totalSnapshot.data().count;
 
@@ -327,7 +336,6 @@ export default function AnalysisPage() {
       const processedSnapshot = await getCountFromServer(processedQuery);
       const processedCountVal = processedSnapshot.data().count;
       
-      // Intentar recuperar el impacto total de la data existente o del documento previo
       const freshSnap = await getDoc(doc(db, 'aggregates', 'global_stats'));
       const freshData = freshSnap.data();
       const sumImpactFromDisciplines = Object.values(freshData?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.impact || 0), 0);
@@ -428,7 +436,7 @@ export default function AnalysisPage() {
               <AlertDescription className="text-xs mt-1">
                 Firestore requiere un índice para este filtro combinado.
                 <Button asChild variant="link" size="sm" className="h-auto p-0 ml-2 text-rose-600 font-bold">
-                  <a href={`https://console.firebase.google.com/v1/r/project/studio-5519165939-247e1/firestore/indexes?create_composite=ClZwcm9qZWN0cy9zdHVkaW8tNTUxOTE2NTkzOS0yNDdlMS9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvb3JkZXJzL2luZGV4ZXMvXxABGhkKFWNsYXNzaWZpY2F0aW9uX3N0YXR1cxABGg0KCXByb2plY3RJZBABGgwKCF9fbmFtZV9fEAE`} target="_blank">Activar Índice Manualmente</a>
+                  <a href={`https://console.firebase.google.com/v1/r/project/${db?.app.options.projectId}/firestore/indexes`} target="_blank">Activar Índice Manualmente</a>
                 </Button>
               </AlertDescription>
             </Alert>
@@ -556,6 +564,10 @@ export default function AnalysisPage() {
                       <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
                       <TableCell>
                         <div className="flex items-center justify-center gap-1">
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-400 hover:text-primary" onClick={() => setSelectedOrderForDetails(order)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing}>
                             {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
                           </Button>
@@ -631,6 +643,156 @@ export default function AnalysisPage() {
               </div>
               <Progress value={bulkAiProgress} className="h-2 bg-slate-100" />
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* DIÁLOGO DE DETALLES DEL REGISTRO */}
+        <Dialog open={!!selectedOrderForDetails} onOpenChange={(open) => !open && setSelectedOrderForDetails(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden rounded-3xl p-0 border-none shadow-2xl bg-white">
+            <div className="bg-slate-900 p-8 text-white">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-primary text-white border-none text-[10px] font-black px-3 py-1">FOLIO: {selectedOrderForDetails?.projectId}</Badge>
+                    <Badge variant="outline" className="border-white/20 text-slate-400 text-[10px] font-bold">ORDEN #{selectedOrderForDetails?.orderNumber || 'N/A'}</Badge>
+                  </div>
+                  <DialogTitle className="text-2xl font-headline font-bold tracking-tight uppercase mt-2">
+                    {selectedOrderForDetails?.projectName || "SIN NOMBRE DE PROYECTO"}
+                  </DialogTitle>
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{selectedOrderForDetails?.format} • {selectedOrderForDetails?.country}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Impacto Neto Auditado</p>
+                  <h3 className="text-3xl font-black text-white tracking-tighter mt-1">
+                    ${formatAmount(selectedOrderForDetails?.impactoNeto || 0)}
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            <ScrollArea className="h-[calc(90vh-160px)] p-8">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pb-10">
+                <div className="md:col-span-2 space-y-8">
+                  <section className="space-y-4">
+                    <h4 className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
+                      <FileText className="h-4 w-4" /> Justificación Técnica
+                    </h4>
+                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 italic text-slate-600 text-sm leading-relaxed">
+                      "{selectedOrderForDetails?.descripcion || "Sin descripción proporcionada."}"
+                    </div>
+                  </section>
+
+                  <section className="space-y-4">
+                    <h4 className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" /> Análisis de Inteligencia Forense (Gemini)
+                    </h4>
+                    {selectedOrderForDetails?.semanticAnalysis ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                          <p className="text-[9px] font-black text-emerald-600 uppercase mb-1">Disciplina IA</p>
+                          <p className="text-sm font-bold text-emerald-900">{selectedOrderForDetails.disciplina_normalizada}</p>
+                        </div>
+                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                          <p className="text-[9px] font-black text-blue-600 uppercase mb-1">Causa Raíz IA</p>
+                          <p className="text-sm font-bold text-blue-900">{selectedOrderForDetails.causa_raiz_normalizada}</p>
+                        </div>
+                        <div className="md:col-span-2 bg-slate-900 p-5 rounded-xl text-white">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Info className="h-3.5 w-3.5 text-accent" />
+                            <p className="text-[10px] font-black uppercase tracking-widest">Racional Técnico de Clasificación</p>
+                          </div>
+                          <p className="text-xs text-slate-300 leading-relaxed italic">
+                            {selectedOrderForDetails.semanticAnalysis.rationale_tecnico || "Análisis automatizado basado en patrones de construcción."}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="border-2 border-dashed rounded-2xl p-8 text-center text-slate-400 bg-slate-50">
+                        <Zap className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                        <p className="text-xs font-bold uppercase tracking-tight">Registro pendiente de clasificación por IA.</p>
+                      </div>
+                    )}
+                  </section>
+                </div>
+
+                <div className="space-y-6">
+                  <Card className="border-none shadow-sm bg-slate-50 p-5 space-y-4">
+                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b pb-2">Metadatos de Control</h4>
+                    
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-lg bg-white flex items-center justify-center shadow-sm text-primary">
+                          <Globe className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-[8px] font-black text-slate-400 uppercase">Estado / Región</p>
+                          <p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.state || 'N/A'}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-lg bg-white flex items-center justify-center shadow-sm text-primary">
+                          <Calendar className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-[8px] font-black text-slate-400 uppercase">Fecha Solicitud</p>
+                          <p className="text-[10px] font-bold uppercase">
+                            {selectedOrderForDetails?.fechaSolicitud ? new Date(selectedOrderForDetails.fechaSolicitud).toLocaleDateString() : 'N/A'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-lg bg-white flex items-center justify-center shadow-sm text-primary">
+                          <UserCheck className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-[8px] font-black text-slate-400 uppercase">Coordinador</p>
+                          <p className="text-[10px] font-bold uppercase truncate max-w-[150px]">{selectedOrderForDetails?.coordinador || 'Sin asignar'}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-lg bg-white flex items-center justify-center shadow-sm text-primary">
+                          <Coins className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-[8px] font-black text-slate-400 uppercase">Área Solicitante</p>
+                          <p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.areaSolicitante || 'Construcción'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card className="border-none shadow-sm bg-slate-900 text-white p-5 space-y-4">
+                    <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-white/10 pb-2">Gobernanza & Firmas</h4>
+                    
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">DocuSign</p>
+                        <Badge className={selectedOrderForDetails?.isSigned ? "bg-emerald-500" : "bg-rose-500"}>
+                          {selectedOrderForDetails?.isSigned ? "FIRMADO" : "PENDIENTE"}
+                        </Badge>
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <p className="text-[8px] font-black text-slate-500 uppercase">Envelope ID</p>
+                        <p className="text-[9px] font-mono text-slate-300 break-all bg-white/5 p-2 rounded border border-white/5">
+                          {selectedOrderForDetails?.envelopeId || "N/A - CARGA DIRECTA"}
+                        </p>
+                      </div>
+
+                      <div className="pt-2">
+                        <div className="flex items-center gap-2 text-emerald-400">
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          <span className="text-[9px] font-black uppercase tracking-widest">Integridad Validada</span>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              </div>
+            </ScrollArea>
           </DialogContent>
         </Dialog>
       </SidebarInset>
