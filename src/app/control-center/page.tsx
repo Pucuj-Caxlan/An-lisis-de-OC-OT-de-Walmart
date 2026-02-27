@@ -104,9 +104,10 @@ export default function ControlCenterPage() {
     fetchTotal();
   }, [db, user?.uid]);
 
+  // Cargamos 15,000 para cubrir el universo total de ~11k sin recortes en KPIs
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !user?.uid) return null;
-    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(10000));
+    return query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(15000));
   }, [db, user?.uid]);
 
   const { data: orders, isLoading } = useCollection(ordersQuery);
@@ -131,7 +132,8 @@ export default function ControlCenterPage() {
     });
 
     const totalImpact = filteredOrders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
-    const totalCount = filteredOrders.length;
+    // Usamos el total real de la DB si no hay filtro, de lo contrario el largo del array filtrado
+    const displayCount = (formatFilter === 'all' && totalInDb) ? totalInDb : filteredOrders.length;
     
     // 1. Análisis Pareto por Disciplina y Sub-disciplina
     const discMap: Record<string, { impact: number, count: number, subs: Record<string, number> }> = {};
@@ -167,7 +169,7 @@ export default function ControlCenterPage() {
       };
     });
 
-    // 2. Inteligencia Dinámica de Spotlight por Formato (Unificado)
+    // 2. Inteligencia Dinámica de Spotlight por Formato
     const spotlightMap: Record<string, number> = {};
     const currentSpotlightConfig = SPOTLIGHT_CONFIG[activeSpotlight];
     
@@ -199,7 +201,7 @@ export default function ControlCenterPage() {
 
     return { 
       totalImpact, 
-      totalCount, 
+      displayCount, 
       concentrationRatio, 
       vitalFewCount: vitalFew.length,
       paretoDiscs, 
@@ -207,7 +209,7 @@ export default function ControlCenterPage() {
       trendData,
       sampleSize: filteredOrders.length
     };
-  }, [orders, formatFilter, activeSpotlight]);
+  }, [orders, formatFilter, activeSpotlight, totalInDb]);
 
   const formatCurrency = (val: number) => {
     if (!mounted) return "$0";
@@ -228,7 +230,7 @@ export default function ControlCenterPage() {
   if (!user?.uid || isLoading) return (
     <div className="flex h-screen items-center justify-center bg-slate-100 flex-col gap-4">
       <Activity className="h-12 w-12 text-cyan-500 animate-spin" />
-      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Analizando Pareto 80/20 por Formato...</p>
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Sincronizando Universo Real (>10,900 registros)...</p>
     </div>
   );
 
@@ -325,13 +327,13 @@ export default function ControlCenterPage() {
                 <div className="flex-1 p-6 flex flex-col justify-between">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">FALLOS RECURRENTES</p>
-                      <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{stats?.totalCount || 0}</h3>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">DESVIACIONES (OC/OT)</p>
+                      <h3 className="text-3xl font-black text-slate-900 tracking-tighter font-headline">{(stats?.displayCount || 0).toLocaleString()}</h3>
                     </div>
                     <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-rose-500 group-hover:translate-x-1 transition-all" />
                   </div>
                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight flex items-center gap-1">
-                    Click para ver detalles <Target className="h-2.5 w-2.5" />
+                    Fallas en Planeación / Ejecución <Target className="h-2.5 w-2.5" />
                   </p>
                 </div>
               </CardContent>
