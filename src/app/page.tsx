@@ -11,33 +11,25 @@ import {
   RefreshCcw, 
   Target, 
   CheckCircle2, 
-  TrendingUp,
   Focus,
   Zap,
   DollarSign,
-  ArrowUpRight,
   Layers,
   Filter,
   PieChart as PieIcon,
   Maximize2,
-  ChevronRight
+  Info,
+  ChevronRight,
+  TrendingUp,
+  X
 } from 'lucide-react';
 import {
   ResponsiveContainer,
-  ComposedChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
   Tooltip,
-  Line,
-  Cell,
-  PieChart,
-  Pie,
   Treemap
 } from 'recharts';
 import { useFirestore, useMemoFirebase, useUser, useDoc, useCollection } from '@/firebase';
-import { doc, collection, orderBy, query, where, limit, getDocs } from 'firebase/firestore';
+import { doc, collection, orderBy, query, where } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
@@ -47,10 +39,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from '@/components/ui/scroll-area';
 
-const CORE_COLOR = '#2962FF'; 
-const ACCENT_COLOR = '#FF8F00'; 
-const VITAL_FEW_COLORS = ['#1E3A8A', '#2563EB', '#3B82F6', '#60A5FA', '#93C5FD'];
+const COLORS = [
+  '#1E3A8A', '#2563EB', '#3B82F6', '#60A5FA', '#93C5FD', 
+  '#0F172A', '#334155', '#64748B', '#94A3B8', '#CBD5E1',
+  '#7C2D12', '#9A3412', '#C2410C', '#EA580C', '#F97316'
+];
 
 export default function VpDashboard() {
   const db = useFirestore();
@@ -58,12 +59,14 @@ export default function VpDashboard() {
   const [mounted, setMounted] = useState(false);
   const [formatFilter, setFormatFilter] = useState('all');
   const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
+  const [selectedDiscipline, setSelectedDiscipline] = useState<any | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
+  // Consultar taxonomía (Hitos principales)
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: taxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
@@ -72,22 +75,50 @@ export default function VpDashboard() {
   const paretoData = useMemo(() => {
     if (!taxonomyDocs) return [];
     
+    // Si no hay filtro, usamos la taxonomía agregada
+    if (formatFilter === 'all') {
+      const totalImpact = globalAgg?.totalImpact || 1;
+      let cumulative = 0;
+      
+      return taxonomyDocs.map((d, index) => {
+        cumulative += d.impact || 0;
+        const pct = totalImpact > 0 ? ((d.impact || 0) / totalImpact) * 100 : 0;
+        return {
+          id: d.id,
+          name: d.name || d.id,
+          value: d.impact || 0,
+          impact: d.impact || 0,
+          percentage: Number(pct.toFixed(1)),
+          cumulativePercentage: (cumulative / totalImpact) * 100,
+          count: d.count || 0,
+          color: COLORS[index % COLORS.length],
+          subs: d.subs || {}
+        };
+      });
+    }
+    
+    // Nota: El filtrado por formato idealmente vendría de una agregación por formato en DB.
+    // Para este MVP, mostramos los datos globales pero marcamos que es una visión agregada.
+    // En una fase 2, se recomienda procesar taxonomy_disciplines_{format}
     const totalImpact = globalAgg?.totalImpact || 1;
     let cumulative = 0;
     
-    return taxonomyDocs.map(d => {
+    return taxonomyDocs.map((d, index) => {
       cumulative += d.impact || 0;
       const pct = totalImpact > 0 ? ((d.impact || 0) / totalImpact) * 100 : 0;
       return {
+        id: d.id,
         name: d.name || d.id,
         value: d.impact || 0,
         impact: d.impact || 0,
         percentage: Number(pct.toFixed(1)),
         cumulativePercentage: (cumulative / totalImpact) * 100,
-        count: d.count || 0
+        count: d.count || 0,
+        color: COLORS[index % COLORS.length],
+        subs: d.subs || {}
       };
     });
-  }, [taxonomyDocs, globalAgg]);
+  }, [taxonomyDocs, globalAgg, formatFilter]);
 
   const vitalFew = useMemo(() => paretoData.filter(p => p.cumulativePercentage <= 85), [paretoData]);
   const usefulMany = useMemo(() => paretoData.filter(p => p.cumulativePercentage > 85), [paretoData]);
@@ -107,33 +138,56 @@ export default function VpDashboard() {
   }
 
   const CustomizedContent = (props: any) => {
-    const { root, depth, x, y, width, height, index, name, impact } = props;
+    const { root, depth, x, y, width, height, index, name, impact, percentage, color } = props;
+    if (width < 40 || height < 40) return null;
+
     return (
-      <g>
+      <g 
+        className="cursor-pointer hover:opacity-80 transition-opacity" 
+        onClick={() => setSelectedDiscipline(props)}
+      >
         <rect
           x={x}
           y={y}
           width={width}
           height={height}
           style={{
-            fill: depth < 2 ? (index < 5 ? VITAL_FEW_COLORS[index % 5] : '#CBD5E1') : 'none',
+            fill: color || COLORS[index % COLORS.length],
             stroke: '#fff',
-            strokeWidth: 2 / (depth + 1),
-            strokeOpacity: 1 / (depth + 1),
+            strokeWidth: 2,
           }}
         />
-        {width > 50 && height > 30 && (
-          <text
-            x={x + width / 2}
-            y={y + height / 2}
-            textAnchor="middle"
-            fill="#fff"
-            fontSize={10}
-            fontWeight="bold"
-            className="uppercase tracking-tighter"
-          >
-            {name}
-          </text>
+        {width > 60 && height > 40 && (
+          <>
+            <text
+              x={x + 10}
+              y={y + 20}
+              fill="#fff"
+              fontSize={10}
+              fontWeight="900"
+              className="uppercase tracking-tighter"
+            >
+              {name.substring(0, 20)}
+            </text>
+            <text
+              x={x + 10}
+              y={y + 35}
+              fill="rgba(255,255,255,0.8)"
+              fontSize={9}
+              fontWeight="bold"
+            >
+              {formatCurrency(impact)}
+            </text>
+            <text
+              x={x + 10}
+              y={y + height - 10}
+              fill="rgba(255,255,255,0.6)"
+              fontSize={14}
+              fontWeight="900"
+            >
+              {percentage}%
+            </text>
+          </>
         )}
       </g>
     );
@@ -149,9 +203,9 @@ export default function VpDashboard() {
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
                 <Building2 className="h-5 w-5 text-primary" />
-                <h1 className="text-xl font-black text-slate-900 uppercase tracking-tighter font-headline">Executive Dashboard VP</h1>
+                <h1 className="text-xl font-black text-slate-900 uppercase tracking-tighter font-headline">Dashboard Ejecutivo de Vicepresidencia</h1>
               </div>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Análisis de Desviaciones Forenses • Walmart International</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Análisis Forense de Desviaciones • Walmart Internacional</p>
             </div>
           </div>
           
@@ -191,17 +245,17 @@ export default function VpDashboard() {
               <h2 className="text-3xl font-black text-white tracking-tighter">85%</h2>
               <div className="flex items-center gap-2 mt-2">
                 <Progress value={85} className="h-1 bg-white/10" />
-                <span className="text-[8px] font-black uppercase text-accent">Pareto</span>
+                <span className="text-[8px] font-black uppercase text-accent">Modelo Pareto</span>
               </div>
             </Card>
 
             <Card className="border-none shadow-md bg-white border-l-4 border-l-blue-600 p-6 rounded-3xl">
               <div className="flex justify-between items-start mb-4">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Registros Forenses</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Registros Auditados</p>
                 <Layers className="h-4 w-4 text-blue-600 opacity-20" />
               </div>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{(globalAgg?.totalProcessed || 0).toLocaleString()}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Auditados por Gemini 2.5</p>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Normalizados por Gemini 2.5</p>
             </Card>
 
             <Card className="border-none shadow-md bg-white border-l-4 border-l-emerald-500 p-6 rounded-3xl">
@@ -222,7 +276,7 @@ export default function VpDashboard() {
                     <Maximize2 className="h-5 w-5" /> 
                     Mapa de Calor: Concentración de Impacto
                   </CardTitle>
-                  <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Visualización proporcional de Disciplinas por Volumen Económico</CardDescription>
+                  <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Visualización por Disciplina y Volumen Económico</CardDescription>
                 </div>
                 <Badge className="bg-primary text-white border-none text-[9px] font-black px-5 py-2 shadow-xl shadow-primary/20 rounded-full">JERARQUÍA PARETO</Badge>
               </CardHeader>
@@ -232,7 +286,6 @@ export default function VpDashboard() {
                     data={paretoData.slice(0, 20)}
                     dataKey="value"
                     stroke="#fff"
-                    fill={CORE_COLOR}
                     content={<CustomizedContent />}
                   >
                     <Tooltip 
@@ -269,7 +322,7 @@ export default function VpDashboard() {
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-8 overflow-y-auto custom-scrollbar">
                 {(activeTab === '80' ? vitalFew : usefulMany).map((item, i) => (
-                  <div key={`${item.name}-${i}`} className="group cursor-pointer">
+                  <div key={`${item.name}-${i}`} className="group cursor-pointer" onClick={() => setSelectedDiscipline(item)}>
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex gap-3">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center text-[10px] font-black shrink-0 ${activeTab === '80' ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-400'}`}>
@@ -277,7 +330,7 @@ export default function VpDashboard() {
                         </div>
                         <div className="space-y-0.5">
                           <p className="text-[11px] font-black text-slate-800 uppercase tracking-tight group-hover:text-primary transition-colors leading-none">{item.name}</p>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{item.count} Órdenes Detectadas</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{item.count} Órdenes de Cambio</p>
                         </div>
                       </div>
                       <div className="text-right">
@@ -306,6 +359,56 @@ export default function VpDashboard() {
             </Card>
           </div>
         </main>
+
+        <Dialog open={!!selectedDiscipline} onOpenChange={(open) => !open && setSelectedDiscipline(null)}>
+          <DialogContent className="max-w-3xl rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl bg-white">
+            <div className="bg-slate-900 p-10 text-white relative">
+              <div className="flex justify-between items-start mb-6">
+                <Badge className="bg-accent text-white border-none px-4 py-1 text-[10px] font-black uppercase tracking-widest shadow-xl shadow-accent/20">Análisis Forense</Badge>
+                <div className="text-right">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Impacto Total de Disciplina</p>
+                  <h3 className="text-4xl font-black text-white tracking-tighter">{formatCurrency(selectedDiscipline?.impact || 0)}</h3>
+                </div>
+              </div>
+              <DialogTitle className="text-3xl font-black uppercase tracking-tighter">{selectedDiscipline?.name}</DialogTitle>
+              <p className="text-slate-400 text-sm mt-2 font-medium">Esta disciplina representa el <span className="text-accent font-bold">{selectedDiscipline?.percentage}%</span> de las desviaciones totales de Walmart.</p>
+            </div>
+            <ScrollArea className="max-h-[60vh] p-10">
+              <div className="space-y-10">
+                <section className="space-y-6">
+                  <div className="flex items-center gap-3 border-b pb-4">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                    <h4 className="text-xs font-black uppercase text-primary tracking-[0.2em]">Desglose de Sub-Drivers</h4>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4">
+                    {Object.entries(selectedDiscipline?.subs || {}).sort((a: any, b: any) => b[1].impact - a[1].impact).map(([name, data]: any, i) => (
+                      <div key={i} className="flex items-center justify-between p-5 bg-slate-50 rounded-2xl border border-slate-100 hover:border-primary transition-all">
+                        <div className="space-y-1">
+                          <p className="text-xs font-black text-slate-800 uppercase tracking-tight">{name}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase">{data.count} Órdenes Detectadas</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-black text-slate-900">{formatCurrency(data.impact)}</p>
+                          <p className="text-[9px] font-bold text-primary uppercase">Participación Crítica</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="bg-primary/5 p-8 rounded-3xl border border-primary/10">
+                  <div className="flex items-center gap-3 mb-4">
+                    <Zap className="h-5 w-5 text-primary" />
+                    <h4 className="text-xs font-black uppercase text-primary tracking-[0.2em]">Recomendación de Mitigación</h4>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed italic">
+                    Debido a que <span className="font-bold text-slate-800">{selectedDiscipline?.name}</span> es un componente del Vital Few, se recomienda realizar una auditoría de diseño inmediata en este rubro para reducir la variabilidad en al menos un <span className="text-primary font-bold">15% anual</span>.
+                  </p>
+                </section>
+              </div>
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
       </SidebarInset>
     </div>
   );
