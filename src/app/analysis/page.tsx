@@ -58,6 +58,7 @@ import {
   updateDoc,
   getCountFromServer,
   getDoc,
+  getDocs
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -170,7 +171,7 @@ export default function AnalysisPage() {
         primaryGroups[normalized].count += s.count || 0;
         primaryGroups[normalized].impact += s.impact || 0;
         
-        // Integrar sub-disciplinas si el motor de ingesta las guardó
+        // Integrar sub-disciplinas
         if (s.subs) {
           Object.entries(s.subs).forEach(([subName, subStats]: any) => {
             if (!primaryGroups[normalized].subs[subName]) {
@@ -192,8 +193,6 @@ export default function AnalysisPage() {
 
     const totalInDb = globalAgg?.totalOrders || 0;
     const totalWithDataInDb = globalAgg?.totalProcessed || 0;
-
-    // Prioridad al impacto consolidado
     const globalTotalImpact = globalAgg?.totalImpact || 0;
     
     if (disciplineFilter === 'all') {
@@ -258,39 +257,65 @@ export default function AnalysisPage() {
     return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2 }).format(amount);
   };
 
-  const updateGlobalStatsHierarchy = async (discName: string, subName: string, impact: number) => {
+  const handleRefreshUniverseStats = async () => {
     if (!db) return;
-    const ref = doc(db, 'aggregates', 'global_stats');
-    
-    // Rutas dinámicas para la jerarquía en Firestore
-    const countPath = `disciplines.${discName}.count`;
-    const impactPath = `disciplines.${discName}.impact`;
-    const subCountPath = `disciplines.${discName}.subs.${subName}.count`;
-    const subImpactPath = `disciplines.${discName}.subs.${subName}.impact`;
-    
+    setIsRefreshingStats(true);
     try {
-      await updateDoc(ref, {
-        [countPath]: increment(1),
-        [impactPath]: increment(impact),
-        [subCountPath]: increment(1),
-        [subImpactPath]: increment(impact),
-        totalProcessed: increment(1),
-        totalImpact: increment(impact),
-        lastUpdate: new Date().toISOString()
+      const colRef = collection(db, 'orders');
+      
+      // 1. Obtener conteos reales
+      const totalSnapshot = await getCountFromServer(colRef);
+      const totalCount = totalSnapshot.data().count;
+
+      const processedQuery = query(colRef, where('classification_status', '!=', 'pending'));
+      const processedSnapshot = await getCountFromServer(processedQuery);
+      const processedCountVal = processedSnapshot.data().count;
+      
+      // 2. Reconstruir Jerarquía desde los datos ya procesados (Muestra de 10,000)
+      // Esto recupera la estructura jerárquica sin re-procesar con IA
+      const sampleQuery = query(processedQuery, limit(10000));
+      const sampleDocs = await getDocs(sampleQuery);
+      
+      const newDisciplineMap: Record<string, any> = {};
+      let calculatedImpact = 0;
+
+      sampleDocs.forEach(d => {
+        const data = d.data();
+        const disc = data.disciplina_normalizada || 'Indefinida';
+        const sub = data.subcausa_normalizada || 'Sin sub-disciplina';
+        const impact = data.impactoNeto || 0;
+        calculatedImpact += impact;
+
+        if (!newDisciplineMap[disc]) {
+          newDisciplineMap[disc] = { impact: 0, count: 0, subs: {} };
+        }
+        newDisciplineMap[disc].impact += impact;
+        newDisciplineMap[disc].count += 1;
+
+        if (!newDisciplineMap[disc].subs[sub]) {
+          newDisciplineMap[disc].subs[sub] = { impact: 0, count: 0 };
+        }
+        newDisciplineMap[disc].subs[sub].impact += impact;
+        newDisciplineMap[disc].subs[sub].count += 1;
       });
-    } catch {
-      await setDoc(ref, {
-        disciplines: {
-          [discName]: { 
-            count: 1, 
-            impact: impact,
-            subs: { [subName]: { count: 1, impact: impact } }
-          }
-        },
-        totalProcessed: increment(1),
-        totalImpact: increment(impact),
+
+      await setDoc(doc(db, 'aggregates', 'global_stats'), {
+        totalOrders: totalCount,
+        totalProcessed: processedCountVal,
+        totalImpact: calculatedImpact,
+        disciplines: newDisciplineMap,
         lastUpdate: new Date().toISOString()
       }, { merge: true });
+      
+      toast({ 
+        title: "Jerarquía Reconstruida", 
+        description: `Se mapearon ${sampleDocs.size} registros existentes en el árbol técnico.` 
+      });
+    } catch (e: any) {
+      console.error("Error syncing hierarchy:", e);
+      toast({ variant: "destructive", title: "Fallo de Sincronización", description: e.message });
+    } finally {
+      setIsRefreshingStats(false);
     }
   };
 
@@ -312,12 +337,6 @@ export default function AnalysisPage() {
         semanticAnalysis: result,
         processedAt: new Date().toISOString()
       });
-
-      await updateGlobalStatsHierarchy(
-        result.disciplina_normalizada, 
-        result.subcausa_normalizada || 'Indefinida', 
-        order.impactoNeto || 0
-      );
       
       toast({ title: "Registro Clasificado", description: result.disciplina_normalizada });
     } catch (e: any) {
@@ -355,12 +374,6 @@ export default function AnalysisPage() {
           processedAt: new Date().toISOString()
         });
 
-        await updateGlobalStatsHierarchy(
-          result.disciplina_normalizada, 
-          result.subcausa_normalizada || 'Indefinida', 
-          order.impactoNeto || 0
-        );
-
         setProcessedCount(i + 1);
         setBulkAiProgress(Math.round(((i + 1) / targetOrders.length) * 100));
       } catch (e) {
@@ -372,41 +385,6 @@ export default function AnalysisPage() {
     setIsBulkProcessing(false);
     setSelectedIds([]);
     setTimeout(() => setShowBulkAiDialog(false), 2000);
-  };
-
-  const handleRefreshUniverseStats = async () => {
-    if (!db) return;
-    setIsRefreshingStats(true);
-    try {
-      const colRef = collection(db, 'orders');
-      const totalSnapshot = await getCountFromServer(colRef);
-      const totalCount = totalSnapshot.data().count;
-
-      const processedQuery = query(colRef, where('classification_status', '!=', 'pending'));
-      const processedSnapshot = await getCountFromServer(processedQuery);
-      const processedCountVal = processedSnapshot.data().count;
-      
-      const freshSnap = await getDoc(doc(db, 'aggregates', 'global_stats'));
-      const freshData = freshSnap.data();
-      const currentImpact = freshData?.totalImpact || 0;
-
-      await setDoc(doc(db, 'aggregates', 'global_stats'), {
-        totalOrders: totalCount,
-        totalProcessed: processedCountVal,
-        totalImpact: currentImpact,
-        lastUpdate: new Date().toISOString()
-      }, { merge: true });
-      
-      toast({ 
-        title: "Universo Sincronizado", 
-        description: `Total: ${totalCount.toLocaleString()} | Integridad: ${processedCountVal.toLocaleString()} registros.` 
-      });
-    } catch (e: any) {
-      console.error("Error syncing universe:", e);
-      toast({ variant: "destructive", title: "Fallo de Sincronización", description: "Verifique permisos." });
-    } finally {
-      setIsRefreshingStats(false);
-    }
   };
 
   const handleDeleteRecord = async (id: string) => {
@@ -438,7 +416,7 @@ export default function AnalysisPage() {
                 value={disciplineFilter} 
                 onValueChange={(v) => { 
                   setDisciplineFilter(v); 
-                  setSubDisciplineFilter('all'); // Reset sub-filtro al cambiar primaria
+                  setSubDisciplineFilter('all'); 
                   setCurrentPage(1); 
                   setPageHistory([null]); 
                 }}
@@ -510,7 +488,7 @@ export default function AnalysisPage() {
                 className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl"
               >
                 <RefreshCcw className={`h-3 w-3 mr-2 ${isRefreshingStats ? 'animate-spin' : ''}`} />
-                Sincronizar Universo
+                Sincronizar Jerarquía
               </Button>
             </div>
           </div>
