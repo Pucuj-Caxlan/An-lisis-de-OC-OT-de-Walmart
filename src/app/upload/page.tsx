@@ -26,7 +26,7 @@ import { Badge } from '@/components/ui/badge';
 import { correlateHeaders } from '@/ai/flows/header-correlation-flow';
 import * as XLSX from 'xlsx';
 
-// Función de normalización idéntica a la del Dashboard para coherencia en agregados
+// Función de normalización institucional para coherencia en agregados
 const normalizeFormatName = (name: any) => {
   if (!name) return 'FORMATO NO ESPECIFICADO';
   const n = String(name).trim().toUpperCase();
@@ -62,7 +62,9 @@ export default function UploadPage() {
     setProgress(5);
     let totalProcessed = 0;
     let totalImpactAcc = 0;
-    const disciplineMap: Record<string, { impact: number, count: number }> = {};
+    
+    // Jerarquía de Agregación: Disciplina > Sub-Disciplina
+    const disciplineMap: Record<string, { impact: number, count: number, subs: Record<string, { impact: number, count: number }> }> = {};
     const causeMap: Record<string, { impact: number, count: number }> = {};
     const formatMap: Record<string, { impact: number, count: number }> = {};
 
@@ -98,19 +100,27 @@ export default function UploadPage() {
             const impact = row.impactoNeto || 0;
             totalImpactAcc += impact;
             
-            // Agregación local para metadatos
+            // Agregación local para metadatos jerárquicos
             const disc = row.disciplina_normalizada || 'Indefinida';
+            const subDisc = row.subcausa_normalizada || 'Sin sub-disciplina';
             const cause = row.causaRaiz || 'Errores / Omisiones';
             const fmt = normalizeFormatName(row.format || row.type);
             
-            if (!disciplineMap[disc]) disciplineMap[disc] = { impact: 0, count: 0 };
+            // 1. Disciplina y Sub-Disciplina
+            if (!disciplineMap[disc]) disciplineMap[disc] = { impact: 0, count: 0, subs: {} };
             disciplineMap[disc].impact += impact;
             disciplineMap[disc].count += 1;
+            
+            if (!disciplineMap[disc].subs[subDisc]) disciplineMap[disc].subs[subDisc] = { impact: 0, count: 0 };
+            disciplineMap[disc].subs[subDisc].impact += impact;
+            disciplineMap[disc].subs[subDisc].count += 1;
 
+            // 2. Causa Raíz
             if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
             causeMap[cause].impact += impact;
             causeMap[cause].count += 1;
 
+            // 3. Formato
             if (!formatMap[fmt]) formatMap[fmt] = { impact: 0, count: 0 };
             formatMap[fmt].impact += impact;
             formatMap[fmt].count += 1;
@@ -132,7 +142,7 @@ export default function UploadPage() {
         }
       }
 
-      // Materializar Agregados Globales (Single Source of Truth)
+      // Materializar Agregados Globales con Jerarquía (SSOT)
       const globalSnapshot = await getCountFromServer(collection(db, 'orders'));
       const finalTotalCount = globalSnapshot.data().count;
 
@@ -147,7 +157,7 @@ export default function UploadPage() {
 
       setStats({ total: totalProcessed });
       setProgress(100);
-      toast({ title: "Universo Normalizado", description: `Se han cargado ${totalProcessed} registros.` });
+      toast({ title: "Universo Normalizado", description: `Se han cargado ${totalProcessed} registros con jerarquía técnica.` });
       setSelectedFiles([]);
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error Ingesta", description: error.message });
@@ -180,8 +190,8 @@ export default function UploadPage() {
                   <SearchCode className="h-8 w-8 text-accent" />
                 </div>
                 <div>
-                  <CardTitle className="text-2xl font-headline font-bold uppercase">Motor de Ingesta Institucional</CardTitle>
-                  <CardDescription className="text-slate-400">Normaliza el universo completo de 11,150+ registros sin truncamiento</CardDescription>
+                  <CardTitle className="text-2xl font-headline font-bold uppercase">Motor de Ingesta Jerárquico</CardTitle>
+                  <CardDescription className="text-slate-400">Normaliza Disciplinas y Sub-Disciplinas para análisis 80/20 granular.</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -194,7 +204,7 @@ export default function UploadPage() {
                   <Upload className="h-10 w-10 text-primary" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 uppercase">Subir Archivo de Gran Volumen</h3>
-                <p className="text-sm text-slate-500 mt-2">Compatible con archivos de más de 10,000 filas.</p>
+                <p className="text-sm text-slate-500 mt-2">Sincroniza el universo real (>10,000 filas) con estructura de árbol.</p>
                 <Input id="file-upload" type="file" className="hidden" multiple accept=".xlsx,.xls" onChange={handleFileChange} />
               </div>
 
@@ -217,7 +227,7 @@ export default function UploadPage() {
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-black text-primary uppercase flex items-center gap-2">
                       {isCorrelating ? <BrainCircuit className="h-4 w-4 animate-pulse" /> : <Loader2 className="h-4 w-4 animate-spin" />}
-                      {isCorrelating ? "Mapeando Esquema con IA..." : "Sincronizando Universo Total..."}
+                      {isCorrelating ? "Mapeando Jerarquía con IA..." : "Sincronizando Árbol de Disciplinas..."}
                     </span>
                     <span className="text-2xl font-headline font-bold text-primary">{Math.round(progress)}%</span>
                   </div>

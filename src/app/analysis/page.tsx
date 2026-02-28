@@ -29,7 +29,8 @@ import {
   UserCheck,
   Globe,
   Coins,
-  ShieldCheck
+  ShieldCheck,
+  ChevronDown
 } from 'lucide-react';
 import {
   Table,
@@ -99,7 +100,11 @@ export default function AnalysisPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageHistory, setPageHistory] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
   const [stats, setStats] = useState({ total: 0, withData: 0, pending: 0, totalImpact: 0 });
+  
+  // FILTROS JERÁRQUICOS
   const [disciplineFilter, setDisciplineFilter] = useState<string>('all');
+  const [subDisciplineFilter, setSubDisciplineFilter] = useState<string>('all');
+  
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
@@ -116,7 +121,7 @@ export default function AnalysisPage() {
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // 2. Query Paginada con Cursor
+  // 2. Query Paginada con Jerarquía
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
@@ -128,7 +133,15 @@ export default function AnalysisPage() {
     } else if (disciplineFilter === 'unclassified') {
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
-      baseQuery = query(q, where('disciplina_normalizada', '==', disciplineFilter), orderBy('projectId', 'asc'), limit(pageSize));
+      // Filtrado por Disciplina Primaria
+      baseQuery = query(q, where('disciplina_normalizada', '==', disciplineFilter));
+      
+      // Filtrado por Sub-Disciplina (si aplica)
+      if (subDisciplineFilter !== 'all') {
+        baseQuery = query(baseQuery, where('subcausa_normalizada', '==', subDisciplineFilter));
+      }
+      
+      baseQuery = query(baseQuery, orderBy('projectId', 'asc'), limit(pageSize));
     }
 
     const currentCursor = pageHistory[currentPage - 1];
@@ -137,29 +150,40 @@ export default function AnalysisPage() {
     }
 
     return baseQuery;
-  }, [db, isAuthReady, pageSize, currentPage, disciplineFilter, pageHistory]);
+  }, [db, isAuthReady, pageSize, currentPage, disciplineFilter, subDisciplineFilter, pageHistory]);
 
   const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
 
-  // 3. Normalización Dinámica de Disciplinas para el Filtro
-  const groupedDisciplines = useMemo(() => {
-    const groups: Record<string, { count: number, impact: number, rawNames: string[] }> = {};
+  // 3. Normalización de Disciplinas y Sub-Disciplinas desde Agregados
+  const disciplineStructure = useMemo(() => {
+    const primaryGroups: Record<string, { count: number, impact: number, subs: Record<string, { count: number, impact: number }> }> = {};
     
     if (globalAgg?.disciplines) {
       Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
         let normalized = String(name).trim().toUpperCase();
         if (normalized.endsWith('S') && normalized.length > 4) normalized = normalized.substring(0, normalized.length - 1);
         
-        if (!groups[normalized]) {
-          groups[normalized] = { count: 0, impact: 0, rawNames: [] };
+        if (!primaryGroups[normalized]) {
+          primaryGroups[normalized] = { count: 0, impact: 0, subs: {} };
         }
-        groups[normalized].count += s.count || 0;
-        groups[normalized].impact += s.impact || 0;
-        if (!groups[normalized].rawNames.includes(name)) groups[normalized].rawNames.push(name);
+        
+        primaryGroups[normalized].count += s.count || 0;
+        primaryGroups[normalized].impact += s.impact || 0;
+        
+        // Integrar sub-disciplinas si el motor de ingesta las guardó
+        if (s.subs) {
+          Object.entries(s.subs).forEach(([subName, subStats]: any) => {
+            if (!primaryGroups[normalized].subs[subName]) {
+              primaryGroups[normalized].subs[subName] = { count: 0, impact: 0 };
+            }
+            primaryGroups[normalized].subs[subName].count += subStats.count || 0;
+            primaryGroups[normalized].subs[subName].impact += subStats.impact || 0;
+          });
+        }
       });
     }
 
-    return groups;
+    return primaryGroups;
   }, [globalAgg]);
 
   // 4. Actualizar KPIs Dinámicos
@@ -167,38 +191,45 @@ export default function AnalysisPage() {
     if (!mounted) return;
 
     const totalInDb = globalAgg?.totalOrders || 0;
-    const totalWithDataInDb = globalAgg?.totalProcessed || Object.values(groupedDisciplines).reduce((acc, g) => acc + g.count, 0);
+    const totalWithDataInDb = globalAgg?.totalProcessed || 0;
 
-    // CÁLCULO DE IMPACTO: Prioridad al campo global consolidado
-    const sumDisciplinesImpact = Object.values(globalAgg?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.impact || 0), 0);
-    const globalTotalImpact = (globalAgg?.totalImpact && globalAgg.totalImpact > 0) ? globalAgg.totalImpact : sumDisciplinesImpact;
+    // Prioridad al impacto consolidado
+    const globalTotalImpact = globalAgg?.totalImpact || 0;
     
-    const currentViewImpact = orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0;
-
     if (disciplineFilter === 'all') {
       setStats({
         total: totalInDb,
         withData: totalWithDataInDb,
         pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: globalTotalImpact > 0 ? globalTotalImpact : currentViewImpact
+        totalImpact: globalTotalImpact
       });
     } else if (disciplineFilter === 'unclassified') {
       setStats({
         total: Math.max(0, totalInDb - totalWithDataInDb),
         withData: 0,
         pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: currentViewImpact
+        totalImpact: orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0
       });
     } else {
-      const group = groupedDisciplines[disciplineFilter];
-      setStats({
-        total: group?.count || 0,
-        withData: group?.count || 0,
-        pending: 0,
-        totalImpact: group?.impact || 0
-      });
+      const group = disciplineStructure[disciplineFilter];
+      if (subDisciplineFilter === 'all') {
+        setStats({
+          total: group?.count || 0,
+          withData: group?.count || 0,
+          pending: 0,
+          totalImpact: group?.impact || 0
+        });
+      } else {
+        const subGroup = group?.subs[subDisciplineFilter];
+        setStats({
+          total: subGroup?.count || 0,
+          withData: subGroup?.count || 0,
+          pending: 0,
+          totalImpact: subGroup?.impact || 0
+        });
+      }
     }
-  }, [disciplineFilter, globalAgg, groupedDisciplines, mounted, orders]);
+  }, [disciplineFilter, subDisciplineFilter, globalAgg, disciplineStructure, mounted, orders]);
 
   const isIndexError = error && (error as any).code === 'failed-precondition';
 
@@ -227,16 +258,22 @@ export default function AnalysisPage() {
     return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2 }).format(amount);
   };
 
-  const updateGlobalStatsIncrementally = async (discName: string, impact: number) => {
+  const updateGlobalStatsHierarchy = async (discName: string, subName: string, impact: number) => {
     if (!db) return;
     const ref = doc(db, 'aggregates', 'global_stats');
-    const path = `disciplines.${discName}.count`;
+    
+    // Rutas dinámicas para la jerarquía en Firestore
+    const countPath = `disciplines.${discName}.count`;
     const impactPath = `disciplines.${discName}.impact`;
+    const subCountPath = `disciplines.${discName}.subs.${subName}.count`;
+    const subImpactPath = `disciplines.${discName}.subs.${subName}.impact`;
     
     try {
       await updateDoc(ref, {
-        [path]: increment(1),
+        [countPath]: increment(1),
         [impactPath]: increment(impact),
+        [subCountPath]: increment(1),
+        [subImpactPath]: increment(impact),
         totalProcessed: increment(1),
         totalImpact: increment(impact),
         lastUpdate: new Date().toISOString()
@@ -244,7 +281,11 @@ export default function AnalysisPage() {
     } catch {
       await setDoc(ref, {
         disciplines: {
-          [discName]: { count: 1, impact: impact }
+          [discName]: { 
+            count: 1, 
+            impact: impact,
+            subs: { [subName]: { count: 1, impact: impact } }
+          }
         },
         totalProcessed: increment(1),
         totalImpact: increment(impact),
@@ -272,7 +313,12 @@ export default function AnalysisPage() {
         processedAt: new Date().toISOString()
       });
 
-      await updateGlobalStatsIncrementally(result.disciplina_normalizada, order.impactoNeto || 0);
+      await updateGlobalStatsHierarchy(
+        result.disciplina_normalizada, 
+        result.subcausa_normalizada || 'Indefinida', 
+        order.impactoNeto || 0
+      );
+      
       toast({ title: "Registro Clasificado", description: result.disciplina_normalizada });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Error IA", description: e.message || "Fallo en motor Gemini." });
@@ -309,7 +355,11 @@ export default function AnalysisPage() {
           processedAt: new Date().toISOString()
         });
 
-        await updateGlobalStatsIncrementally(result.disciplina_normalizada, order.impactoNeto || 0);
+        await updateGlobalStatsHierarchy(
+          result.disciplina_normalizada, 
+          result.subcausa_normalizada || 'Indefinida', 
+          order.impactoNeto || 0
+        );
 
         setProcessedCount(i + 1);
         setBulkAiProgress(Math.round(((i + 1) / targetOrders.length) * 100));
@@ -338,8 +388,7 @@ export default function AnalysisPage() {
       
       const freshSnap = await getDoc(doc(db, 'aggregates', 'global_stats'));
       const freshData = freshSnap.data();
-      const sumImpactFromDisciplines = Object.values(freshData?.disciplines || {}).reduce((acc: number, g: any) => acc + (g.impact || 0), 0);
-      const currentImpact = (freshData?.totalImpact && freshData.totalImpact > 0) ? freshData.totalImpact : sumImpactFromDisciplines;
+      const currentImpact = freshData?.totalImpact || 0;
 
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: totalCount,
@@ -354,7 +403,7 @@ export default function AnalysisPage() {
       });
     } catch (e: any) {
       console.error("Error syncing universe:", e);
-      toast({ variant: "destructive", title: "Fallo de Sincronización", description: "Verifique permisos en Firestore." });
+      toast({ variant: "destructive", title: "Fallo de Sincronización", description: "Verifique permisos." });
     } finally {
       setIsRefreshingStats(false);
     }
@@ -381,17 +430,27 @@ export default function AnalysisPage() {
               <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Consola de Control de Universo</h1>
             </div>
           </div>
+          
           <div className="flex items-center gap-4">
+            {/* SISTEMA DE FILTROS JERÁRQUICOS */}
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
-              <Select value={disciplineFilter} onValueChange={(v) => { setDisciplineFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
-                <SelectTrigger className="h-8 w-72 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
+              <Select 
+                value={disciplineFilter} 
+                onValueChange={(v) => { 
+                  setDisciplineFilter(v); 
+                  setSubDisciplineFilter('all'); // Reset sub-filtro al cambiar primaria
+                  setCurrentPage(1); 
+                  setPageHistory([null]); 
+                }}
+              >
+                <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
                   <Filter className="h-3 w-3 mr-2 text-primary" />
-                  <SelectValue placeholder="Filtrar por Disciplina" />
+                  <SelectValue placeholder="Disciplina Primaria" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">TODAS LAS DISCIPLINAS ({globalAgg?.totalOrders || 0})</SelectItem>
                   <SelectItem value="unclassified" className="text-rose-600 font-bold">SIN CLASIFICAR</SelectItem>
-                  {Object.entries(groupedDisciplines)
+                  {Object.entries(disciplineStructure)
                     .sort((a, b) => b[1].count - a[1].count)
                     .map(([name, group]) => (
                     <SelectItem key={name} value={name}>
@@ -400,6 +459,35 @@ export default function AnalysisPage() {
                   ))}
                 </SelectContent>
               </Select>
+
+              {disciplineFilter !== 'all' && disciplineFilter !== 'unclassified' && (
+                <div className="flex items-center animate-in slide-in-from-left-2 duration-300">
+                  <ChevronDown className="h-3 w-3 text-slate-400 mx-1" />
+                  <Select 
+                    value={subDisciplineFilter} 
+                    onValueChange={(v) => { 
+                      setSubDisciplineFilter(v); 
+                      setCurrentPage(1); 
+                      setPageHistory([null]); 
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
+                      <Layers className="h-3 w-3 mr-2 text-accent" />
+                      <SelectValue placeholder="Filtrar Sub-Disciplina" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">TODAS LAS SUB-DISCIPLINAS</SelectItem>
+                      {Object.entries(disciplineStructure[disciplineFilter]?.subs || {})
+                        .sort((a, b) => b[1].count - a[1].count)
+                        .map(([subName, subStats]) => (
+                        <SelectItem key={subName} value={subName}>
+                          {subName} ({subStats.count.toLocaleString()})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
             
             <div className="flex items-center gap-2">
@@ -407,7 +495,7 @@ export default function AnalysisPage() {
                 <Button 
                   onClick={handleBulkProcess} 
                   disabled={isBulkProcessing}
-                  className="bg-accent hover:bg-accent/90 text-white gap-2 shadow-lg h-10 px-6 rounded-xl animate-in fade-in zoom-in"
+                  className="bg-accent hover:bg-accent/90 text-white gap-2 shadow-lg h-10 px-6 rounded-xl"
                 >
                   <Sparkles className="h-4 w-4" />
                   <span className="text-[10px] font-black uppercase tracking-widest">Procesar Masivo ({selectedIds.length})</span>
@@ -434,7 +522,7 @@ export default function AnalysisPage() {
               <AlertTriangle className="h-5 w-5" />
               <AlertTitle className="text-sm font-black uppercase tracking-tight">Índice Compuesto Requerido</AlertTitle>
               <AlertDescription className="text-xs mt-1">
-                Firestore requiere un índice para este filtro combinado.
+                Firestore requiere un índice para este filtro jerárquico.
                 <Button asChild variant="link" size="sm" className="h-auto p-0 ml-2 text-rose-600 font-bold">
                   <a href={`https://console.firebase.google.com/v1/r/project/${db?.app.options.projectId}/firestore/indexes`} target="_blank">Activar Índice Manualmente</a>
                 </Button>
@@ -445,7 +533,7 @@ export default function AnalysisPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase">Universo {disciplineFilter !== 'all' ? (disciplineFilter === 'unclassified' ? 'Pendiente' : disciplineFilter) : 'Walmart'}</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Universo {disciplineFilter !== 'all' ? disciplineFilter : 'Walmart'}</p>
                 <Database className="h-4 w-4 text-primary opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-slate-800">{stats.total.toLocaleString()}</h4>
@@ -458,7 +546,7 @@ export default function AnalysisPage() {
                 <CheckCircle2 className="h-4 w-4 text-emerald-500 opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-emerald-600">{stats.withData.toLocaleString()}</h4>
-              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Con Disciplina & Causa</p>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Con Clasificación IA</p>
             </Card>
 
             <Card className="p-5 border-none shadow-sm bg-slate-900 text-white border-l-4 border-l-accent flex flex-col justify-between">
@@ -478,7 +566,7 @@ export default function AnalysisPage() {
               <div className="space-y-2">
                 <div className="flex items-end justify-between">
                   <h4 className="text-3xl font-headline font-bold text-primary">{progressPercentage}%</h4>
-                  <span className="text-[9px] text-slate-400 font-black mb-1 uppercase">Sincronizado</span>
+                  <span className="text-[9px] text-slate-400 font-black mb-1 uppercase">Auditado</span>
                 </div>
                 <Progress value={progressPercentage} className="h-1.5 bg-slate-100" />
               </div>
@@ -510,7 +598,7 @@ export default function AnalysisPage() {
                     <TableCell colSpan={6} className="text-center py-32">
                       <div className="space-y-2">
                         <Search className="h-10 w-10 mx-auto text-slate-200" />
-                        <p className="text-slate-400 font-bold uppercase text-xs">No se encontraron registros en este filtro.</p>
+                        <p className="text-slate-400 font-bold uppercase text-xs">No se encontraron registros bajo esta jerarquía.</p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -582,7 +670,7 @@ export default function AnalysisPage() {
                               <AlertDialogHeader>
                                 <AlertDialogTitle className="font-headline uppercase text-slate-900 text-sm">Eliminar Registro</AlertDialogTitle>
                                 <AlertDialogDescription className="text-xs text-slate-500">
-                                  ¿Confirmas la eliminación de la orden {order.projectId}? Esta acción no se puede deshacer.
+                                  ¿Confirmas la eliminación de la orden {order.projectId}?
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
