@@ -87,7 +87,17 @@ export default function ControlCenterPage() {
 
     const totalImpact = globalAgg?.totalImpact || 0;
     
-    const paretoDiscs = taxonomyDocs.map(d => ({
+    // Deduplicar por nombre para evitar errores de claves duplicadas en React
+    const uniqueDiscs: Record<string, any> = {};
+    taxonomyDocs.forEach(d => {
+      const name = d.name || d.id;
+      if (!uniqueDiscs[name] || (d.impact || 0) > uniqueDiscs[name].impact) {
+        uniqueDiscs[name] = d;
+      }
+    });
+
+    const paretoDiscs = Object.values(uniqueDiscs).map(d => ({
+      id: d.id,
       name: d.name || d.id,
       impact: d.impact || 0,
       count: d.count || 0,
@@ -157,7 +167,6 @@ export default function ControlCenterPage() {
         </header>
 
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
-          {/* Top KPIs - Enfoque Pareto */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <Card className="p-6 border-none shadow-md bg-white rounded-3xl">
               <div className="flex items-center justify-between mb-4">
@@ -201,7 +210,6 @@ export default function ControlCenterPage() {
             </Card>
           </div>
 
-          {/* Análisis por Hitos Principales & Drill-down */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <Card className="border-none shadow-xl bg-white rounded-3xl p-8 flex flex-col min-h-[650px]">
               <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 mb-8">
@@ -226,7 +234,7 @@ export default function ControlCenterPage() {
                       className="bg-transparent border-none text-[10px] font-black uppercase tracking-widest focus:ring-0 w-full text-slate-600 cursor-pointer"
                     >
                       <option value="all">CONCENTRADO TOTAL</option>
-                      {stats?.paretoDiscs.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+                      {stats?.paretoDiscs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                     </select>
                   </div>
                 </div>
@@ -234,8 +242,8 @@ export default function ControlCenterPage() {
 
               <div className="flex-1 space-y-8 overflow-y-auto pr-2 custom-scrollbar">
                 {selectedDiscipline === 'all' ? (
-                  stats?.paretoDiscs.map((d, i) => (
-                    <div key={i} className="group cursor-pointer space-y-3" onClick={() => setSelectedDiscipline(d.name)}>
+                  stats?.paretoDiscs.map((d) => (
+                    <div key={d.id} className="group cursor-pointer space-y-3" onClick={() => setSelectedDiscipline(d.name)}>
                       <div className="flex justify-between items-start">
                         <div className="space-y-1">
                           <p className="text-xs font-black text-slate-800 uppercase group-hover:text-primary transition-colors flex items-center gap-2">
@@ -267,7 +275,7 @@ export default function ControlCenterPage() {
                     <div className="space-y-6">
                       <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Sub-Disciplinas & Causas</h6>
                       {currentDetailedDiscipline?.subs.map((s, i) => (
-                        <div key={i} className="space-y-2 group">
+                        <div key={`sub-${i}`} className="space-y-2 group">
                           <div className="flex justify-between items-end">
                             <p className="text-[10px] font-bold text-slate-700 uppercase group-hover:text-primary transition-colors">{s.name}</p>
                             <span className="text-[11px] font-black text-slate-900">{formatCurrency(s.impact)}</span>

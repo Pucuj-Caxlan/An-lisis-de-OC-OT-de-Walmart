@@ -94,20 +94,18 @@ export default function UploadPage() {
       }
 
       const globalBatch = writeBatch(db);
-      // Solo guardar métricas totales en global_stats
       globalBatch.set(doc(db, 'aggregates', 'global_stats'), { 
         totalImpact: totalImpactAcc, 
         lastUpdate: new Date().toISOString() 
       }, { merge: true });
 
-      // Escribir taxonomías sanitizando IDs
       Object.entries(discMap).forEach(([name, data]) => {
-        const safeId = name.replace(/\//g, '_').substring(0, 100);
+        const safeId = name.replace(/[\/\s\.]+/g, '_').substring(0, 100);
         globalBatch.set(doc(db, 'taxonomy_disciplines', safeId), { ...data, id: safeId, name: name });
       });
       
       Object.entries(causeMap).forEach(([name, data]) => {
-        const safeId = name.replace(/\//g, '_').substring(0, 100);
+        const safeId = name.replace(/[\/\s\.]+/g, '_').substring(0, 100);
         globalBatch.set(doc(db, 'taxonomy_causes', safeId), { ...data, id: safeId, name: name });
       });
       
