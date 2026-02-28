@@ -4,25 +4,18 @@
 import React, { useState } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
   Upload, 
-  FileSpreadsheet, 
-  CheckCircle2, 
-  Loader2,
-  X,
-  Zap,
-  BrainCircuit,
-  SearchCode
+  X
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import { processExcelFile, CANONICAL_SCHEMA } from '@/lib/excel-processor';
 import { useFirestore } from '@/firebase';
-import { doc, writeBatch, setDoc, getCountFromServer, collection } from 'firebase/firestore';
-import { Badge } from '@/components/ui/badge';
+import { doc, writeBatch } from 'firebase/firestore';
 import { correlateHeaders } from '@/ai/flows/header-correlation-flow';
 import * as XLSX from 'xlsx';
 

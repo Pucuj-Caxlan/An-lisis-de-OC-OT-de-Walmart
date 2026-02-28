@@ -5,25 +5,18 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { 
   Activity, 
   Target, 
   Zap, 
-  Database,
-  Layers,
-  Focus,
-  Filter,
   TrendingDown,
-  ShieldAlert,
   ArrowRight,
-  SearchCode,
-  AlertTriangle,
-  HardHat,
-  FileWarning,
   ChevronLeft,
-  ArrowUpRight
+  ArrowUpRight,
+  Focus,
+  Filter
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -32,28 +25,14 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar
+  Tooltip
 } from 'recharts';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useDoc } from '@/firebase';
-import { collection, query, limit, orderBy, getCountFromServer, doc } from 'firebase/firestore';
+import { collection, query, orderBy, getCountFromServer, doc } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Progress } from '@/components/ui/progress';
 
 const CYAN_PRIMARY = "#00D8FF";
-const PARETO_ORANGE = "#FF8F00";
-const SLATE_CORE = "#1E293B";
 
 export default function ControlCenterPage() {
   const router = useRouter();
@@ -87,7 +66,6 @@ export default function ControlCenterPage() {
 
     const totalImpact = globalAgg?.totalImpact || 0;
     
-    // Deduplicar por nombre para evitar errores de claves duplicadas en React
     const uniqueDiscs: Record<string, any> = {};
     taxonomyDocs.forEach(d => {
       const name = d.name || d.id;
@@ -246,10 +224,10 @@ export default function ControlCenterPage() {
                     <div key={d.id} className="group cursor-pointer space-y-3" onClick={() => setSelectedDiscipline(d.name)}>
                       <div className="flex justify-between items-start">
                         <div className="space-y-1">
-                          <p className="text-xs font-black text-slate-800 uppercase group-hover:text-primary transition-colors flex items-center gap-2">
+                          <div className="text-xs font-black text-slate-800 uppercase group-hover:text-primary transition-colors flex items-center gap-2">
                             {d.name}
                             {d.cumulativePct <= 85 && <div className="h-1.5 w-1.5 rounded-full bg-orange-500" />}
-                          </p>
+                          </div>
                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Principal Driver: <span className="text-slate-600">{d.topSubName}</span></p>
                         </div>
                         <div className="text-right">
