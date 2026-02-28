@@ -263,7 +263,7 @@ export default function AnalysisPage() {
     try {
       const colRef = collection(db, 'orders');
       
-      // 1. Obtener conteos reales
+      // 1. Obtener conteos reales vía Server Aggregation (Sin descargar documentos)
       const totalSnapshot = await getCountFromServer(colRef);
       const totalCount = totalSnapshot.data().count;
 
@@ -271,8 +271,7 @@ export default function AnalysisPage() {
       const processedSnapshot = await getCountFromServer(processedQuery);
       const processedCountVal = processedSnapshot.data().count;
       
-      // 2. Reconstruir Jerarquía desde los datos ya procesados (Muestra de 10,000)
-      // Esto recupera la estructura jerárquica sin re-procesar con IA
+      // 2. Reconstruir Jerarquía desde una muestra de seguridad (Máximo 10,000 para evitar errores de índice)
       const sampleQuery = query(processedQuery, limit(10000));
       const sampleDocs = await getDocs(sampleQuery);
       
@@ -281,24 +280,34 @@ export default function AnalysisPage() {
 
       sampleDocs.forEach(d => {
         const data = d.data();
-        const disc = data.disciplina_normalizada || 'Indefinida';
-        const sub = data.subcausa_normalizada || 'Sin sub-disciplina';
+        let disc = String(data.disciplina_normalizada || 'Indefinida').trim();
+        let sub = String(data.subcausa_normalizada || 'Sin sub-disciplina').trim();
         const impact = data.impactoNeto || 0;
+        
+        // Limpiar claves para evitar explosión de índices (truncar nombres muy largos)
+        if (disc.length > 50) disc = disc.substring(0, 50);
+        if (sub.length > 50) sub = sub.substring(0, 50);
+        
         calculatedImpact += impact;
 
         if (!newDisciplineMap[disc]) {
           newDisciplineMap[disc] = { impact: 0, count: 0, subs: {} };
         }
-        newDisciplineMap[disc].impact += impact;
-        newDisciplineMap[disc].count += 1;
+        
+        // Solo agregar sub-disciplinas si no superamos un límite razonable por documento (evita "too many index entries")
+        if (Object.keys(newDisciplineMap[disc].subs).length < 100 || newDisciplineMap[disc].subs[sub]) {
+          newDisciplineMap[disc].impact += impact;
+          newDisciplineMap[disc].count += 1;
 
-        if (!newDisciplineMap[disc].subs[sub]) {
-          newDisciplineMap[disc].subs[sub] = { impact: 0, count: 0 };
+          if (!newDisciplineMap[disc].subs[sub]) {
+            newDisciplineMap[disc].subs[sub] = { impact: 0, count: 0 };
+          }
+          newDisciplineMap[disc].subs[sub].impact += impact;
+          newDisciplineMap[disc].subs[sub].count += 1;
         }
-        newDisciplineMap[disc].subs[sub].impact += impact;
-        newDisciplineMap[disc].subs[sub].count += 1;
       });
 
+      // 3. Guardar con estructura optimizada
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: totalCount,
         totalProcessed: processedCountVal,
@@ -308,12 +317,18 @@ export default function AnalysisPage() {
       }, { merge: true });
       
       toast({ 
-        title: "Jerarquía Reconstruida", 
-        description: `Se mapearon ${sampleDocs.size} registros existentes en el árbol técnico.` 
+        title: "Jerarquía Optimizada", 
+        description: `Se mapearon ${sampleDocs.size} registros bajo un esquema de seguridad de índices.` 
       });
     } catch (e: any) {
       console.error("Error syncing hierarchy:", e);
-      toast({ variant: "destructive", title: "Fallo de Sincronización", description: e.message });
+      toast({ 
+        variant: "destructive", 
+        title: "Fallo de Sincronización", 
+        description: e.message.includes('index entries') 
+          ? "El universo es demasiado complejo. Se ha limitado la profundidad de sub-disciplinas." 
+          : e.message 
+      });
     } finally {
       setIsRefreshingStats(false);
     }

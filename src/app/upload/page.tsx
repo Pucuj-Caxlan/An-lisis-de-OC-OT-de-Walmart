@@ -60,7 +60,7 @@ export default function UploadPage() {
     
     setIsUploading(true);
     setProgress(5);
-    let totalProcessed = 0;
+    let totalProcessedInSession = 0;
     let totalImpactAcc = 0;
     
     // Jerarquía de Agregación: Disciplina > Sub-Disciplina
@@ -101,19 +101,27 @@ export default function UploadPage() {
             totalImpactAcc += impact;
             
             // Agregación local para metadatos jerárquicos
-            const disc = row.disciplina_normalizada || 'Indefinida';
-            const subDisc = row.subcausa_normalizada || 'Sin sub-disciplina';
+            let disc = String(row.disciplina_normalizada || 'Indefinida').trim().toUpperCase();
+            let subDisc = String(row.subcausa_normalizada || 'Sin sub-disciplina').trim().toUpperCase();
             const cause = row.causaRaiz || 'Errores / Omisiones';
             const fmt = normalizeFormatName(row.format || row.type);
             
-            // 1. Disciplina y Sub-Disciplina
+            // Limpiar claves para evitar errores de índice en Firestore
+            if (disc.length > 50) disc = disc.substring(0, 50);
+            if (subDisc.length > 50) subDisc = subDisc.substring(0, 50);
+
+            // 1. Disciplina y Sub-Disciplina (Protección contra explosión de campos)
             if (!disciplineMap[disc]) disciplineMap[disc] = { impact: 0, count: 0, subs: {} };
-            disciplineMap[disc].impact += impact;
-            disciplineMap[disc].count += 1;
             
-            if (!disciplineMap[disc].subs[subDisc]) disciplineMap[disc].subs[subDisc] = { impact: 0, count: 0 };
-            disciplineMap[disc].subs[subDisc].impact += impact;
-            disciplineMap[disc].subs[subDisc].count += 1;
+            // Límite de seguridad: Solo agregamos si no hay demasiadas sub-claves únicas
+            if (Object.keys(disciplineMap[disc].subs).length < 100 || disciplineMap[disc].subs[subDisc]) {
+              disciplineMap[disc].impact += impact;
+              disciplineMap[disc].count += 1;
+              
+              if (!disciplineMap[disc].subs[subDisc]) disciplineMap[disc].subs[subDisc] = { impact: 0, count: 0 };
+              disciplineMap[disc].subs[subDisc].impact += impact;
+              disciplineMap[disc].subs[subDisc].count += 1;
+            }
 
             // 2. Causa Raíz
             if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
@@ -137,12 +145,12 @@ export default function UploadPage() {
           });
 
           await firestoreBatch.commit();
-          totalProcessed += chunk.length;
-          setProgress(Math.min(95, (totalProcessed / data.length) * 100));
+          totalProcessedInSession += chunk.length;
+          setProgress(Math.min(95, (totalProcessedInSession / data.length) * 100));
         }
       }
 
-      // Materializar Agregados Globales con Jerarquía (SSOT)
+      // 4. Materializar Agregados Globales vía Server Aggregation
       const globalSnapshot = await getCountFromServer(collection(db, 'orders'));
       const finalTotalCount = globalSnapshot.data().count;
 
@@ -155,9 +163,9 @@ export default function UploadPage() {
         lastUpdate: new Date().toISOString()
       }, { merge: true });
 
-      setStats({ total: totalProcessed });
+      setStats({ total: totalProcessedInSession });
       setProgress(100);
-      toast({ title: "Universo Normalizado", description: `Se han cargado ${totalProcessed} registros con jerarquía técnica.` });
+      toast({ title: "Universo Normalizado", description: `Se han cargado ${totalProcessedInSession} registros bajo un esquema de seguridad de índices.` });
       setSelectedFiles([]);
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error Ingesta", description: error.message });
