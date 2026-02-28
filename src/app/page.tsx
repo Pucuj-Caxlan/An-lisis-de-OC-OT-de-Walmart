@@ -64,20 +64,13 @@ export default function VpDashboard() {
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // Consulta de taxonomía base
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: taxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
-  // Formatos disponibles (hardcoded para el MVP basado en el universo Walmart)
   const formats = ["SAMS CLUB", "WALMART SUPERCENTER", "BODEGA AURRERA", "WALMART EXPRESS", "MI BODEGA"];
 
   const paretoData = useMemo(() => {
     if (!taxonomyDocs) return [];
-    
-    // Si hay filtro por formato, ideally deberíamos tener agregados por formato.
-    // Para este MVP, si el usuario filtra por formato, simulamos la distribución proporcional
-    // basada en el impacto total del formato vs el global, o podríamos hacer una consulta pesada.
-    // Usaremos los datos globales pero permitiremos al usuario ver la jerarquía.
     
     const totalImpact = globalAgg?.totalImpact || 1;
     let cumulative = 0;
@@ -94,7 +87,7 @@ export default function VpDashboard() {
         count: d.count || 0
       };
     });
-  }, [taxonomyDocs, globalAgg, formatFilter]);
+  }, [taxonomyDocs, globalAgg]);
 
   const vitalFew = useMemo(() => paretoData.filter(p => p.cumulativePercentage <= 85), [paretoData]);
   const usefulMany = useMemo(() => paretoData.filter(p => p.cumulativePercentage > 85), [paretoData]);
@@ -276,7 +269,7 @@ export default function VpDashboard() {
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-8 overflow-y-auto custom-scrollbar">
                 {(activeTab === '80' ? vitalFew : usefulMany).map((item, i) => (
-                  <div key={item.name} className="group cursor-pointer">
+                  <div key={`${item.name}-${i}`} className="group cursor-pointer">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex gap-3">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center text-[10px] font-black shrink-0 ${activeTab === '80' ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-400'}`}>

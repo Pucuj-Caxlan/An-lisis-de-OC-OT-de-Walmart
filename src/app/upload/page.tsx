@@ -79,7 +79,16 @@ export default function UploadPage() {
             causeMap[cause].count += 1;
 
             const orderId = `${batchId}_${row.rowNumber}`;
-            batch.set(doc(db, 'orders', orderId), { ...row, id: orderId, importBatchId: batchId, classification_status: 'pending', processedAt: new Date().toISOString() });
+            batch.set(doc(db, 'orders', orderId), { 
+              ...row, 
+              id: orderId, 
+              importBatchId: batchId, 
+              classification_status: 'pending', 
+              processedAt: new Date().toISOString(),
+              disciplina_normalizada: disc,
+              subcausa_normalizada: sub,
+              causa_raiz_normalizada: cause
+            });
           });
           await batch.commit();
           setProgress(Math.min(95, (i / data.length) * 100));
@@ -129,7 +138,7 @@ export default function UploadPage() {
                   <Upload className="h-10 w-10 text-primary" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 uppercase">Subir Archivo de Gran Volumen</h3>
-                <p className="text-sm text-slate-500 mt-2">Sincroniza el universo real (&gt;10,000 filas) con estructura de árbol.</p>
+                <div className="text-sm text-slate-500 mt-2">Sincroniza el universo real (&gt;10,000 filas) con estructura de árbol.</div>
                 <Input id="file-upload" type="file" className="hidden" multiple accept=".xlsx,.xls" onChange={handleFileChange} />
               </div>
               {selectedFiles.length > 0 && <div className="grid gap-3">{selectedFiles.map((file, i) => <div key={i} className="flex justify-between p-4 bg-slate-50 border rounded-2xl"><span className="text-sm font-bold">{file.name}</span><Button variant="ghost" onClick={() => setSelectedFiles(prev => prev.filter((_, idx) => idx !== i))}><X className="h-5 w-5" /></Button></div>)}</div>}

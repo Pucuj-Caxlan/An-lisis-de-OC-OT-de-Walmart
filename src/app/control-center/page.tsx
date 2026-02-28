@@ -66,15 +66,16 @@ export default function ControlCenterPage() {
 
     const totalImpact = globalAgg?.totalImpact || 0;
     
-    const uniqueDiscs: Record<string, any> = {};
+    // Usar un Map para evitar duplicados por nombre
+    const uniqueDiscsMap = new Map();
     taxonomyDocs.forEach(d => {
       const name = d.name || d.id;
-      if (!uniqueDiscs[name] || (d.impact || 0) > uniqueDiscs[name].impact) {
-        uniqueDiscs[name] = d;
+      if (!uniqueDiscsMap.has(name) || (d.impact || 0) > uniqueDiscsMap.get(name).impact) {
+        uniqueDiscsMap.set(name, d);
       }
     });
 
-    const paretoDiscs = Object.values(uniqueDiscs).map(d => ({
+    const paretoDiscs = Array.from(uniqueDiscsMap.values()).map(d => ({
       id: d.id,
       name: d.name || d.id,
       impact: d.impact || 0,
@@ -220,8 +221,8 @@ export default function ControlCenterPage() {
 
               <div className="flex-1 space-y-8 overflow-y-auto pr-2 custom-scrollbar">
                 {selectedDiscipline === 'all' ? (
-                  stats?.paretoDiscs.map((d) => (
-                    <div key={d.id} className="group cursor-pointer space-y-3" onClick={() => setSelectedDiscipline(d.name)}>
+                  stats?.paretoDiscs.map((d, i) => (
+                    <div key={`${d.id}-${i}`} className="group cursor-pointer space-y-3" onClick={() => setSelectedDiscipline(d.name)}>
                       <div className="flex justify-between items-start">
                         <div className="space-y-1">
                           <div className="text-xs font-black text-slate-800 uppercase group-hover:text-primary transition-colors flex items-center gap-2">
@@ -310,7 +311,7 @@ export default function ControlCenterPage() {
                       <span className="font-black text-emerald-600">Alta</span>
                     </div>
                     <Progress value={95} className="h-1 bg-slate-50" />
-                    <p className="text-[9px] text-slate-400 leading-relaxed italic">El motor Gemini 2.5 Flash ha normalizado el 100% de los hitos principales detectados en el universo.</p>
+                    <div className="text-[9px] text-slate-400 leading-relaxed italic">El motor Gemini 2.5 Flash ha normalizado el 100% de los hitos principales detectados en el universo.</div>
                   </div>
                 </Card>
                 <Card className="p-6 border-none shadow-md bg-white rounded-3xl border-t-4 border-t-accent">
@@ -321,7 +322,7 @@ export default function ControlCenterPage() {
                       <span className="font-black text-accent">Crítico</span>
                     </div>
                     <Progress value={65} className="h-1 bg-slate-50" />
-                    <p className="text-[9px] text-slate-400 leading-relaxed italic">La concentración del impacto en hitos principales sugiere la necesidad de un plan de mitigación masivo.</p>
+                    <div className="text-[9px] text-slate-400 leading-relaxed italic">La concentración del impacto en hitos principales sugiere la necesidad de un plan de mitigación masivo.</div>
                   </div>
                 </Card>
               </div>
