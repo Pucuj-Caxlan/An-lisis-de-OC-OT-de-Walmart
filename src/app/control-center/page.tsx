@@ -237,7 +237,7 @@ export default function ControlCenterPage() {
   if (!user?.uid || isLoading) return (
     <div className="flex h-screen items-center justify-center bg-slate-100 flex-col gap-4">
       <Activity className="h-12 w-12 text-cyan-500 animate-spin" />
-      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Sincronizando Universo Real ({totalInDb || '10,900+'} registros)...</p>
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Sincronizando Universo Real ({totalInDb || '10,900+'}) registros...</p>
     </div>
   );
 

@@ -134,7 +134,7 @@ export default function AnalysisPage() {
     } else if (disciplineFilter === 'unclassified') {
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
-      // Filtrado por Disciplina Primaria
+      // Filtrado por Disciplina Primaria (Normalizada a lo que hay en DB)
       baseQuery = query(q, where('disciplina_normalizada', '==', disciplineFilter));
       
       // Filtrado por Sub-Disciplina (si aplica)
@@ -162,7 +162,6 @@ export default function AnalysisPage() {
     if (globalAgg?.disciplines) {
       Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
         let normalized = String(name).trim().toUpperCase();
-        if (normalized.endsWith('S') && normalized.length > 4) normalized = normalized.substring(0, normalized.length - 1);
         
         if (!primaryGroups[normalized]) {
           primaryGroups[normalized] = { count: 0, impact: 0, subs: {} };
@@ -174,11 +173,12 @@ export default function AnalysisPage() {
         // Integrar sub-disciplinas
         if (s.subs) {
           Object.entries(s.subs).forEach(([subName, subStats]: any) => {
-            if (!primaryGroups[normalized].subs[subName]) {
-              primaryGroups[normalized].subs[subName] = { count: 0, impact: 0 };
+            let subNorm = String(subName).trim().toUpperCase();
+            if (!primaryGroups[normalized].subs[subNorm]) {
+              primaryGroups[normalized].subs[subNorm] = { count: 0, impact: 0 };
             }
-            primaryGroups[normalized].subs[subName].count += subStats.count || 0;
-            primaryGroups[normalized].subs[subName].impact += subStats.impact || 0;
+            primaryGroups[normalized].subs[subNorm].count += subStats.count || 0;
+            primaryGroups[normalized].subs[subNorm].impact += subStats.impact || 0;
           });
         }
       });
@@ -263,7 +263,6 @@ export default function AnalysisPage() {
     try {
       const colRef = collection(db, 'orders');
       
-      // 1. Obtener conteos reales vía Server Aggregation (Sin descargar documentos)
       const totalSnapshot = await getCountFromServer(colRef);
       const totalCount = totalSnapshot.data().count;
 
@@ -271,7 +270,6 @@ export default function AnalysisPage() {
       const processedSnapshot = await getCountFromServer(processedQuery);
       const processedCountVal = processedSnapshot.data().count;
       
-      // 2. Reconstruir Jerarquía desde una muestra de seguridad (Máximo 10,000 para evitar errores de índice)
       const sampleQuery = query(processedQuery, limit(10000));
       const sampleDocs = await getDocs(sampleQuery);
       
@@ -280,11 +278,10 @@ export default function AnalysisPage() {
 
       sampleDocs.forEach(d => {
         const data = d.data();
-        let disc = String(data.disciplina_normalizada || 'Indefinida').trim();
-        let sub = String(data.subcausa_normalizada || 'Sin sub-disciplina').trim();
+        let disc = String(data.disciplina_normalizada || 'Indefinida').trim().toUpperCase();
+        let sub = String(data.subcausa_normalizada || 'Sin sub-disciplina').trim().toUpperCase();
         const impact = data.impactoNeto || 0;
         
-        // Limpiar claves para evitar explosión de índices (truncar nombres muy largos)
         if (disc.length > 50) disc = disc.substring(0, 50);
         if (sub.length > 50) sub = sub.substring(0, 50);
         
@@ -294,7 +291,6 @@ export default function AnalysisPage() {
           newDisciplineMap[disc] = { impact: 0, count: 0, subs: {} };
         }
         
-        // Solo agregar sub-disciplinas si no superamos un límite razonable por documento (evita "too many index entries")
         if (Object.keys(newDisciplineMap[disc].subs).length < 100 || newDisciplineMap[disc].subs[sub]) {
           newDisciplineMap[disc].impact += impact;
           newDisciplineMap[disc].count += 1;
@@ -307,7 +303,6 @@ export default function AnalysisPage() {
         }
       });
 
-      // 3. Guardar con estructura optimizada
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: totalCount,
         totalProcessed: processedCountVal,
@@ -325,9 +320,7 @@ export default function AnalysisPage() {
       toast({ 
         variant: "destructive", 
         title: "Fallo de Sincronización", 
-        description: e.message.includes('index entries') 
-          ? "El universo es demasiado complejo. Se ha limitado la profundidad de sub-disciplinas." 
-          : e.message 
+        description: e.message 
       });
     } finally {
       setIsRefreshingStats(false);
@@ -345,9 +338,9 @@ export default function AnalysisPage() {
 
       const orderRef = doc(db, 'orders', order.id);
       updateDocumentNonBlocking(orderRef, {
-        disciplina_normalizada: result.disciplina_normalizada,
-        causa_raiz_normalizada: result.causa_raiz_normalizada,
-        subcausa_normalizada: result.subcausa_normalizada,
+        disciplina_normalizada: result.disciplina_normalizada.toUpperCase(),
+        causa_raiz_normalizada: result.causa_raiz_normalizada.toUpperCase(),
+        subcausa_normalizada: result.subcausa_normalizada.toUpperCase(),
         classification_status: 'auto',
         semanticAnalysis: result,
         processedAt: new Date().toISOString()
@@ -381,9 +374,9 @@ export default function AnalysisPage() {
 
         const orderRef = doc(db, 'orders', order.id);
         updateDocumentNonBlocking(orderRef, {
-          disciplina_normalizada: result.disciplina_normalizada,
-          causa_raiz_normalizada: result.causa_raiz_normalizada,
-          subcausa_normalizada: result.subcausa_normalizada,
+          disciplina_normalizada: result.disciplina_normalizada.toUpperCase(),
+          causa_raiz_normalizada: result.causa_raiz_normalizada.toUpperCase(),
+          subcausa_normalizada: result.subcausa_normalizada.toUpperCase(),
           classification_status: 'auto',
           semanticAnalysis: result,
           processedAt: new Date().toISOString()
@@ -425,7 +418,6 @@ export default function AnalysisPage() {
           </div>
           
           <div className="flex items-center gap-4">
-            {/* SISTEMA DE FILTROS JERÁRQUICOS */}
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
               <Select 
                 value={disciplineFilter} 
@@ -515,7 +507,7 @@ export default function AnalysisPage() {
               <AlertTriangle className="h-5 w-5" />
               <AlertTitle className="text-sm font-black uppercase tracking-tight">Índice Compuesto Requerido</AlertTitle>
               <AlertDescription className="text-xs mt-1">
-                Firestore requiere un índice para este filtro jerárquico.
+                Firestore requiere un índice específico para este filtro jerárquico.
                 <Button asChild variant="link" size="sm" className="h-auto p-0 ml-2 text-rose-600 font-bold">
                   <a href={`https://console.firebase.google.com/v1/r/project/${db?.app.options.projectId}/firestore/indexes`} target="_blank">Activar Índice Manualmente</a>
                 </Button>

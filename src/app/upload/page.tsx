@@ -212,7 +212,7 @@ export default function UploadPage() {
                   <Upload className="h-10 w-10 text-primary" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 uppercase">Subir Archivo de Gran Volumen</h3>
-                <p className="text-sm text-slate-500 mt-2">Sincroniza el universo real (>10,000 filas) con estructura de árbol.</p>
+                <p className="text-sm text-slate-500 mt-2">Sincroniza el universo real ({'>'}10,000 filas) con estructura de árbol.</p>
                 <Input id="file-upload" type="file" className="hidden" multiple accept=".xlsx,.xls" onChange={handleFileChange} />
               </div>
 
