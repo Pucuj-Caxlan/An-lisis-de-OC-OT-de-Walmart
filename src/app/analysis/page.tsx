@@ -30,7 +30,8 @@ import {
   Globe,
   Coins,
   ShieldCheck,
-  ChevronDown
+  ChevronDown,
+  Loader2
 } from 'lucide-react';
 import {
   Table,
@@ -56,7 +57,8 @@ import {
   setDoc,
   writeBatch,
   getCountFromServer,
-  getDocs
+  getDocs,
+  updateDoc
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
@@ -105,6 +107,7 @@ export default function AnalysisPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [isRefreshingStats, setIsRefreshingStats] = useState(false);
+  const [isBulkClassifying, setIsBulkClassifying] = useState(false);
   const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any | null>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -113,7 +116,6 @@ export default function AnalysisPage() {
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // Carga de Taxonomía desde Colección (Escalable y sin error de índices)
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('count', 'desc')) : null, [db]);
   const { data: taxonomyDocs } = useCollection(taxonomyQuery);
 
@@ -128,7 +130,6 @@ export default function AnalysisPage() {
     } else if (disciplineFilter === 'unclassified') {
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
-      // Usamos el nombre original para el filtro de Firestore
       baseQuery = query(q, where('disciplina_normalizada', '==', disciplineFilter));
       if (subDisciplineFilter !== 'all') {
         baseQuery = query(baseQuery, where('subcausa_normalizada', '==', subDisciplineFilter));
@@ -149,7 +150,6 @@ export default function AnalysisPage() {
   const disciplineStructure = useMemo(() => {
     const structure: Record<string, any> = {};
     taxonomyDocs?.forEach(doc => {
-      // Priorizamos el campo name original si existe
       const originalName = doc.name || doc.id;
       structure[originalName] = doc;
     });
@@ -201,71 +201,163 @@ export default function AnalysisPage() {
     return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2 }).format(amount);
   };
 
+  // NUEVA FUNCIÓN: Sincronización Iterativa para superar el límite de 10,000
   const handleRefreshUniverseStats = async () => {
     if (!db) return;
     setIsRefreshingStats(true);
     try {
       const colRef = collection(db, 'orders');
       const totalSnapshot = await getCountFromServer(colRef);
-      const totalCount = totalSnapshot.data().count;
+      const totalInDbCount = totalSnapshot.data().count;
 
-      // Limitamos a 10,000 para evitar error de cuota estructurada
-      const processedQuery = query(colRef, where('classification_status', '!=', 'pending'), limit(10000));
-      const sampleDocs = await getDocs(processedQuery);
-      
       const discMap: Record<string, any> = {};
       const causeMap: Record<string, any> = {};
-      let calculatedImpact = 0;
-
-      sampleDocs.forEach(d => {
-        const data = d.data();
-        let disc = String(data.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
-        let sub = String(data.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
-        let cause = String(data.causa_raiz_normalizada || 'SIN DEFINIR').trim().toUpperCase();
-        const impact = data.impactoNeto || 0;
-        calculatedImpact += impact;
-
-        if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
-        discMap[disc].impact += impact;
-        discMap[disc].count += 1;
-        if (!discMap[disc].subs[sub]) discMap[disc].subs[sub] = { impact: 0, count: 0 };
-        discMap[disc].subs[sub].impact += impact;
-        discMap[disc].subs[sub].count += 1;
-
-        if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
-        causeMap[cause].impact += impact;
-        causeMap[cause].count += 1;
-      });
-
-      const batch = writeBatch(db);
+      let totalCalculatedImpact = 0;
+      let totalProcessedInSync = 0;
       
-      // Actualizar solo contadores en el documento global
-      batch.set(doc(db, 'aggregates', 'global_stats'), {
-        totalOrders: totalCount,
-        totalProcessed: sampleDocs.size,
-        totalImpact: calculatedImpact,
+      let lastVisible = null;
+      let hasMore = true;
+      const CHUNK_SIZE = 3000; // Bloques para no saturar memoria
+
+      while (hasMore) {
+        let q = query(
+          colRef, 
+          where('classification_status', '!=', 'pending'), 
+          orderBy('classification_status'),
+          limit(CHUNK_SIZE)
+        );
+        
+        if (lastVisible) {
+          q = query(q, startAfter(lastVisible));
+        }
+
+        const querySnapshot = await getDocs(q);
+        
+        if (querySnapshot.empty) {
+          hasMore = false;
+          break;
+        }
+
+        querySnapshot.forEach(d => {
+          const data = d.data();
+          let disc = String(data.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
+          let sub = String(data.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
+          let cause = String(data.causa_raiz_normalizada || 'SIN DEFINIR').trim().toUpperCase();
+          const impact = data.impactoNeto || 0;
+          
+          totalCalculatedImpact += impact;
+          totalProcessedInSync++;
+
+          if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
+          discMap[disc].impact += impact;
+          discMap[disc].count += 1;
+          if (!discMap[disc].subs[sub]) discMap[disc].subs[sub] = { impact: 0, count: 0 };
+          discMap[disc].subs[sub].impact += impact;
+          discMap[disc].subs[sub].count += 1;
+
+          if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
+          causeMap[cause].impact += impact;
+          causeMap[cause].count += 1;
+        });
+
+        lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
+        if (querySnapshot.size < CHUNK_SIZE) {
+          hasMore = false;
+        }
+      }
+
+      // Guardar en batches para no exceder límites de escritura
+      const saveTaxonomy = async (map: Record<string, any>, coll: string) => {
+        const entries = Object.entries(map);
+        for (let i = 0; i < entries.length; i += 400) {
+          const chunk = entries.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach(([name, data]) => {
+            const safeId = name.replace(/\//g, '_').substring(0, 100);
+            batch.set(doc(db, coll, safeId), { ...data, id: safeId, name: name, lastUpdate: new Date().toISOString() });
+          });
+          await batch.commit();
+        }
+      };
+
+      await saveTaxonomy(discMap, 'taxonomy_disciplines');
+      await saveTaxonomy(causeMap, 'taxonomy_causes');
+
+      // Actualizar stats globales
+      await setDoc(doc(db, 'aggregates', 'global_stats'), {
+        totalOrders: totalInDbCount,
+        totalProcessed: totalProcessedInSync,
+        totalImpact: totalCalculatedImpact,
         lastUpdate: new Date().toISOString()
       }, { merge: true });
 
-      // Escribir taxonomías en documentos independientes sanitizando IDs
-      Object.entries(discMap).forEach(([name, data]) => {
-        const safeId = name.replace(/\//g, '_').substring(0, 100);
-        const ref = doc(db, 'taxonomy_disciplines', safeId);
-        batch.set(ref, { ...data, id: safeId, name: name, lastUpdate: new Date().toISOString() });
+      toast({ 
+        title: "Universo Sincronizado al 100%", 
+        description: `Se procesaron exitosamente ${totalProcessedInSync} de ${totalInDbCount} registros.` 
       });
-
-      Object.entries(causeMap).forEach(([name, data]) => {
-        const safeId = name.replace(/\//g, '_').substring(0, 100);
-        const ref = doc(db, 'taxonomy_causes', safeId);
-        batch.set(ref, { ...data, id: safeId, name: name, lastUpdate: new Date().toISOString() });
-      });
-
-      await batch.commit();
-      toast({ title: "Jerarquía Sincronizada", description: `Se mapearon ${sampleDocs.size} registros.` });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Fallo de Sincronización", description: e.message });
     } finally {
       setIsRefreshingStats(false);
+    }
+  };
+
+  // NUEVA FUNCIÓN: Clasificación masiva para alcanzar el 100% de integridad
+  const handleBulkAutoClassify = async () => {
+    if (!db || !user) return;
+    setIsBulkClassifying(true);
+    try {
+      const colRef = collection(db, 'orders');
+      const qPending = query(colRef, where('classification_status', '==', 'pending'), limit(50));
+      
+      let processed = 0;
+      let hasMore = true;
+
+      toast({ title: "Iniciando Auditoría Masiva", description: "Procesando registros pendientes en lotes de 50..." });
+
+      while (hasMore) {
+        const snapshot = await getDocs(qPending);
+        if (snapshot.empty) {
+          hasMore = false;
+          break;
+        }
+
+        // Procesamos este lote de 50 con la IA
+        for (const d of snapshot.docs) {
+          const order = d.data();
+          try {
+            const result = await analyzeOrderSemantically({
+              descripcion: String(order.descripcion || "").substring(0, 300),
+              monto: order.impactoNeto
+            });
+
+            await updateDoc(doc(db, 'orders', d.id), {
+              disciplina_normalizada: result.disciplina_normalizada.toUpperCase(),
+              causa_raiz_normalizada: result.causa_raiz_normalizada.toUpperCase(),
+              subcausa_normalizada: result.subcausa_normalizada.toUpperCase(),
+              classification_status: 'auto',
+              semanticAnalysis: result,
+              processedAt: new Date().toISOString()
+            });
+            processed++;
+          } catch (aiErr) {
+            console.warn("AI record skip:", d.id);
+          }
+        }
+        
+        // Si el lote fue menor a 50, terminamos
+        if (snapshot.size < 50) hasMore = false;
+        
+        // Pausa breve para evitar saturación de rate limits
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      toast({ title: "Auditoría Completada", description: `Se clasificaron ${processed} registros adicionales.` });
+      handleRefreshUniverseStats(); // Sincronizamos jerarquía al final
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error en Auditoría Masiva", description: e.message });
+    } finally {
+      setIsBulkClassifying(false);
     }
   };
 
@@ -355,10 +447,28 @@ export default function AnalysisPage() {
               )}
             </div>
             
-            <Button variant="outline" size="sm" onClick={handleRefreshUniverseStats} disabled={isRefreshingStats} className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl">
-              <RefreshCcw className={`h-3 w-3 mr-2 ${isRefreshingStats ? 'animate-spin' : ''}`} />
-              Sincronizar Jerarquía
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleBulkAutoClassify} 
+                disabled={isBulkClassifying || stats.pending === 0} 
+                className="h-10 border-accent/20 text-accent text-[10px] font-black uppercase rounded-xl hover:bg-accent hover:text-white"
+              >
+                {isBulkClassifying ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <Sparkles className="h-3 w-3 mr-2" />}
+                Auditar Pendientes (IA)
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleRefreshUniverseStats} 
+                disabled={isRefreshingStats} 
+                className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl"
+              >
+                <RefreshCcw className={`h-3 w-3 mr-2 ${isRefreshingStats ? 'animate-spin' : ''}`} />
+                Sincronizar Jerarquía
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -366,7 +476,7 @@ export default function AnalysisPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase">Universo {disciplineFilter !== 'all' ? disciplineFilter : 'Walmart'}</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Universo Walmart</p>
                 <Database className="h-4 w-4 text-primary opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-slate-800">{stats.total.toLocaleString()}</h4>
