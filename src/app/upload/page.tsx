@@ -26,7 +26,6 @@ import { Badge } from '@/components/ui/badge';
 import { correlateHeaders } from '@/ai/flows/header-correlation-flow';
 import * as XLSX from 'xlsx';
 
-// Función de normalización institucional para coherencia en agregados
 const normalizeFormatName = (name: any) => {
   if (!name) return 'FORMATO NO ESPECIFICADO';
   const n = String(name).trim().toUpperCase();
@@ -45,132 +44,85 @@ export default function UploadPage() {
   const db = useFirestore();
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [isCorrelating, setIsCorrelating] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [stats, setStats] = useState({ total: 0 });
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setSelectedFiles(prev => [...prev, ...Array.from(e.target.files!)]);
-    }
+    if (e.target.files) setSelectedFiles(prev => [...prev, ...Array.from(e.target.files!)]);
   };
 
   const startAnalysis = async () => {
     if (selectedFiles.length === 0 || !db) return;
-    
     setIsUploading(true);
     setProgress(5);
-    let totalProcessedInSession = 0;
     let totalImpactAcc = 0;
-    
-    // Jerarquía de Agregación: Disciplina > Sub-Disciplina
-    const disciplineMap: Record<string, { impact: number, count: number, subs: Record<string, { impact: number, count: number }> }> = {};
-    const causeMap: Record<string, { impact: number, count: number }> = {};
-    const formatMap: Record<string, { impact: number, count: number }> = {};
+    const discMap: Record<string, any> = {};
+    const causeMap: Record<string, any> = {};
 
     try {
       for (const file of selectedFiles) {
-        setIsCorrelating(true);
         const reader = new FileReader();
         const headerSample = await new Promise<string[]>((resolve) => {
           reader.onload = (e) => {
             const data = new Uint8Array(e.target?.result as ArrayBuffer);
             const workbook = XLSX.read(data, { type: 'array', sheetRows: 1 });
-            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            const headers = XLSX.utils.sheet_to_json(firstSheet, { header: 1 })[0] as string[];
+            const headers = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 })[0] as string[];
             resolve(headers.map(h => String(h)));
           };
           reader.readAsArrayBuffer(file);
         });
-
         await correlateHeaders({ headers: headerSample, canonicalSchema: CANONICAL_SCHEMA });
-        setIsCorrelating(false);
 
         const buffer = await file.arrayBuffer();
         const { data } = processExcelFile(buffer);
-        
         const batchId = crypto.randomUUID();
-        const chunkSize = 400; // Optimizado para Firestore
+        const chunkSize = 400;
         
         for (let i = 0; i < data.length; i += chunkSize) {
           const chunk = data.slice(i, i + chunkSize);
-          const firestoreBatch = writeBatch(db);
-          
+          const batch = writeBatch(db);
           chunk.forEach((row) => {
             const impact = row.impactoNeto || 0;
             totalImpactAcc += impact;
-            
-            // Agregación local para metadatos jerárquicos
-            let disc = String(row.disciplina_normalizada || 'Indefinida').trim().toUpperCase();
-            let subDisc = String(row.subcausa_normalizada || 'Sin sub-disciplina').trim().toUpperCase();
-            const cause = row.causaRaiz || 'Errores / Omisiones';
-            const fmt = normalizeFormatName(row.format || row.type);
-            
-            // Limpiar claves para evitar errores de índice en Firestore
-            if (disc.length > 50) disc = disc.substring(0, 50);
-            if (subDisc.length > 50) subDisc = subDisc.substring(0, 50);
+            let disc = String(row.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
+            let sub = String(row.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
+            let cause = String(row.causaRaiz || 'ERRORES / OMISIONES').trim().toUpperCase();
 
-            // 1. Disciplina y Sub-Disciplina (Protección contra explosión de campos)
-            if (!disciplineMap[disc]) disciplineMap[disc] = { impact: 0, count: 0, subs: {} };
-            
-            // Límite de seguridad: Solo agregamos si no hay demasiadas sub-claves únicas
-            if (Object.keys(disciplineMap[disc].subs).length < 100 || disciplineMap[disc].subs[subDisc]) {
-              disciplineMap[disc].impact += impact;
-              disciplineMap[disc].count += 1;
-              
-              if (!disciplineMap[disc].subs[subDisc]) disciplineMap[disc].subs[subDisc] = { impact: 0, count: 0 };
-              disciplineMap[disc].subs[subDisc].impact += impact;
-              disciplineMap[disc].subs[subDisc].count += 1;
-            }
+            if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
+            discMap[disc].impact += impact;
+            discMap[disc].count += 1;
+            if (!discMap[disc].subs[sub]) discMap[disc].subs[sub] = { impact: 0, count: 0 };
+            discMap[disc].subs[sub].impact += impact;
+            discMap[disc].subs[sub].count += 1;
 
-            // 2. Causa Raíz
             if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
             causeMap[cause].impact += impact;
             causeMap[cause].count += 1;
 
-            // 3. Formato
-            if (!formatMap[fmt]) formatMap[fmt] = { impact: 0, count: 0 };
-            formatMap[fmt].impact += impact;
-            formatMap[fmt].count += 1;
-
             const orderId = `${batchId}_${row.rowNumber}`;
-            const orderRef = doc(db, 'orders', orderId);
-            firestoreBatch.set(orderRef, {
-              ...row,
-              id: orderId,
-              importBatchId: batchId,
-              classification_status: 'pending',
-              processedAt: new Date().toISOString()
-            });
+            batch.set(doc(db, 'orders', orderId), { ...row, id: orderId, importBatchId: batchId, classification_status: 'pending', processedAt: new Date().toISOString() });
           });
-
-          await firestoreBatch.commit();
-          totalProcessedInSession += chunk.length;
-          setProgress(Math.min(95, (totalProcessedInSession / data.length) * 100));
+          await batch.commit();
+          setProgress(Math.min(95, (i / data.length) * 100));
         }
       }
 
-      // 4. Materializar Agregados Globales vía Server Aggregation
-      const globalSnapshot = await getCountFromServer(collection(db, 'orders'));
-      const finalTotalCount = globalSnapshot.data().count;
-
-      await setDoc(doc(db, 'aggregates', 'global_stats'), {
-        totalOrders: finalTotalCount,
-        totalImpact: totalImpactAcc,
-        disciplines: disciplineMap,
-        rootCauses: causeMap,
-        formats: formatMap,
-        lastUpdate: new Date().toISOString()
+      const globalBatch = writeBatch(db);
+      // Solo guardar métricas totales en global_stats para evitar error de índices
+      globalBatch.set(doc(db, 'aggregates', 'global_stats'), { 
+        totalImpact: totalImpactAcc, 
+        lastUpdate: new Date().toISOString() 
       }, { merge: true });
 
-      setStats({ total: totalProcessedInSession });
-      setProgress(100);
-      toast({ title: "Universo Normalizado", description: `Se han cargado ${totalProcessedInSession} registros bajo un esquema de seguridad de índices.` });
+      Object.entries(discMap).forEach(([name, data]) => globalBatch.set(doc(db, 'taxonomy_disciplines', name.substring(0, 100)), { ...data, id: name }));
+      Object.entries(causeMap).forEach(([name, data]) => globalBatch.set(doc(db, 'taxonomy_causes', name.substring(0, 100)), { ...data, id: name }));
+      await globalBatch.commit();
+
+      toast({ title: "Universo Normalizado", description: "Taxonomía guardada con éxito." });
       setSelectedFiles([]);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error Ingesta", description: error.message });
-    } finally {
-      setTimeout(() => { setIsUploading(false); setProgress(0); }, 1000);
+    } catch (e: any) { 
+      toast({ variant: "destructive", title: "Error Ingesta", description: e.message }); 
+    } finally { 
+      setIsUploading(false); setProgress(0); 
     }
   };
 
@@ -179,78 +131,25 @@ export default function UploadPage() {
       <AppSidebar />
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6">
-          <div className="flex items-center gap-2">
-            <SidebarTrigger />
-            <h1 className="text-xl font-headline font-bold text-slate-800 uppercase tracking-tight">Carga de Bitácoras Masivas</h1>
-          </div>
-          {stats.total > 0 && (
-            <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-1.5 py-1 px-3">
-              <CheckCircle2 className="h-3 w-3" /> {stats.total} Homologados
-            </Badge>
-          )}
+          <div className="flex items-center gap-2"><SidebarTrigger /><h1 className="text-xl font-headline font-bold text-slate-800 uppercase">Carga Masiva</h1></div>
         </header>
-
-        <main className="p-6 md:p-8 max-w-5xl mx-auto w-full space-y-8">
-          <Card className="border-none shadow-xl bg-white overflow-hidden rounded-3xl">
-            <CardHeader className="bg-slate-900 text-white p-8">
-              <div className="flex items-center gap-4">
-                <div className="p-3 bg-white/10 rounded-2xl">
-                  <SearchCode className="h-8 w-8 text-accent" />
-                </div>
-                <div>
-                  <CardTitle className="text-2xl font-headline font-bold uppercase">Motor de Ingesta Jerárquico</CardTitle>
-                  <CardDescription className="text-slate-400">Normaliza Disciplinas y Sub-Disciplinas para análisis 80/20 granular.</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
+        <main className="p-8 max-w-5xl mx-auto w-full space-y-8">
+          <Card className="border-none shadow-xl rounded-3xl overflow-hidden">
+            <CardHeader className="bg-slate-900 text-white p-8"><CardTitle className="text-2xl font-headline font-bold">Motor de Ingesta Escalable</CardTitle></CardHeader>
             <CardContent className="p-8 space-y-8">
-              <div 
-                className={`border-2 border-dashed rounded-3xl p-16 text-center transition-all cursor-pointer group ${isUploading ? 'opacity-50 pointer-events-none' : 'hover:border-primary/50 hover:bg-primary/5 border-slate-200'}`}
-                onClick={() => document.getElementById('file-upload')?.click()}
-              >
-                <div className="bg-primary/10 h-20 w-20 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
-                  <Upload className="h-10 w-10 text-primary" />
-                </div>
-                <h3 className="text-xl font-bold text-slate-800 uppercase">Subir Archivo de Gran Volumen</h3>
-                <p className="text-sm text-slate-500 mt-2">Sincroniza el universo real (&gt;10,000 filas) con estructura de árbol.</p>
+              <div className="border-2 border-dashed rounded-3xl p-16 text-center cursor-pointer hover:bg-primary/5 border-slate-200" onClick={() => document.getElementById('file-upload')?.click()}>
+                <Upload className="h-10 w-10 text-primary mx-auto mb-6" />
+                <h3 className="text-xl font-bold uppercase">Subir Archivo de Gran Volumen</h3>
+                <p className="text-sm text-slate-500 mt-2">Sincroniza el universo real (&gt;10,000 filas) sin bloqueos.</p>
                 <Input id="file-upload" type="file" className="hidden" multiple accept=".xlsx,.xls" onChange={handleFileChange} />
               </div>
-
-              {selectedFiles.length > 0 && (
-                <div className="grid gap-3">
-                  {selectedFiles.map((file, i) => (
-                    <div key={i} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-100 rounded-2xl">
-                      <div className="flex items-center gap-4">
-                        <FileSpreadsheet className="h-6 w-6 text-emerald-600" />
-                        <span className="text-sm font-bold text-slate-700">{file.name}</span>
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => setSelectedFiles(prev => prev.filter((_, idx) => idx !== i))}><X className="h-5 w-5" /></Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
+              {selectedFiles.length > 0 && <div className="grid gap-3">{selectedFiles.map((file, i) => <div key={i} className="flex justify-between p-4 bg-slate-50 border rounded-2xl"><span className="text-sm font-bold">{file.name}</span><Button variant="ghost" onClick={() => setSelectedFiles(prev => prev.filter((_, idx) => idx !== i))}><X className="h-5 w-5" /></Button></div>)}</div>}
               {isUploading ? (
-                <div className="space-y-6 bg-slate-50 p-8 rounded-3xl border border-slate-100">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-black text-primary uppercase flex items-center gap-2">
-                      {isCorrelating ? <BrainCircuit className="h-4 w-4 animate-pulse" /> : <Loader2 className="h-4 w-4 animate-spin" />}
-                      {isCorrelating ? "Mapeando Jerarquía con IA..." : "Sincronizando Árbol de Disciplinas..."}
-                    </span>
-                    <span className="text-2xl font-headline font-bold text-primary">{Math.round(progress)}%</span>
-                  </div>
-                  <Progress value={progress} className="h-2.5 bg-slate-200" />
+                <div className="space-y-6 bg-slate-50 p-8 rounded-3xl">
+                  <div className="flex justify-between"><span className="text-sm font-black text-primary">SINCRONIZANDO TAXONOMÍA...</span><span className="text-2xl font-bold text-primary">{Math.round(progress)}%</span></div>
+                  <Progress value={progress} className="h-2.5" />
                 </div>
-              ) : (
-                <Button 
-                  className="w-full bg-primary h-16 text-lg font-headline font-bold uppercase tracking-widest rounded-2xl shadow-xl"
-                  disabled={selectedFiles.length === 0}
-                  onClick={startAnalysis}
-                >
-                  <Zap className="h-5 w-5 mr-3 text-accent fill-accent" />
-                  Iniciar Normalización Estructural
-                </Button>
-              )}
+              ) : <Button className="w-full h-16 text-lg font-bold uppercase tracking-widest rounded-2xl" disabled={selectedFiles.length === 0} onClick={startAnalysis}>Iniciar Normalización</Button>}
             </CardContent>
           </Card>
         </main>

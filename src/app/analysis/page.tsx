@@ -54,10 +54,8 @@ import {
   DocumentData,
   where,
   setDoc,
-  increment,
-  updateDoc,
+  writeBatch,
   getCountFromServer,
-  getDoc,
   getDocs
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
@@ -91,7 +89,6 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -102,27 +99,24 @@ export default function AnalysisPage() {
   const [pageHistory, setPageHistory] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
   const [stats, setStats] = useState({ total: 0, withData: 0, pending: 0, totalImpact: 0 });
   
-  // FILTROS JERÁRQUICOS
   const [disciplineFilter, setDisciplineFilter] = useState<string>('all');
   const [subDisciplineFilter, setSubDisciplineFilter] = useState<string>('all');
   
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
-  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
-  const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
-  const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any | null>(null);
-  const [bulkAiProgress, setBulkAiProgress] = useState(0);
-  const [processedCount, setProcessedCount] = useState(0);
   const [isRefreshingStats, setIsRefreshingStats] = useState(false);
+  const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any | null>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Leer Agregados Globales (SSOT)
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // 2. Query Paginada con Jerarquía
+  // Carga de Taxonomía desde Colección (Escalable y sin error de índices)
+  const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('count', 'desc')) : null, [db]);
+  const { data: taxonomyDocs } = useCollection(taxonomyQuery);
+
   const ordersQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
     
@@ -134,14 +128,10 @@ export default function AnalysisPage() {
     } else if (disciplineFilter === 'unclassified') {
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
-      // Filtrado por Disciplina Primaria (Normalizada a lo que hay en DB)
       baseQuery = query(q, where('disciplina_normalizada', '==', disciplineFilter));
-      
-      // Filtrado por Sub-Disciplina (si aplica)
       if (subDisciplineFilter !== 'all') {
         baseQuery = query(baseQuery, where('subcausa_normalizada', '==', subDisciplineFilter));
       }
-      
       baseQuery = query(baseQuery, orderBy('projectId', 'asc'), limit(pageSize));
     }
 
@@ -153,91 +143,42 @@ export default function AnalysisPage() {
     return baseQuery;
   }, [db, isAuthReady, pageSize, currentPage, disciplineFilter, subDisciplineFilter, pageHistory]);
 
-  const { data: orders, isLoading, error, snapshot } = useCollection(ordersQuery);
+  const { data: orders, isLoading, snapshot } = useCollection(ordersQuery);
 
-  // 3. Normalización de Disciplinas y Sub-Disciplinas desde Agregados
   const disciplineStructure = useMemo(() => {
-    const primaryGroups: Record<string, { count: number, impact: number, subs: Record<string, { count: number, impact: number }> }> = {};
-    
-    if (globalAgg?.disciplines) {
-      Object.entries(globalAgg.disciplines).forEach(([name, s]: any) => {
-        let normalized = String(name).trim().toUpperCase();
-        
-        if (!primaryGroups[normalized]) {
-          primaryGroups[normalized] = { count: 0, impact: 0, subs: {} };
-        }
-        
-        primaryGroups[normalized].count += s.count || 0;
-        primaryGroups[normalized].impact += s.impact || 0;
-        
-        // Integrar sub-disciplinas
-        if (s.subs) {
-          Object.entries(s.subs).forEach(([subName, subStats]: any) => {
-            let subNorm = String(subName).trim().toUpperCase();
-            if (!primaryGroups[normalized].subs[subNorm]) {
-              primaryGroups[normalized].subs[subNorm] = { count: 0, impact: 0 };
-            }
-            primaryGroups[normalized].subs[subNorm].count += subStats.count || 0;
-            primaryGroups[normalized].subs[subNorm].impact += subStats.impact || 0;
-          });
-        }
-      });
-    }
+    const structure: Record<string, any> = {};
+    taxonomyDocs?.forEach(doc => {
+      structure[doc.id] = doc;
+    });
+    return structure;
+  }, [taxonomyDocs]);
 
-    return primaryGroups;
-  }, [globalAgg]);
-
-  // 4. Actualizar KPIs Dinámicos
   useEffect(() => {
     if (!mounted) return;
-
     const totalInDb = globalAgg?.totalOrders || 0;
     const totalWithDataInDb = globalAgg?.totalProcessed || 0;
     const globalTotalImpact = globalAgg?.totalImpact || 0;
     
     if (disciplineFilter === 'all') {
-      setStats({
-        total: totalInDb,
-        withData: totalWithDataInDb,
-        pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: globalTotalImpact
-      });
+      setStats({ total: totalInDb, withData: totalWithDataInDb, pending: Math.max(0, totalInDb - totalWithDataInDb), totalImpact: globalTotalImpact });
     } else if (disciplineFilter === 'unclassified') {
-      setStats({
-        total: Math.max(0, totalInDb - totalWithDataInDb),
-        withData: 0,
-        pending: Math.max(0, totalInDb - totalWithDataInDb),
-        totalImpact: orders?.reduce((acc, o) => acc + (o.impactoNeto || 0), 0) || 0
-      });
+      setStats({ total: Math.max(0, totalInDb - totalWithDataInDb), withData: 0, pending: Math.max(0, totalInDb - totalWithDataInDb), totalImpact: 0 });
     } else {
       const group = disciplineStructure[disciplineFilter];
       if (subDisciplineFilter === 'all') {
-        setStats({
-          total: group?.count || 0,
-          withData: group?.count || 0,
-          pending: 0,
-          totalImpact: group?.impact || 0
-        });
+        setStats({ total: group?.count || 0, withData: group?.count || 0, pending: 0, totalImpact: group?.impact || 0 });
       } else {
-        const subGroup = group?.subs[subDisciplineFilter];
-        setStats({
-          total: subGroup?.count || 0,
-          withData: subGroup?.count || 0,
-          pending: 0,
-          totalImpact: subGroup?.impact || 0
-        });
+        const subGroup = group?.subs?.[subDisciplineFilter];
+        setStats({ total: subGroup?.count || 0, withData: subGroup?.count || 0, pending: 0, totalImpact: subGroup?.impact || 0 });
       }
     }
-  }, [disciplineFilter, subDisciplineFilter, globalAgg, disciplineStructure, mounted, orders]);
-
-  const isIndexError = error && (error as any).code === 'failed-precondition';
+  }, [disciplineFilter, subDisciplineFilter, globalAgg, disciplineStructure, mounted]);
 
   const handleNextPage = () => {
     if (snapshot && snapshot.docs.length === pageSize) {
-      const last = snapshot.docs[snapshot.docs.length - 1];
       setPageHistory(prev => {
         const newHistory = [...prev];
-        newHistory[currentPage] = last;
+        newHistory[currentPage] = snapshot.docs[snapshot.docs.length - 1];
         return newHistory;
       });
       setCurrentPage(prev => prev + 1);
@@ -262,66 +203,61 @@ export default function AnalysisPage() {
     setIsRefreshingStats(true);
     try {
       const colRef = collection(db, 'orders');
-      
       const totalSnapshot = await getCountFromServer(colRef);
       const totalCount = totalSnapshot.data().count;
 
-      const processedQuery = query(colRef, where('classification_status', '!=', 'pending'));
-      const processedSnapshot = await getCountFromServer(processedQuery);
-      const processedCountVal = processedSnapshot.data().count;
+      const processedQuery = query(colRef, where('classification_status', '!=', 'pending'), limit(10000));
+      const sampleDocs = await getDocs(processedQuery);
       
-      const sampleQuery = query(processedQuery, limit(10000));
-      const sampleDocs = await getDocs(sampleQuery);
-      
-      const newDisciplineMap: Record<string, any> = {};
+      const discMap: Record<string, any> = {};
+      const causeMap: Record<string, any> = {};
       let calculatedImpact = 0;
 
       sampleDocs.forEach(d => {
         const data = d.data();
-        let disc = String(data.disciplina_normalizada || 'Indefinida').trim().toUpperCase();
-        let sub = String(data.subcausa_normalizada || 'Sin sub-disciplina').trim().toUpperCase();
+        let disc = String(data.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
+        let sub = String(data.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
+        let cause = String(data.causa_raiz_normalizada || 'SIN DEFINIR').trim().toUpperCase();
         const impact = data.impactoNeto || 0;
-        
-        if (disc.length > 50) disc = disc.substring(0, 50);
-        if (sub.length > 50) sub = sub.substring(0, 50);
-        
         calculatedImpact += impact;
 
-        if (!newDisciplineMap[disc]) {
-          newDisciplineMap[disc] = { impact: 0, count: 0, subs: {} };
-        }
-        
-        if (Object.keys(newDisciplineMap[disc].subs).length < 100 || newDisciplineMap[disc].subs[sub]) {
-          newDisciplineMap[disc].impact += impact;
-          newDisciplineMap[disc].count += 1;
+        if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
+        discMap[disc].impact += impact;
+        discMap[disc].count += 1;
+        if (!discMap[disc].subs[sub]) discMap[disc].subs[sub] = { impact: 0, count: 0 };
+        discMap[disc].subs[sub].impact += impact;
+        discMap[disc].subs[sub].count += 1;
 
-          if (!newDisciplineMap[disc].subs[sub]) {
-            newDisciplineMap[disc].subs[sub] = { impact: 0, count: 0 };
-          }
-          newDisciplineMap[disc].subs[sub].impact += impact;
-          newDisciplineMap[disc].subs[sub].count += 1;
-        }
+        if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
+        causeMap[cause].impact += impact;
+        causeMap[cause].count += 1;
       });
 
-      await setDoc(doc(db, 'aggregates', 'global_stats'), {
+      const batch = writeBatch(db);
+      
+      // Actualizar solo contadores en el documento global para evitar error de índices
+      batch.set(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: totalCount,
-        totalProcessed: processedCountVal,
+        totalProcessed: sampleDocs.size,
         totalImpact: calculatedImpact,
-        disciplines: newDisciplineMap,
         lastUpdate: new Date().toISOString()
       }, { merge: true });
-      
-      toast({ 
-        title: "Jerarquía Optimizada", 
-        description: `Se mapearon ${sampleDocs.size} registros bajo un esquema de seguridad de índices.` 
+
+      // Escribir taxonomías en documentos independientes
+      Object.entries(discMap).forEach(([name, data]) => {
+        const ref = doc(db, 'taxonomy_disciplines', name.substring(0, 100));
+        batch.set(ref, { ...data, id: name, lastUpdate: new Date().toISOString() });
       });
+
+      Object.entries(causeMap).forEach(([name, data]) => {
+        const ref = doc(db, 'taxonomy_causes', name.substring(0, 100));
+        batch.set(ref, { ...data, id: name, lastUpdate: new Date().toISOString() });
+      });
+
+      await batch.commit();
+      toast({ title: "Jerarquía Sincronizada", description: `Se mapearon ${sampleDocs.size} registros.` });
     } catch (e: any) {
-      console.error("Error syncing hierarchy:", e);
-      toast({ 
-        variant: "destructive", 
-        title: "Fallo de Sincronización", 
-        description: e.message 
-      });
+      toast({ variant: "destructive", title: "Fallo de Sincronización", description: e.message });
     } finally {
       setIsRefreshingStats(false);
     }
@@ -348,57 +284,15 @@ export default function AnalysisPage() {
       
       toast({ title: "Registro Clasificado", description: result.disciplina_normalizada });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Error IA", description: e.message || "Fallo en motor Gemini." });
+      toast({ variant: "destructive", title: "Error IA", description: e.message });
     } finally {
       setIsAnalyzing(null);
     }
   };
 
-  const handleBulkProcess = async () => {
-    if (!db || !user || selectedIds.length === 0) return;
-    
-    setIsBulkProcessing(true);
-    setShowBulkAiDialog(true);
-    setProcessedCount(0);
-    setBulkAiProgress(0);
-
-    const targetOrders = orders?.filter(o => selectedIds.includes(o.id)) || [];
-    
-    for (let i = 0; i < targetOrders.length; i++) {
-      const order = targetOrders[i];
-      try {
-        const result = await analyzeOrderSemantically({
-          descripcion: String(order.descripcion || "").substring(0, 300),
-          monto: order.impactoNeto
-        });
-
-        const orderRef = doc(db, 'orders', order.id);
-        updateDocumentNonBlocking(orderRef, {
-          disciplina_normalizada: result.disciplina_normalizada.toUpperCase(),
-          causa_raiz_normalizada: result.causa_raiz_normalizada.toUpperCase(),
-          subcausa_normalizada: result.subcausa_normalizada.toUpperCase(),
-          classification_status: 'auto',
-          semanticAnalysis: result,
-          processedAt: new Date().toISOString()
-        });
-
-        setProcessedCount(i + 1);
-        setBulkAiProgress(Math.round(((i + 1) / targetOrders.length) * 100));
-      } catch (e) {
-        console.error(`Error bulk processing:`, e);
-      }
-    }
-
-    toast({ title: "Procesamiento Completo", description: `${targetOrders.length} registros actualizados.` });
-    setIsBulkProcessing(false);
-    setSelectedIds([]);
-    setTimeout(() => setShowBulkAiDialog(false), 2000);
-  };
-
   const handleDeleteRecord = async (id: string) => {
     if (!db) return;
-    const orderRef = doc(db, 'orders', id);
-    deleteDocumentNonBlocking(orderRef);
+    deleteDocumentNonBlocking(doc(db, 'orders', id));
     toast({ title: "Registro eliminado" });
   };
 
@@ -421,12 +315,7 @@ export default function AnalysisPage() {
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
               <Select 
                 value={disciplineFilter} 
-                onValueChange={(v) => { 
-                  setDisciplineFilter(v); 
-                  setSubDisciplineFilter('all'); 
-                  setCurrentPage(1); 
-                  setPageHistory([null]); 
-                }}
+                onValueChange={(v) => { setDisciplineFilter(v); setSubDisciplineFilter('all'); setCurrentPage(1); setPageHistory([null]); }}
               >
                 <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
                   <Filter className="h-3 w-3 mr-2 text-primary" />
@@ -435,39 +324,24 @@ export default function AnalysisPage() {
                 <SelectContent>
                   <SelectItem value="all">TODAS LAS DISCIPLINAS ({globalAgg?.totalOrders || 0})</SelectItem>
                   <SelectItem value="unclassified" className="text-rose-600 font-bold">SIN CLASIFICAR</SelectItem>
-                  {Object.entries(disciplineStructure)
-                    .sort((a, b) => b[1].count - a[1].count)
-                    .map(([name, group]) => (
-                    <SelectItem key={name} value={name}>
-                      {name} ({group.count.toLocaleString()})
-                    </SelectItem>
+                  {Object.keys(disciplineStructure).sort().map(name => (
+                    <SelectItem key={name} value={name}>{name} ({disciplineStructure[name].count})</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
               {disciplineFilter !== 'all' && disciplineFilter !== 'unclassified' && (
-                <div className="flex items-center animate-in slide-in-from-left-2 duration-300">
+                <div className="flex items-center">
                   <ChevronDown className="h-3 w-3 text-slate-400 mx-1" />
-                  <Select 
-                    value={subDisciplineFilter} 
-                    onValueChange={(v) => { 
-                      setSubDisciplineFilter(v); 
-                      setCurrentPage(1); 
-                      setPageHistory([null]); 
-                    }}
-                  >
+                  <Select value={subDisciplineFilter} onValueChange={(v) => { setSubDisciplineFilter(v); setCurrentPage(1); setPageHistory([null]); }}>
                     <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
                       <Layers className="h-3 w-3 mr-2 text-accent" />
-                      <SelectValue placeholder="Filtrar Sub-Disciplina" />
+                      <SelectValue placeholder="Sub-Disciplina" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">TODAS LAS SUB-DISCIPLINAS</SelectItem>
-                      {Object.entries(disciplineStructure[disciplineFilter]?.subs || {})
-                        .sort((a, b) => b[1].count - a[1].count)
-                        .map(([subName, subStats]) => (
-                        <SelectItem key={subName} value={subName}>
-                          {subName} ({subStats.count.toLocaleString()})
-                        </SelectItem>
+                      {Object.keys(disciplineStructure[disciplineFilter]?.subs || {}).sort().map(subName => (
+                        <SelectItem key={subName} value={subName}>{subName}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -475,46 +349,14 @@ export default function AnalysisPage() {
               )}
             </div>
             
-            <div className="flex items-center gap-2">
-              {selectedIds.length > 0 && (
-                <Button 
-                  onClick={handleBulkProcess} 
-                  disabled={isBulkProcessing}
-                  className="bg-accent hover:bg-accent/90 text-white gap-2 shadow-lg h-10 px-6 rounded-xl"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  <span className="text-[10px] font-black uppercase tracking-widest">Procesar Masivo ({selectedIds.length})</span>
-                </Button>
-              )}
-              
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleRefreshUniverseStats}
-                disabled={isRefreshingStats}
-                className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl"
-              >
-                <RefreshCcw className={`h-3 w-3 mr-2 ${isRefreshingStats ? 'animate-spin' : ''}`} />
-                Sincronizar Jerarquía
-              </Button>
-            </div>
+            <Button variant="outline" size="sm" onClick={handleRefreshUniverseStats} disabled={isRefreshingStats} className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl">
+              <RefreshCcw className={`h-3 w-3 mr-2 ${isRefreshingStats ? 'animate-spin' : ''}`} />
+              Sincronizar Jerarquía
+            </Button>
           </div>
         </header>
 
         <main className="p-6 space-y-6">
-          {isIndexError && (
-            <Alert variant="destructive" className="bg-rose-50 border-rose-200 shadow-sm rounded-2xl">
-              <AlertTriangle className="h-5 w-5" />
-              <AlertTitle className="text-sm font-black uppercase tracking-tight">Índice Compuesto Requerido</AlertTitle>
-              <AlertDescription className="text-xs mt-1">
-                Firestore requiere un índice específico para este filtro jerárquico.
-                <Button asChild variant="link" size="sm" className="h-auto p-0 ml-2 text-rose-600 font-bold">
-                  <a href={`https://console.firebase.google.com/v1/r/project/${db?.app.options.projectId}/firestore/indexes`} target="_blank">Activar Índice Manualmente</a>
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
@@ -524,7 +366,6 @@ export default function AnalysisPage() {
               <h4 className="text-3xl font-headline font-bold text-slate-800">{stats.total.toLocaleString()}</h4>
               <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Registros del Filtro</p>
             </Card>
-            
             <Card className="p-5 border-none shadow-sm bg-white border-l-4 border-l-emerald-500 flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-black text-emerald-600 uppercase">Integridad Técnica</p>
@@ -533,16 +374,14 @@ export default function AnalysisPage() {
               <h4 className="text-3xl font-headline font-bold text-emerald-600">{stats.withData.toLocaleString()}</h4>
               <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Con Clasificación IA</p>
             </Card>
-
             <Card className="p-5 border-none shadow-sm bg-slate-900 text-white border-l-4 border-l-accent flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-accent uppercase">Impacto Neto Total</p>
+                <p className="text-[10px] font-black text-accent uppercase">Impacto Neto</p>
                 <DollarSign className="h-4 w-4 text-accent opacity-40" />
               </div>
               <h4 className="text-2xl font-headline font-bold text-white">${formatAmount(stats.totalImpact)}</h4>
               <p className="text-[9px] text-slate-500 mt-2 uppercase font-bold">Consolidado en MXN</p>
             </Card>
-
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Avance Clasificación</p>
@@ -562,308 +401,107 @@ export default function AnalysisPage() {
             <Table>
               <TableHeader className="bg-slate-50/50">
                 <TableRow>
-                  <TableHead className="w-12 text-center">
-                    <Checkbox 
-                      checked={selectedIds.length === (orders?.length || 0) && (orders?.length || 0) > 0} 
-                      onCheckedChange={(checked) => setSelectedIds(checked ? (orders?.map(o => o.id) || []) : [])} 
-                    />
-                  </TableHead>
+                  <TableHead className="w-12 text-center"><Checkbox /></TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Estatus Datos</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Disciplina & Trazabilidad</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-right">Impacto Neto</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-center w-[120px]">Acciones</TableHead>
+                  <TableHead className="text-[10px) font-black uppercase text-center w-[120px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={6} className="text-center py-32"><RefreshCcw className="h-10 w-10 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
                 ) : !orders || orders.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-32">
-                      <div className="space-y-2">
-                        <Search className="h-10 w-10 mx-auto text-slate-200" />
-                        <p className="text-slate-400 font-bold uppercase text-xs">No se encontraron registros bajo esta jerarquía.</p>
+                  <TableRow><TableCell colSpan={6} className="text-center py-32 text-slate-400 font-bold uppercase text-xs">No se encontraron registros.</TableCell></TableRow>
+                ) : orders.map((order) => (
+                  <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors">
+                    <TableCell className="text-center"><Checkbox /></TableCell>
+                    <TableCell>
+                      <Badge className={order.classification_status === 'auto' ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"}>
+                        {order.classification_status === 'auto' ? "AUTO IA" : "VALIDADO"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="font-black text-primary text-sm">{order.projectId}</span>
+                        <span className="text-[9px] text-slate-400 uppercase truncate max-w-[180px] font-bold">{order.projectName}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                         <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
+                         <span className="text-[9px] text-slate-400 uppercase font-bold truncate max-w-[200px]">{order.subcausa_normalizada || "Sin sub-disciplina"}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-center gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => setSelectedOrderForDetails(order)}><Eye className="h-4 w-4 text-slate-400" /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing}>
+                          {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleDeleteRecord(order.id)}><Trash2 className="h-4 w-4 text-slate-300" /></Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ) : orders.map((order) => {
-                  const hasDiscipline = !!order.disciplina_normalizada;
-                  const isAuto = order.classification_status === 'auto';
-                  const confidence = order.semanticAnalysis?.confidence_score;
-                  
-                  return (
-                    <TableRow key={order.id} className={`hover:bg-slate-50/50 transition-colors ${selectedIds.includes(order.id) ? 'bg-primary/5' : ''}`}>
-                      <TableCell className="text-center">
-                        <Checkbox 
-                          checked={selectedIds.includes(order.id)} 
-                          onCheckedChange={(checked) => setSelectedIds(prev => checked ? [...prev, order.id] : prev.filter(id => id !== order.id))} 
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          {isAuto ? (
-                            <Badge className="bg-emerald-100 text-emerald-700 border-none text-[8px] font-black uppercase px-2 w-fit">AUTO IA</Badge>
-                          ) : hasDiscipline ? (
-                            <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] font-black uppercase px-2 w-fit">VALIDADO</Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[8px] font-black border-dashed text-slate-400 uppercase px-2 w-fit">PENDIENTE</Badge>
-                          )}
-                          {confidence !== undefined && (
-                            <div className="flex items-center gap-1">
-                              <Target className="h-2.5 w-2.5 text-slate-400" />
-                              <span className="text-[8px] font-bold text-slate-500">{Math.round(confidence * 100)}% Confianza</span>
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-black text-primary text-sm tracking-tighter">{order.projectId}</span>
-                          <span className="text-[9px] text-slate-400 uppercase truncate max-w-[180px] font-bold">{order.projectName}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                           <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
-                           <div className="flex items-center gap-1.5 mt-0.5">
-                             <Layers className="h-2.5 w-2.5 text-slate-300" />
-                             <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tight truncate max-w-[200px]">
-                               {order.subcausa_normalizada || order.causa_raiz_normalizada || "Sin sub-disciplina"}
-                             </span>
-                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-center gap-1">
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-400 hover:text-primary" onClick={() => setSelectedOrderForDetails(order)}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing}>
-                            {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
-                          </Button>
-                          
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-300 hover:text-rose-500">
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent className="rounded-3xl">
-                              <AlertDialogHeader>
-                                <AlertDialogTitle className="font-headline uppercase text-slate-900 text-sm">Eliminar Registro</AlertDialogTitle>
-                                <AlertDialogDescription className="text-xs text-slate-500">
-                                  ¿Confirmas la eliminación de la orden {order.projectId}?
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel className="rounded-xl text-[10px] font-black uppercase">Cancelar</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDeleteRecord(order.id)} className="bg-rose-600 rounded-xl text-[10px] font-black uppercase">Eliminar</AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                ))}
               </TableBody>
             </Table>
 
             <div className="flex items-center justify-between px-6 py-4 bg-slate-50/50 border-t">
-              <div className="flex items-center gap-4">
-                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  PÁGINA {currentPage} • BLOQUE: {pageSize}
-                </div>
-                <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(parseInt(v)); setCurrentPage(1); setPageHistory([null]); }}>
-                  <SelectTrigger className="h-8 w-32 text-[9px] font-black uppercase rounded-xl border-slate-200">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="100">100 por página</SelectItem>
-                    <SelectItem value="300">300 por página</SelectItem>
-                    <SelectItem value="500">500 por página</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">PÁGINA {currentPage} • BLOQUE: {pageSize}</div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black px-4 rounded-xl shadow-sm">
-                  <ChevronLeft className="h-4 w-4 mr-1" /> ANTERIOR
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={!orders || orders.length < pageSize} className="text-[9px] font-black px-4 rounded-xl shadow-sm">
-                  SIGUIENTE <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
+                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black px-4 rounded-xl shadow-sm">ANTERIOR</Button>
+                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={!orders || orders.length < pageSize} className="text-[9px] font-black px-4 rounded-xl shadow-sm">SIGUIENTE</Button>
               </div>
             </div>
           </Card>
         </main>
 
-        <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
-          <DialogContent className="max-w-md rounded-3xl p-8 text-center space-y-6">
-            <RefreshCcw className="h-12 w-12 text-primary animate-spin mx-auto" />
-            <div>
-              <DialogTitle className="text-xl font-bold uppercase text-slate-900">Procesando Universo IA</DialogTitle>
-              <DialogDescription className="text-slate-500 mt-2">
-                Analizando {selectedIds.length} registros con motor Gemini 2.5 Flash.
-              </DialogDescription>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-[10px] font-black text-primary uppercase">
-                <span>{processedCount} DE {selectedIds.length}</span>
-                <span>{bulkAiProgress}%</span>
-              </div>
-              <Progress value={bulkAiProgress} className="h-2 bg-slate-100" />
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* DIÁLOGO DE DETALLES DEL REGISTRO */}
         <Dialog open={!!selectedOrderForDetails} onOpenChange={(open) => !open && setSelectedOrderForDetails(null)}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden rounded-3xl p-0 border-none shadow-2xl bg-white">
-            <div className="bg-slate-900 p-8 text-white">
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Badge className="bg-primary text-white border-none text-[10px] font-black px-3 py-1">FOLIO: {selectedOrderForDetails?.projectId}</Badge>
-                    <Badge variant="outline" className="border-white/20 text-slate-400 text-[10px] font-bold">ORDEN #{selectedOrderForDetails?.orderNumber || 'N/A'}</Badge>
-                  </div>
-                  <DialogTitle className="text-2xl font-headline font-bold tracking-tight uppercase mt-2">
-                    {selectedOrderForDetails?.projectName || "SIN NOMBRE DE PROYECTO"}
-                  </DialogTitle>
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{selectedOrderForDetails?.format} • {selectedOrderForDetails?.country}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Impacto Neto Auditado</p>
-                  <h3 className="text-3xl font-black text-white tracking-tighter mt-1">
-                    ${formatAmount(selectedOrderForDetails?.impactoNeto || 0)}
-                  </h3>
-                </div>
+            <div className="bg-slate-900 p-8 text-white flex justify-between items-start">
+              <div className="space-y-1">
+                <Badge className="bg-primary text-white border-none text-[10px] font-black px-3 py-1">FOLIO: {selectedOrderForDetails?.projectId}</Badge>
+                <DialogTitle className="text-2xl font-headline font-bold tracking-tight uppercase mt-2">{selectedOrderForDetails?.projectName || "SIN NOMBRE"}</DialogTitle>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-black text-accent uppercase tracking-widest">Impacto Neto</p>
+                <h3 className="text-3xl font-black text-white tracking-tighter mt-1">${formatAmount(selectedOrderForDetails?.impactoNeto || 0)}</h3>
               </div>
             </div>
-
             <ScrollArea className="h-[calc(90vh-160px)] p-8">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pb-10">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div className="md:col-span-2 space-y-8">
                   <section className="space-y-4">
-                    <h4 className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
-                      <FileText className="h-4 w-4" /> Justificación Técnica
-                    </h4>
-                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 italic text-slate-600 text-sm leading-relaxed">
-                      "{selectedOrderForDetails?.descripcion || "Sin descripción proporcionada."}"
-                    </div>
+                    <h4 className="text-xs font-black uppercase text-primary flex items-center gap-2"><FileText className="h-4 w-4" /> Justificación Técnica</h4>
+                    <div className="bg-slate-50 p-6 rounded-2xl border italic text-slate-600 text-sm">"{selectedOrderForDetails?.descripcion || "Sin descripción."}"</div>
                   </section>
-
                   <section className="space-y-4">
-                    <h4 className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
-                      <Sparkles className="h-4 w-4" /> Análisis de Inteligencia Forense (Gemini)
-                    </h4>
-                    {selectedOrderForDetails?.semanticAnalysis ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                          <p className="text-[9px] font-black text-emerald-600 uppercase mb-1">Disciplina IA</p>
-                          <p className="text-sm font-bold text-emerald-900">{selectedOrderForDetails.disciplina_normalizada}</p>
+                    <h4 className="text-xs font-black uppercase text-primary flex items-center gap-2"><Sparkles className="h-4 w-4" /> Análisis IA Gemini</h4>
+                    {selectedOrderForDetails?.semanticAnalysis && (
+                      <div className="grid gap-4">
+                        <div className="flex gap-4">
+                          <div className="bg-emerald-50 p-4 rounded-xl flex-1"><p className="text-[9px] font-black text-emerald-600 uppercase mb-1">Disciplina</p><p className="text-sm font-bold">{selectedOrderForDetails.disciplina_normalizada}</p></div>
+                          <div className="bg-blue-50 p-4 rounded-xl flex-1"><p className="text-[9px] font-black text-blue-600 uppercase mb-1">Causa Raíz</p><p className="text-sm font-bold">{selectedOrderForDetails.causa_raiz_normalizada}</p></div>
                         </div>
-                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                          <p className="text-[9px] font-black text-blue-600 uppercase mb-1">Causa Raíz IA</p>
-                          <p className="text-sm font-bold text-blue-900">{selectedOrderForDetails.causa_raiz_normalizada}</p>
+                        <div className="bg-slate-900 p-5 rounded-xl text-white">
+                          <p className="text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2"><Info className="h-3 w-3 text-accent" /> Racional Técnico</p>
+                          <p className="text-xs text-slate-300 leading-relaxed italic">{selectedOrderForDetails.semanticAnalysis.rationale_tecnico}</p>
                         </div>
-                        <div className="md:col-span-2 bg-slate-900 p-5 rounded-xl text-white">
-                          <div className="flex items-center gap-2 mb-3">
-                            <Info className="h-3.5 w-3.5 text-accent" />
-                            <p className="text-[10px] font-black uppercase tracking-widest">Racional Técnico de Clasificación</p>
-                          </div>
-                          <p className="text-xs text-slate-300 leading-relaxed italic">
-                            {selectedOrderForDetails.semanticAnalysis.rationale_tecnico || "Análisis automatizado basado en patrones de construcción."}
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="border-2 border-dashed rounded-2xl p-8 text-center text-slate-400 bg-slate-50">
-                        <Zap className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                        <p className="text-xs font-bold uppercase tracking-tight">Registro pendiente de clasificación por IA.</p>
                       </div>
                     )}
                   </section>
                 </div>
-
-                <div className="space-y-6">
-                  <Card className="border-none shadow-sm bg-slate-50 p-5 space-y-4">
-                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b pb-2">Metadatos de Control</h4>
-                    
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-lg bg-white flex items-center justify-center shadow-sm text-primary">
-                          <Globe className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="text-[8px] font-black text-slate-400 uppercase">Estado / Región</p>
-                          <p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.state || 'N/A'}</p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-lg bg-white flex items-center justify-center shadow-sm text-primary">
-                          <Calendar className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="text-[8px] font-black text-slate-400 uppercase">Fecha Solicitud</p>
-                          <p className="text-[10px] font-bold uppercase">
-                            {selectedOrderForDetails?.fechaSolicitud ? new Date(selectedOrderForDetails.fechaSolicitud).toLocaleDateString() : 'N/A'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-lg bg-white flex items-center justify-center shadow-sm text-primary">
-                          <UserCheck className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="text-[8px] font-black text-slate-400 uppercase">Coordinador</p>
-                          <p className="text-[10px] font-bold uppercase truncate max-w-[150px]">{selectedOrderForDetails?.coordinador || 'Sin asignar'}</p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-lg bg-white flex items-center justify-center shadow-sm text-primary">
-                          <Coins className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="text-[8px] font-black text-slate-400 uppercase">Área Solicitante</p>
-                          <p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.areaSolicitante || 'Construcción'}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-
-                  <Card className="border-none shadow-sm bg-slate-900 text-white p-5 space-y-4">
-                    <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-white/10 pb-2">Gobernanza & Firmas</h4>
-                    
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">DocuSign</p>
-                        <Badge className={selectedOrderForDetails?.isSigned ? "bg-emerald-500" : "bg-rose-500"}>
-                          {selectedOrderForDetails?.isSigned ? "FIRMADO" : "PENDIENTE"}
-                        </Badge>
-                      </div>
-                      
-                      <div className="space-y-1">
-                        <p className="text-[8px] font-black text-slate-500 uppercase">Envelope ID</p>
-                        <p className="text-[9px] font-mono text-slate-300 break-all bg-white/5 p-2 rounded border border-white/5">
-                          {selectedOrderForDetails?.envelopeId || "N/A - CARGA DIRECTA"}
-                        </p>
-                      </div>
-
-                      <div className="pt-2">
-                        <div className="flex items-center gap-2 text-emerald-400">
-                          <ShieldCheck className="h-3.5 w-3.5" />
-                          <span className="text-[9px] font-black uppercase tracking-widest">Integridad Validada</span>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                </div>
+                <Card className="border-none shadow-sm bg-slate-50 p-5 space-y-4 h-fit">
+                  <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b pb-2">Metadatos</h4>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3"><Globe className="h-4 w-4 text-primary" /><div><p className="text-[8px] font-black text-slate-400 uppercase">Región</p><p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.state || 'N/A'}</p></div></div>
+                    <div className="flex items-center gap-3"><Calendar className="h-4 w-4 text-primary" /><div><p className="text-[8px] font-black text-slate-400 uppercase">Fecha</p><p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.fechaSolicitud ? new Date(selectedOrderForDetails.fechaSolicitud).toLocaleDateString() : 'N/A'}</p></div></div>
+                    <div className="flex items-center gap-3"><ShieldCheck className={selectedOrderForDetails?.isSigned ? "text-emerald-500" : "text-rose-500"} /><div className="text-[10px] font-bold">{selectedOrderForDetails?.isSigned ? "FIRMADO DOCUSIGN" : "SIN FIRMA"}</div></div>
+                  </div>
+                </Card>
               </div>
             </ScrollArea>
           </DialogContent>
