@@ -84,7 +84,7 @@ export default function ControlCenterPage() {
     const totalImpact = globalAgg?.totalImpact || 0;
     
     const paretoDiscs = taxonomyDocs.map(d => ({
-      name: d.id,
+      name: d.name || d.id, // Preferimos el nombre original
       impact: d.impact,
       count: d.count,
       topSubName: Object.entries(d.subs || {}).sort((a: any, b: any) => b[1].impact - a[1].impact)[0]?.[0] || 'N/A',
@@ -148,11 +148,9 @@ export default function ControlCenterPage() {
               <p className="text-[10px] font-black text-slate-400 uppercase">Impacto Total Auditado</p>
               <h3 className="text-3xl font-black text-slate-900 font-headline">{formatCurrency(stats?.totalImpact || 0)}</h3>
             </Card>
-            <Card onClick={() => router.push('/analysis')} className="p-6 border-none shadow-md bg-white rounded-2xl cursor-pointer hover:shadow-lg transition-all border-l-4 border-l-orange-500 group relative">
-              <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity"><ArrowRight className="h-4 w-4 text-orange-500" /></div>
+            <Card className="p-6 border-none shadow-md bg-white rounded-2xl border-l-4 border-l-orange-500 group relative">
               <p className="text-[10px] font-black text-slate-400 uppercase">Concentración Pareto</p>
               <h3 className="text-3xl font-black text-slate-900 font-headline">{(stats?.concentrationRatio || 0).toFixed(1)}%</h3>
-              <p className="text-[8px] font-bold text-orange-500 mt-1">Click para ver detalles</p>
             </Card>
             <Card onClick={() => router.push('/analysis')} className="p-6 border-none shadow-md bg-white rounded-2xl cursor-pointer hover:shadow-lg transition-all border-l-4 border-l-rose-500 group relative">
               <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity"><ArrowRight className="h-4 w-4 text-rose-500" /></div>

@@ -41,7 +41,7 @@ export default function WordCloudPage() {
     if (!taxonomyDocs) return [];
     const maxImpact = Math.max(...taxonomyDocs.map(d => d.impact), 1);
     return taxonomyDocs.map(d => ({
-      text: d.id,
+      text: d.name || d.id, // Preferimos el nombre original
       weight: Math.max(10, (d.impact / maxImpact) * 70 + 10),
       impact: d.impact,
       frequency: d.count,

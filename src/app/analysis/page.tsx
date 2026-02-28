@@ -128,6 +128,7 @@ export default function AnalysisPage() {
     } else if (disciplineFilter === 'unclassified') {
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
+      // Usamos el nombre original para el filtro de Firestore
       baseQuery = query(q, where('disciplina_normalizada', '==', disciplineFilter));
       if (subDisciplineFilter !== 'all') {
         baseQuery = query(baseQuery, where('subcausa_normalizada', '==', subDisciplineFilter));
@@ -148,7 +149,9 @@ export default function AnalysisPage() {
   const disciplineStructure = useMemo(() => {
     const structure: Record<string, any> = {};
     taxonomyDocs?.forEach(doc => {
-      structure[doc.id] = doc;
+      // Priorizamos el campo name original si existe
+      const originalName = doc.name || doc.id;
+      structure[originalName] = doc;
     });
     return structure;
   }, [taxonomyDocs]);
@@ -206,6 +209,7 @@ export default function AnalysisPage() {
       const totalSnapshot = await getCountFromServer(colRef);
       const totalCount = totalSnapshot.data().count;
 
+      // Limitamos a 10,000 para evitar error de cuota estructurada
       const processedQuery = query(colRef, where('classification_status', '!=', 'pending'), limit(10000));
       const sampleDocs = await getDocs(processedQuery);
       
@@ -235,7 +239,7 @@ export default function AnalysisPage() {
 
       const batch = writeBatch(db);
       
-      // Actualizar solo contadores en el documento global para evitar error de índices
+      // Actualizar solo contadores en el documento global
       batch.set(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: totalCount,
         totalProcessed: sampleDocs.size,
@@ -243,15 +247,17 @@ export default function AnalysisPage() {
         lastUpdate: new Date().toISOString()
       }, { merge: true });
 
-      // Escribir taxonomías en documentos independientes
+      // Escribir taxonomías en documentos independientes sanitizando IDs
       Object.entries(discMap).forEach(([name, data]) => {
-        const ref = doc(db, 'taxonomy_disciplines', name.substring(0, 100));
-        batch.set(ref, { ...data, id: name, lastUpdate: new Date().toISOString() });
+        const safeId = name.replace(/\//g, '_').substring(0, 100);
+        const ref = doc(db, 'taxonomy_disciplines', safeId);
+        batch.set(ref, { ...data, id: safeId, name: name, lastUpdate: new Date().toISOString() });
       });
 
       Object.entries(causeMap).forEach(([name, data]) => {
-        const ref = doc(db, 'taxonomy_causes', name.substring(0, 100));
-        batch.set(ref, { ...data, id: name, lastUpdate: new Date().toISOString() });
+        const safeId = name.replace(/\//g, '_').substring(0, 100);
+        const ref = doc(db, 'taxonomy_causes', safeId);
+        batch.set(ref, { ...data, id: safeId, name: name, lastUpdate: new Date().toISOString() });
       });
 
       await batch.commit();
@@ -406,7 +412,7 @@ export default function AnalysisPage() {
                   <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
                   <TableHead className="text-[10px] font-black uppercase">Disciplina & Trazabilidad</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-right">Impacto Neto</TableHead>
-                  <TableHead className="text-[10px) font-black uppercase text-center w-[120px]">Acciones</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center w-[120px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

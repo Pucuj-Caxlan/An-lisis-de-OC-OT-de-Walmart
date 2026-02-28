@@ -87,9 +87,12 @@ export default function UploadPdfPage() {
 
       const completeness = calculateCompleteness(extracted.extractedData);
 
+      // Sanitizamos el ID para evitar errores de ruta en Firestore
+      const safeId = `pdf_${extracted.extractedData.projectInfo?.projectId}_${extracted.extractedData.header?.orderNumber}`.replace(/[\/\s]+/g, '_');
+
       const homogenizedData = {
         ...extracted.extractedData,
-        id: `pdf_${extracted.extractedData.projectInfo?.projectId}_${extracted.extractedData.header?.orderNumber}`.replace(/\s+/g, '_'),
+        id: safeId,
         projectId: extracted.extractedData.projectInfo?.projectId || "N/A",
         projectName: extracted.extractedData.projectInfo?.projectName || "N/A",
         impactoNeto: extracted.extractedData.financialImpact?.netImpact || 0,
