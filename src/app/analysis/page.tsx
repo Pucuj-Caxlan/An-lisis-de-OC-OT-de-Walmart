@@ -31,7 +31,8 @@ import {
   Coins,
   ShieldCheck,
   ChevronDown,
-  Loader2
+  Loader2,
+  Focus
 } from 'lucide-react';
 import {
   Table,
@@ -116,7 +117,7 @@ export default function AnalysisPage() {
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('count', 'desc')) : null, [db]);
+  const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: taxonomyDocs } = useCollection(taxonomyQuery);
 
   const ordersQuery = useMemoFirebase(() => {
@@ -130,9 +131,13 @@ export default function AnalysisPage() {
     } else if (disciplineFilter === 'unclassified') {
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
-      baseQuery = query(q, where('disciplina_normalizada', '==', disciplineFilter));
+      // Búsqueda normalizada en mayúsculas
+      const cleanDisc = String(disciplineFilter).trim().toUpperCase();
+      baseQuery = query(q, where('disciplina_normalizada', '==', cleanDisc));
+      
       if (subDisciplineFilter !== 'all') {
-        baseQuery = query(baseQuery, where('subcausa_normalizada', '==', subDisciplineFilter));
+        const cleanSub = String(subDisciplineFilter).trim().toUpperCase();
+        baseQuery = query(baseQuery, where('subcausa_normalizada', '==', cleanSub));
       }
       baseQuery = query(baseQuery, orderBy('projectId', 'asc'), limit(pageSize));
     }
@@ -201,7 +206,6 @@ export default function AnalysisPage() {
     return new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2 }).format(amount);
   };
 
-  // NUEVA FUNCIÓN: Sincronización Iterativa para superar el límite de 10,000
   const handleRefreshUniverseStats = async () => {
     if (!db) return;
     setIsRefreshingStats(true);
@@ -217,7 +221,7 @@ export default function AnalysisPage() {
       
       let lastVisible = null;
       let hasMore = true;
-      const CHUNK_SIZE = 3000; // Bloques para no saturar memoria
+      const CHUNK_SIZE = 3000;
 
       while (hasMore) {
         let q = query(
@@ -227,10 +231,7 @@ export default function AnalysisPage() {
           limit(CHUNK_SIZE)
         );
         
-        if (lastVisible) {
-          q = query(q, startAfter(lastVisible));
-        }
-
+        if (lastVisible) q = query(q, startAfter(lastVisible));
         const querySnapshot = await getDocs(q);
         
         if (querySnapshot.empty) {
@@ -251,6 +252,7 @@ export default function AnalysisPage() {
           if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
           discMap[disc].impact += impact;
           discMap[disc].count += 1;
+          
           if (!discMap[disc].subs[sub]) discMap[disc].subs[sub] = { impact: 0, count: 0 };
           discMap[disc].subs[sub].impact += impact;
           discMap[disc].subs[sub].count += 1;
@@ -261,19 +263,16 @@ export default function AnalysisPage() {
         });
 
         lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
-        if (querySnapshot.size < CHUNK_SIZE) {
-          hasMore = false;
-        }
+        if (querySnapshot.size < CHUNK_SIZE) hasMore = false;
       }
 
-      // Guardar en batches para no exceder límites de escritura
       const saveTaxonomy = async (map: Record<string, any>, coll: string) => {
         const entries = Object.entries(map);
         for (let i = 0; i < entries.length; i += 400) {
           const chunk = entries.slice(i, i + 400);
           const batch = writeBatch(db);
           chunk.forEach(([name, data]) => {
-            const safeId = name.replace(/\//g, '_').substring(0, 100);
+            const safeId = name.replace(/[\/\s\.]+/g, '_').substring(0, 100);
             batch.set(doc(db, coll, safeId), { ...data, id: safeId, name: name, lastUpdate: new Date().toISOString() });
           });
           await batch.commit();
@@ -283,7 +282,6 @@ export default function AnalysisPage() {
       await saveTaxonomy(discMap, 'taxonomy_disciplines');
       await saveTaxonomy(causeMap, 'taxonomy_causes');
 
-      // Actualizar stats globales
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: totalInDbCount,
         totalProcessed: totalProcessedInSync,
@@ -292,8 +290,8 @@ export default function AnalysisPage() {
       }, { merge: true });
 
       toast({ 
-        title: "Universo Sincronizado al 100%", 
-        description: `Se procesaron exitosamente ${totalProcessedInSync} de ${totalInDbCount} registros.` 
+        title: "Hitos Sincronizados", 
+        description: `Se procesaron ${totalProcessedInSync} registros del universo.` 
       });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Fallo de Sincronización", description: e.message });
@@ -302,27 +300,25 @@ export default function AnalysisPage() {
     }
   };
 
-  // NUEVA FUNCIÓN: Clasificación masiva para alcanzar el 100% de integridad
   const handleBulkAutoClassify = async () => {
     if (!db || !user) return;
     setIsBulkClassifying(true);
     try {
       const colRef = collection(db, 'orders');
-      const qPending = query(colRef, where('classification_status', '==', 'pending'), limit(50));
-      
       let processed = 0;
       let hasMore = true;
 
-      toast({ title: "Iniciando Auditoría Masiva", description: "Procesando registros pendientes en lotes de 50..." });
+      toast({ title: "Iniciando Auditoría Masiva", description: "Procesando registros en lotes de 50..." });
 
       while (hasMore) {
+        const qPending = query(colRef, where('classification_status', '==', 'pending'), limit(50));
         const snapshot = await getDocs(qPending);
+        
         if (snapshot.empty) {
           hasMore = false;
           break;
         }
 
-        // Procesamos este lote de 50 con la IA
         for (const d of snapshot.docs) {
           const order = d.data();
           try {
@@ -341,21 +337,18 @@ export default function AnalysisPage() {
             });
             processed++;
           } catch (aiErr) {
-            console.warn("AI record skip:", d.id);
+            console.warn("Skip record:", d.id);
           }
         }
         
-        // Si el lote fue menor a 50, terminamos
         if (snapshot.size < 50) hasMore = false;
-        
-        // Pausa breve para evitar saturación de rate limits
         await new Promise(r => setTimeout(r, 1000));
       }
 
-      toast({ title: "Auditoría Completada", description: `Se clasificaron ${processed} registros adicionales.` });
-      handleRefreshUniverseStats(); // Sincronizamos jerarquía al final
+      toast({ title: "Auditoría Completada", description: `Integridad aumentada en ${processed} registros.` });
+      handleRefreshUniverseStats();
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Error en Auditoría Masiva", description: e.message });
+      toast({ variant: "destructive", title: "Error en Auditoría", description: e.message });
     } finally {
       setIsBulkClassifying(false);
     }
@@ -417,10 +410,10 @@ export default function AnalysisPage() {
               >
                 <SelectTrigger className="h-8 w-56 text-[10px] font-black uppercase rounded-lg border-none bg-white shadow-sm">
                   <Filter className="h-3 w-3 mr-2 text-primary" />
-                  <SelectValue placeholder="Disciplina Primaria" />
+                  <SelectValue placeholder="Hito Principal" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">TODAS LAS DISCIPLINAS ({globalAgg?.totalOrders || 0})</SelectItem>
+                  <SelectItem value="all">TODOS LOS HITOS ({globalAgg?.totalOrders || 0})</SelectItem>
                   <SelectItem value="unclassified" className="text-rose-600 font-bold">SIN CLASIFICAR</SelectItem>
                   {Object.keys(disciplineStructure).sort().map(name => (
                     <SelectItem key={name} value={name}>{name} ({disciplineStructure[name].count})</SelectItem>
@@ -437,7 +430,7 @@ export default function AnalysisPage() {
                       <SelectValue placeholder="Sub-Disciplina" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">TODAS LAS SUB-DISCIPLINAS</SelectItem>
+                      <SelectItem value="all">TODAS LAS SUB-DISCIPLINA</SelectItem>
                       {Object.keys(disciplineStructure[disciplineFilter]?.subs || {}).sort().map(subName => (
                         <SelectItem key={subName} value={subName}>{subName}</SelectItem>
                       ))}
@@ -453,7 +446,7 @@ export default function AnalysisPage() {
                 size="sm" 
                 onClick={handleBulkAutoClassify} 
                 disabled={isBulkClassifying || stats.pending === 0} 
-                className="h-10 border-accent/20 text-accent text-[10px] font-black uppercase rounded-xl hover:bg-accent hover:text-white"
+                className="h-10 border-accent/20 text-accent text-[10px] font-black uppercase rounded-xl hover:bg-accent hover:text-white transition-all shadow-sm"
               >
                 {isBulkClassifying ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <Sparkles className="h-3 w-3 mr-2" />}
                 Auditar Pendientes (IA)
@@ -463,10 +456,10 @@ export default function AnalysisPage() {
                 size="sm" 
                 onClick={handleRefreshUniverseStats} 
                 disabled={isRefreshingStats} 
-                className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl"
+                className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl shadow-sm"
               >
                 <RefreshCcw className={`h-3 w-3 mr-2 ${isRefreshingStats ? 'animate-spin' : ''}`} />
-                Sincronizar Jerarquía
+                Sincronizar Hitos
               </Button>
             </div>
           </div>
@@ -480,33 +473,36 @@ export default function AnalysisPage() {
                 <Database className="h-4 w-4 text-primary opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-slate-800">{stats.total.toLocaleString()}</h4>
-              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Registros del Filtro</p>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold tracking-tight">Total Registros en Base</p>
             </Card>
+            
             <Card className="p-5 border-none shadow-sm bg-white border-l-4 border-l-emerald-500 flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-black text-emerald-600 uppercase">Integridad Técnica</p>
                 <CheckCircle2 className="h-4 w-4 text-emerald-500 opacity-20" />
               </div>
               <h4 className="text-3xl font-headline font-bold text-emerald-600">{stats.withData.toLocaleString()}</h4>
-              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Con Clasificación IA</p>
+              <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold tracking-tight">Mapeados a Hito Principal</p>
             </Card>
+
             <Card className="p-5 border-none shadow-sm bg-slate-900 text-white border-l-4 border-l-accent flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-accent uppercase">Impacto Neto</p>
+                <p className="text-[10px] font-black text-accent uppercase">Impacto Neto (Pareto)</p>
                 <DollarSign className="h-4 w-4 text-accent opacity-40" />
               </div>
               <h4 className="text-2xl font-headline font-bold text-white">${formatAmount(stats.totalImpact)}</h4>
-              <p className="text-[9px] text-slate-500 mt-2 uppercase font-bold">Consolidado en MXN</p>
+              <p className="text-[9px] text-slate-500 mt-2 uppercase font-bold tracking-tight italic">MXN Auditado</p>
             </Card>
+
             <Card className="p-5 border-none shadow-sm bg-white flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Avance Clasificación</p>
-                <Zap className="h-4 w-4 text-primary" />
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Avance Global</p>
+                <Focus className="h-4 w-4 text-primary" />
               </div>
               <div className="space-y-2">
                 <div className="flex items-end justify-between">
                   <h4 className="text-3xl font-headline font-bold text-primary">{progressPercentage}%</h4>
-                  <span className="text-[9px] text-slate-400 font-black mb-1 uppercase">Auditado</span>
+                  <span className="text-[9px] text-slate-400 font-black mb-1 uppercase tracking-tighter">Integridad</span>
                 </div>
                 <Progress value={progressPercentage} className="h-1.5 bg-slate-100" />
               </div>
@@ -518,46 +514,46 @@ export default function AnalysisPage() {
               <TableHeader className="bg-slate-50/50">
                 <TableRow>
                   <TableHead className="w-12 text-center"><Checkbox /></TableHead>
-                  <TableHead className="text-[10px] font-black uppercase">Estatus Datos</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase">PID / Proyecto</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase">Disciplina & Trazabilidad</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-right">Impacto Neto</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-center w-[120px]">Acciones</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase tracking-widest">Gobernanza</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase tracking-widest">PID / Proyecto</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase tracking-widest">Hito & Sub-Disciplina</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase tracking-widest text-right">Impacto Neto</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase tracking-widest text-center w-[120px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={6} className="text-center py-32"><RefreshCcw className="h-10 w-10 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
                 ) : !orders || orders.length === 0 ? (
-                  <TableRow><TableCell colSpan={6} className="text-center py-32 text-slate-400 font-bold uppercase text-xs">No se encontraron registros.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-center py-32 text-slate-400 font-bold uppercase text-xs">No se encontraron registros para este hito.</TableCell></TableRow>
                 ) : orders.map((order) => (
                   <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors">
                     <TableCell className="text-center"><Checkbox /></TableCell>
                     <TableCell>
-                      <Badge className={order.classification_status === 'auto' ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"}>
-                        {order.classification_status === 'auto' ? "AUTO IA" : "VALIDADO"}
+                      <Badge className={order.classification_status === 'auto' ? "bg-emerald-100 text-emerald-700 text-[8px] font-black" : "bg-blue-100 text-blue-700 text-[8px] font-black"}>
+                        {order.classification_status === 'auto' ? "AUTO IA" : "REVISADO"}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col">
-                        <span className="font-black text-primary text-sm">{order.projectId}</span>
-                        <span className="text-[9px] text-slate-400 uppercase truncate max-w-[180px] font-bold">{order.projectName}</span>
+                        <span className="font-black text-primary text-sm tracking-tight">{order.projectId}</span>
+                        <span className="text-[9px] text-slate-400 uppercase truncate max-w-[180px] font-bold tracking-tighter">{order.projectName}</span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col">
-                         <span className="font-bold text-slate-700 text-xs">{order.disciplina_normalizada || "—"}</span>
-                         <span className="text-[9px] text-slate-400 uppercase font-bold truncate max-w-[200px]">{order.subcausa_normalizada || "Sin sub-disciplina"}</span>
+                         <span className="font-bold text-slate-700 text-xs uppercase tracking-tighter">{order.disciplina_normalizada || "—"}</span>
+                         <span className="text-[9px] text-slate-400 uppercase font-bold truncate max-w-[200px] tracking-tight">{order.subcausa_normalizada || "Sin sub-disciplina"}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-right font-black text-slate-800 text-sm">${formatAmount(order.impactoNeto || 0)}</TableCell>
+                    <TableCell className="text-right font-black text-slate-800 text-sm tracking-tighter">${formatAmount(order.impactoNeto || 0)}</TableCell>
                     <TableCell>
                       <div className="flex items-center justify-center gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => setSelectedOrderForDetails(order)}><Eye className="h-4 w-4 text-slate-400" /></Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing}>
-                          {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
+                        <Button variant="ghost" size="sm" onClick={() => setSelectedOrderForDetails(order)} className="hover:bg-slate-100"><Eye className="h-4 w-4 text-slate-400" /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleSingleSemanticAnalysis(order)} disabled={!!isAnalyzing} className="hover:bg-accent/10">
+                          {isAnalyzing === order.id ? <RefreshCcw className="h-4 w-4 animate-spin text-accent" /> : <Sparkles className="h-4 w-4 text-accent" />}
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDeleteRecord(order.id)}><Trash2 className="h-4 w-4 text-slate-300" /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleDeleteRecord(order.id)} className="hover:bg-rose-50"><Trash2 className="h-4 w-4 text-slate-300 hover:text-rose-400" /></Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -568,8 +564,8 @@ export default function AnalysisPage() {
             <div className="flex items-center justify-between px-6 py-4 bg-slate-50/50 border-t">
               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">PÁGINA {currentPage} • BLOQUE: {pageSize}</div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black px-4 rounded-xl shadow-sm">ANTERIOR</Button>
-                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={!orders || orders.length < pageSize} className="text-[9px] font-black px-4 rounded-xl shadow-sm">SIGUIENTE</Button>
+                <Button variant="outline" size="sm" onClick={handlePrevPage} disabled={currentPage === 1} className="text-[9px] font-black px-4 rounded-xl shadow-sm bg-white uppercase tracking-widest">ANTERIOR</Button>
+                <Button variant="outline" size="sm" onClick={handleNextPage} disabled={!orders || orders.length < pageSize} className="text-[9px] font-black px-4 rounded-xl shadow-sm bg-white uppercase tracking-widest">SIGUIENTE</Button>
               </div>
             </div>
           </Card>
@@ -591,31 +587,38 @@ export default function AnalysisPage() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div className="md:col-span-2 space-y-8">
                   <section className="space-y-4">
-                    <h4 className="text-xs font-black uppercase text-primary flex items-center gap-2"><FileText className="h-4 w-4" /> Justificación Técnica</h4>
-                    <div className="bg-slate-50 p-6 rounded-2xl border italic text-slate-600 text-sm">"{selectedOrderForDetails?.descripcion || "Sin descripción."}"</div>
+                    <h4 className="text-xs font-black uppercase text-primary flex items-center gap-2 tracking-widest"><FileText className="h-4 w-4" /> Justificación Técnica</h4>
+                    <div className="bg-slate-50 p-6 rounded-2xl border italic text-slate-600 text-sm leading-relaxed">"{selectedOrderForDetails?.descripcion || "Sin descripción."}"</div>
                   </section>
                   <section className="space-y-4">
-                    <h4 className="text-xs font-black uppercase text-primary flex items-center gap-2"><Sparkles className="h-4 w-4" /> Análisis IA Gemini</h4>
+                    <h4 className="text-xs font-black uppercase text-primary flex items-center gap-2 tracking-widest"><Sparkles className="h-4 w-4" /> Análisis IA Gemini</h4>
                     {selectedOrderForDetails?.semanticAnalysis && (
                       <div className="grid gap-4">
                         <div className="flex gap-4">
-                          <div className="bg-emerald-50 p-4 rounded-xl flex-1"><p className="text-[9px] font-black text-emerald-600 uppercase mb-1">Disciplina</p><p className="text-sm font-bold">{selectedOrderForDetails.disciplina_normalizada}</p></div>
-                          <div className="bg-blue-50 p-4 rounded-xl flex-1"><p className="text-[9px] font-black text-blue-600 uppercase mb-1">Causa Raíz</p><p className="text-sm font-bold">{selectedOrderForDetails.causa_raiz_normalizada}</p></div>
+                          <div className="bg-emerald-50 p-4 rounded-xl flex-1 border border-emerald-100">
+                            <p className="text-[9px] font-black text-emerald-600 uppercase mb-1 tracking-widest">Hito Principal</p>
+                            <p className="text-sm font-bold uppercase">{selectedOrderForDetails.disciplina_normalizada}</p>
+                          </div>
+                          <div className="bg-blue-50 p-4 rounded-xl flex-1 border border-blue-100">
+                            <p className="text-[9px] font-black text-blue-600 uppercase mb-1 tracking-widest">Causa Raíz</p>
+                            <p className="text-sm font-bold uppercase">{selectedOrderForDetails.causa_raiz_normalizada}</p>
+                          </div>
                         </div>
-                        <div className="bg-slate-900 p-5 rounded-xl text-white">
-                          <p className="text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2"><Info className="h-3 w-3 text-accent" /> Racional Técnico</p>
+                        <div className="bg-slate-900 p-5 rounded-xl text-white shadow-lg">
+                          <p className="text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2 text-accent"><Info className="h-3 w-3" /> Racional Técnico</p>
                           <p className="text-xs text-slate-300 leading-relaxed italic">{selectedOrderForDetails.semanticAnalysis.rationale_tecnico}</p>
                         </div>
                       </div>
                     )}
                   </section>
                 </div>
-                <Card className="border-none shadow-sm bg-slate-50 p-5 space-y-4 h-fit">
-                  <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b pb-2">Metadatos</h4>
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3"><Globe className="h-4 w-4 text-primary" /><div><p className="text-[8px] font-black text-slate-400 uppercase">Región</p><p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.state || 'N/A'}</p></div></div>
-                    <div className="flex items-center gap-3"><Calendar className="h-4 w-4 text-primary" /><div><p className="text-[8px] font-black text-slate-400 uppercase">Fecha</p><p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.fechaSolicitud ? new Date(selectedOrderForDetails.fechaSolicitud).toLocaleDateString() : 'N/A'}</p></div></div>
-                    <div className="flex items-center gap-3"><ShieldCheck className={selectedOrderForDetails?.isSigned ? "text-emerald-500" : "text-rose-500"} /><div className="text-[10px] font-bold">{selectedOrderForDetails?.isSigned ? "FIRMADO DOCUSIGN" : "SIN FIRMA"}</div></div>
+                <Card className="border-none shadow-sm bg-slate-50 p-5 space-y-4 h-fit rounded-2xl">
+                  <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b pb-2">Gobernanza & Metadatos</h4>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3"><Globe className="h-4 w-4 text-primary opacity-50" /><div><p className="text-[8px] font-black text-slate-400 uppercase">Región/Estado</p><p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.state || 'N/A'}</p></div></div>
+                    <div className="flex items-center gap-3"><Calendar className="h-4 w-4 text-primary opacity-50" /><div><p className="text-[8px] font-black text-slate-400 uppercase">Fecha Solicitud</p><p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.fechaSolicitud ? new Date(selectedOrderForDetails.fechaSolicitud).toLocaleDateString() : 'N/A'}</p></div></div>
+                    <div className="flex items-center gap-3"><ShieldCheck className={selectedOrderForDetails?.isSigned ? "text-emerald-500" : "text-rose-500"} /><div className="text-[10px] font-black uppercase tracking-tighter">{selectedOrderForDetails?.isSigned ? "FIRMADO DOCUSIGN" : "SIN FIRMA VÁLIDA"}</div></div>
+                    <div className="flex items-center gap-3"><UserCheck className="h-4 w-4 text-primary opacity-50" /><div><p className="text-[8px] font-black text-slate-400 uppercase">Coordinador</p><p className="text-[10px] font-bold uppercase">{selectedOrderForDetails?.coordinador || 'N/A'}</p></div></div>
                   </div>
                 </Card>
               </div>

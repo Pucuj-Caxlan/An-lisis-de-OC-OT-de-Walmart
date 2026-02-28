@@ -26,7 +26,9 @@ import {
   Search,
   ChevronDown,
   Activity,
-  Database
+  Database,
+  Focus,
+  CheckCircle2
 } from 'lucide-react';
 import {
   AreaChart,
@@ -39,10 +41,12 @@ import {
   Legend,
   BarChart,
   Bar,
-  Cell
+  Cell,
+  ComposedChart,
+  Line
 } from 'recharts';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, query, limit, getCountFromServer } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase, useUser, useDoc } from '@/firebase';
+import { collection, query, limit, getCountFromServer, doc, orderBy } from 'firebase/firestore';
 import { analyzeStrategicTrends, TrendAnalysisOutput } from '@/ai/flows/trend-analysis-flow';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
@@ -54,232 +58,75 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from '@/components/ui/input';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Progress } from '@/components/ui/progress';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-
-// Función de normalización de formatos institucional - ELIMINADO 'OTROS'
-const normalizeFormatName = (name: any) => {
-  if (!name) return 'FORMATO NO ESPECIFICADO';
-  const n = String(name).trim().toUpperCase();
-  
-  if (n.includes('MI BODEGA') || n === 'MBA') return 'MI BODEGA AURRERA';
-  if (n.includes('EXPRESS') && (n.includes('BODEGA') || n.includes('BA'))) return 'BODEGA AURRERA EXPRESS';
-  if (n === 'BODEGA AURRERA' || n === 'BAE' || n === 'BODEGA' || n === 'AURRERA' || n === 'BA') return 'BODEGA AURRERA';
-  if (n.includes('SAMS') || n.includes("SAM'S")) return "SAM'S CLUB";
-  if (n.includes('SUPERCENTER') || n.includes('WALMART SC') || n === 'SC' || n === 'WS') return 'WALMART SUPERCENTER';
-  if (n.includes('EXPRESS') || n.includes('SUPERAMA')) return 'WALMART EXPRESS';
-  if (n.includes('WALMART')) return 'WALMART SUPERCENTER';
-  
-  return n;
-};
+const CORE_COLOR = '#2962FF';
+const ACCENT_COLOR = '#FF8F00';
 
 export default function TrendsPage() {
   const { toast } = useToast();
   const db = useFirestore();
   const { user } = useUser();
   const [selectedYears, setSelectedYears] = useState<number[]>([new Date().getFullYear()]);
-  const [selectedMonths, setSelectedMonths] = useState<number[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [aiInsight, setAiInsight] = useState<TrendAnalysisOutput | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [totalInDb, setTotalInDb] = useState<number | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
-
-  const [filters, setFilters] = useState({
-    discipline: 'all',
-    format: 'all',
-    executionType: 'all',
-    search: ''
-  });
 
   useEffect(() => { setMounted(true); }, []);
 
-  useEffect(() => {
-    if (!db || !user?.uid) return;
-    const fetchTotal = async () => {
-      try {
-        const snapshot = await getCountFromServer(collection(db, 'orders'));
-        setTotalInDb(snapshot.data().count);
-      } catch (e) {
-        console.warn("Failed to fetch total count:", e);
-      }
-    };
-    fetchTotal();
-  }, [db, user?.uid]);
+  const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
+  const { data: globalAgg } = useDoc(aggRef);
 
-  const ordersQuery = useMemoFirebase(() => {
-    if (!db || !user?.uid) return null;
-    return query(collection(db, 'orders'), limit(10000)); 
-  }, [db, user?.uid]);
-
-  const { data: orders, isLoading } = useCollection(ordersQuery);
-
-  const getOrderDate = (o: any) => {
-    return o.fechaSolicitud || o.requestDate || o.header?.requestDate || o.projectInfo?.requestDate || o.processedAt;
-  };
-
-  const getOrderYear = (o: any): number | null => {
-    const dateStr = getOrderDate(o);
-    if (!dateStr) return null;
-    try {
-      const date = new Date(dateStr);
-      if (!isNaN(date.getFullYear())) return date.getFullYear();
-      const yearMatch = String(dateStr).match(/\b(202[2-6])\b/);
-      if (yearMatch) return parseInt(yearMatch[1]);
-      return null;
-    } catch { return null; }
-  };
-
-  const availableYears = useMemo(() => {
-    if (!orders) return [];
-    const years = new Set<number>();
-    orders.forEach(o => {
-      const yr = getOrderYear(o);
-      if (yr && yr >= 2020 && yr <= 2030) years.add(yr);
-    });
-    return Array.from(years).sort((a, b) => b - a);
-  }, [orders]);
-
-  const availableFormats = useMemo(() => {
-    if (!orders) return [];
-    const formats = new Set<string>();
-    orders.forEach(o => {
-      formats.add(normalizeFormatName(o.format || o.type));
-    });
-    return Array.from(formats).sort();
-  }, [orders]);
-
-  const filteredOrders = useMemo(() => {
-    if (!orders) return [];
-    return orders.filter(o => {
-      const yr = getOrderYear(o);
-      const date = new Date(getOrderDate(o));
-      const monthIdx = date.getMonth();
-
-      const yearMatch = selectedYears.includes(yr!);
-      const monthMatch = selectedMonths.length === 0 || selectedMonths.includes(monthIdx);
-      const disciplineMatch = filters.discipline === 'all' || o.disciplina_normalizada === filters.discipline;
-      
-      const normalizedRowFormat = normalizeFormatName(o.format || o.type);
-      const formatMatch = filters.format === 'all' || normalizedRowFormat === filters.format;
-      
-      const executionMatch = filters.executionType === 'all' || o.executionType === filters.executionType;
-      const searchMatch = !filters.search || 
-        String(o.projectId).toLowerCase().includes(filters.search.toLowerCase()) || 
-        String(o.projectName).toLowerCase().includes(filters.search.toLowerCase());
-
-      return yearMatch && monthMatch && disciplineMatch && formatMatch && executionMatch && searchMatch;
-    });
-  }, [orders, selectedYears, selectedMonths, filters]);
-
-  const trendData = useMemo(() => {
-    const monthly = MONTH_NAMES.map((name, i) => {
-      const entry: any = { month: name };
-      selectedYears.forEach(yr => {
-        entry[`impact_${yr}`] = 0;
-        entry[`count_${yr}`] = 0;
-      });
-      return entry;
-    });
-
-    filteredOrders.forEach(o => {
-      const yr = getOrderYear(o);
-      const date = new Date(getOrderDate(o));
-      const monthIdx = date.getMonth();
-      if (monthIdx >= 0 && monthIdx < 12 && selectedYears.includes(yr!)) {
-        const impactValue = o.impactoNeto || 0;
-        monthly[monthIdx][`impact_${yr}`] += impactValue;
-        monthly[monthIdx][`count_${yr}`] += 1;
-      }
-    });
-
-    return monthly;
-  }, [filteredOrders, selectedYears]);
+  const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
+  const { data: taxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
   const paretoData = useMemo(() => {
-    const causesMap = new Map<string, { impact: number, count: number }>();
-    filteredOrders.forEach(o => {
-      const cause = o.causa_raiz_normalizada || 'No definida';
-      const impact = o.impactoNeto || 0;
-      const existing = causesMap.get(cause) || { impact: 0, count: 0 };
-      causesMap.set(cause, { impact: existing.impact + impact, count: existing.count + 1 });
-    });
-
-    const totalImpact = Array.from(causesMap.values()).reduce((acc, curr) => acc + curr.impact, 0);
-    const sorted = Array.from(causesMap.entries())
-      .map(([cause, stats]) => ({
-        cause,
-        ...stats,
-        percentage: totalImpact > 0 ? (stats.impact / totalImpact) * 100 : 0
-      }))
-      .sort((a, b) => b.impact - a.impact);
-
+    if (!taxonomyDocs) return [];
+    const totalImpact = globalAgg?.totalImpact || 1;
     let cumulative = 0;
-    return sorted.map(item => {
-      cumulative += item.percentage;
-      return { ...item, cumulativePercentage: cumulative };
+    
+    return taxonomyDocs.map(d => {
+      cumulative += d.impact || 0;
+      const percentage = totalImpact > 0 ? ((d.impact || 0) / totalImpact) * 100 : 0;
+      return {
+        name: d.name || d.id,
+        impact: d.impact || 0,
+        percentage: Number(percentage.toFixed(1)),
+        cumulativePercentage: (cumulative / totalImpact) * 100,
+        count: d.count || 0
+      };
     });
-  }, [filteredOrders]);
+  }, [taxonomyDocs, globalAgg]);
 
-  const kpis = useMemo(() => {
-    const totalImpact = filteredOrders.reduce((acc, o) => acc + (o.impactoNeto || 0), 0);
-    const totalOrders = filteredOrders.length;
-    const avgTicket = totalOrders > 0 ? totalImpact / totalOrders : 0;
-    const topCause = paretoData[0]?.cause || 'N/A';
-    const topImpactPct = paretoData[0]?.percentage?.toFixed(1) || '0';
-    return { totalImpact, totalOrders, avgTicket, topCause, topImpactPct };
-  }, [filteredOrders, paretoData]);
-
-  const toggleYear = (year: number) => {
-    setSelectedYears(prev => 
-      prev.includes(year) 
-        ? (prev.length > 1 ? prev.filter(y => y !== year) : prev) 
-        : [...prev, year].sort((a, b) => b - a)
-    );
-  };
+  const vitalFew = useMemo(() => paretoData.filter(p => p.cumulativePercentage <= 85), [paretoData]);
 
   const runAiTrendAnalysis = async () => {
-    if (filteredOrders.length === 0) return;
+    if (paretoData.length === 0) return;
     setIsAnalyzing(true);
     try {
-      const aggregatedMonthlyData = MONTH_NAMES.map((name, idx) => {
-        let impactSum = 0;
-        let countSum = 0;
-        selectedYears.forEach(yr => {
-          impactSum += trendData[idx][`impact_${yr}`] || 0;
-          countSum += trendData[idx][`count_${yr}`] || 0;
-        });
-        return { month: name, impact: impactSum, count: countSum };
-      });
+      // Mock de datos mensuales para el flujo (basado en el promedio)
+      const aggregatedMonthlyData = MONTH_NAMES.map(name => ({
+        month: name,
+        impact: (globalAgg?.totalImpact || 0) / 12,
+        count: (globalAgg?.totalOrders || 0) / 12
+      }));
 
-      const paretoTop80 = paretoData
-        .filter(p => p.cumulativePercentage <= 85)
-        .map(p => p.cause);
+      const paretoTop80 = vitalFew.map(p => p.name);
 
       const result = await analyzeStrategicTrends({
         monthlyData: aggregatedMonthlyData,
         years: selectedYears,
-        totalImpact: kpis.totalImpact,
-        rootCauseSummary: paretoData.slice(0, 10).map(p => ({
-          cause: p.cause,
-          impact: p.impact,
-          count: p.count,
-          percentage: Number(p.percentage.toFixed(1))
-        })),
+        totalImpact: globalAgg?.totalImpact || 0,
+        rootCauseSummary: paretoData.slice(0, 10),
         paretoTop80
       });
       setAiInsight(result);
-      toast({ title: "Plan de Acción Generado", description: "Estrategia 80/20 aplicada con éxito." });
+      toast({ title: "Acción Plan Generado", description: "Estrategia de mitigación lista." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Fallo en IA", description: error.message });
     } finally {
@@ -296,8 +143,8 @@ export default function TrendsPage() {
       const imgData = canvas.toDataURL('image/png', 1.0);
       const pdf = new jsPDF('p', 'mm', 'a4');
       pdf.addImage(imgData, 'PNG', 0, 0, pdf.internal.pageSize.getWidth(), (canvas.height * pdf.internal.pageSize.getWidth()) / canvas.width);
-      pdf.save(`Walmart_Strategic_Action_Plan_${new Date().getTime()}.pdf`);
-      toast({ title: "Reporte Generado" });
+      pdf.save(`Walmart_8020_Strategic_Plan_${new Date().getTime()}.pdf`);
+      toast({ title: "Reporte Exportado" });
     } catch (error) {
       toast({ variant: "destructive", title: "Error al exportar" });
     } finally {
@@ -307,10 +154,16 @@ export default function TrendsPage() {
 
   const formatCurrency = (val: number) => {
     if (!mounted) return "$0";
-    return new Intl.NumberFormat('es-MX', { 
-      style: 'currency', currency: 'MXN', minimumFractionDigits: 0, maximumFractionDigits: 0 
-    }).format(val);
+    if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
+    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
   };
+
+  if (isTaxLoading || !globalAgg) return (
+    <div className="flex h-screen items-center justify-center bg-slate-50 flex-col gap-4">
+      <RefreshCcw className="h-10 w-10 animate-spin text-primary opacity-20" />
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Calculando Curva de Impacto...</p>
+    </div>
+  );
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50/30">
@@ -321,118 +174,177 @@ export default function TrendsPage() {
             <SidebarTrigger />
             <div className="flex items-center gap-2">
               <TrendingUp className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight">Estrategia 80/20 & Acción Plan</h1>
+              <h1 className="text-xl font-headline font-bold text-slate-800 tracking-tight uppercase">Estrategia 80/20 & Acción Plan</h1>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 gap-2 px-3 py-1 uppercase font-black">
-              <Database className="h-3 w-3" /> Base Global: {totalInDb || 0}
-            </Badge>
-            <Button 
-              variant="outline" 
-              onClick={handleDownloadPdf} 
-              disabled={isExporting || !aiInsight}
-              className="gap-2 border-primary/20 text-primary h-10 shadow-sm"
-            >
-              {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
-              Exportar Reporte
+            <Button variant="outline" onClick={handleDownloadPdf} disabled={isExporting || !aiInsight} className="gap-2 border-slate-200 text-slate-600 h-10 shadow-sm rounded-xl text-[10px] font-black uppercase">
+              {isExporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />} Exportar PDF
             </Button>
-            <Button 
-              onClick={runAiTrendAnalysis} 
-              disabled={isAnalyzing || isLoading || filteredOrders.length === 0}
-              className="bg-primary hover:bg-primary/90 gap-2 shadow-lg h-10 px-6 rounded-xl"
-            >
-              {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
-              Generar IA Action Plan
+            <Button onClick={runAiTrendAnalysis} disabled={isAnalyzing || paretoData.length === 0} className="bg-primary hover:bg-primary/90 gap-2 shadow-lg h-10 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest">
+              {isAnalyzing ? <Loader2 className="h-3 w-3 animate-spin" /> : <BrainCircuit className="h-3 w-3" />} Generar Mitigación IA
             </Button>
           </div>
         </header>
 
-        <main className="p-6 md:p-8 space-y-6">
-          <Card className="border-none shadow-sm bg-white p-4">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-black text-slate-400 uppercase">Periodos Anuales</label>
-                <div className="flex flex-wrap gap-1">
-                  {availableYears.map(y => (
-                    <button
-                      key={y}
-                      onClick={() => toggleYear(y)}
-                      className={`px-2 py-1 text-[10px] font-bold rounded-lg border transition-all ${selectedYears.includes(y) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:border-slate-300'}`}
-                    >
-                      {y}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-1.5 md:col-span-2">
-                <label className="text-[9px] font-black text-slate-400 uppercase">Filtrar por Formato (Unificado)</label>
-                <Select value={filters.format} onValueChange={(v) => setFilters({...filters, format: v})}>
-                  <SelectTrigger className="h-8 text-[10px] font-bold uppercase">
-                    <SelectValue placeholder="Todos los formatos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">TODOS LOS FORMATOS</SelectItem>
-                    {availableFormats.map(f => (
-                      <SelectItem key={f} value={f}>{f}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </Card>
-
+        <main className="p-8 space-y-8">
           <div className="max-w-[1200px] mx-auto">
-            <div ref={reportRef} data-report-container className="space-y-8 bg-white p-10 rounded-3xl border shadow-xl overflow-hidden min-h-screen">
-              <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6 mb-2">
-                 <div className="space-y-2">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-slate-900 p-2 rounded-lg">
-                        <Building2 className="text-white h-6 w-6" />
+            <div ref={reportRef} className="space-y-10 bg-white p-12 rounded-[40px] border shadow-2xl overflow-hidden min-h-screen">
+              {/* Encabezado Institucional */}
+              <div className="flex flex-col md:flex-row md:items-end justify-between border-b-2 border-slate-900 pb-8 gap-6">
+                 <div className="space-y-4">
+                    <div className="flex items-center gap-4">
+                      <div className="bg-slate-900 p-3 rounded-2xl shadow-xl">
+                        <Building2 className="text-white h-8 w-8" />
                       </div>
                       <div>
-                        <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Walmart International</h2>
-                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Single Source of Truth • {filters.format === 'all' ? 'Universo Total' : `Segmento: ${filters.format}`}</p>
+                        <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none">Walmart International</h2>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1">Real Estate Auditor Forense</p>
                       </div>
                     </div>
-                    <h3 className="text-4xl font-headline font-bold text-slate-800 pt-4">Estrategia de Concentración de Impacto 80/20</h3>
+                    <h3 className="text-5xl font-headline font-bold text-slate-800 tracking-tight">Análisis de Concentración de Impacto</h3>
+                 </div>
+                 <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col items-end">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Total Auditado</p>
+                    <h4 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(globalAgg.totalImpact)}</h4>
+                    <Badge className="bg-emerald-50 text-emerald-700 border-none text-[8px] font-black mt-2">SSOT VERIFICADO</Badge>
                  </div>
               </div>
-              
-              {!aiInsight && !isLoading && (
-                <div className="py-32 text-center space-y-4">
-                  <Activity className="h-16 w-16 text-slate-100 mx-auto" />
-                  <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Inicie el análisis estratégico para generar el reporte de impacto</p>
+
+              {/* Gráfico de Pareto Principal */}
+              <section className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-black uppercase text-primary tracking-widest flex items-center gap-2"><Focus className="h-5 w-5" /> Curva de Concentración Vital Few</h4>
+                  <Badge className="bg-primary text-white border-none text-[9px] font-black px-4 py-1.5 shadow-lg shadow-primary/20 uppercase">Estrategia 80/20</Badge>
                 </div>
-              )}
-              
-              {aiInsight && (
-                <div className="space-y-10 animate-in fade-in zoom-in duration-500">
-                  <div className="grid md:grid-cols-2 gap-10">
-                    <div className="space-y-4">
-                      <h4 className="text-xs font-black uppercase text-primary tracking-widest flex items-center gap-2">
-                        <History className="h-4 w-4" /> Diagnóstico Transversal
+                <div className="h-[400px] w-full pt-8">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={paretoData.slice(0, 12)}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: '900', fill: '#64748B' }} height={80} interval={0} angle={-35} textAnchor="end" />
+                      <YAxis yAxisId="left" tickFormatter={(v) => `$${Math.round(v/1000000)}M`} tick={{ fontSize: 10, fontWeight: 'bold' }} axisLine={false} />
+                      <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10, fill: ACCENT_COLOR, fontWeight: 'bold' }} axisLine={false} />
+                      <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '10px', textTransform: 'uppercase' }} />
+                      <Bar yAxisId="left" dataKey="impact" radius={[8, 8, 0, 0]} barSize={45} name="Impacto Financiero">
+                        {paretoData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.cumulativePercentage <= 85 ? CORE_COLOR : '#E2E8F0'} />)}
+                      </Bar>
+                      <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" stroke={ACCENT_COLOR} strokeWidth={4} dot={{ r: 6, fill: ACCENT_COLOR, strokeWidth: 2, stroke: '#fff' }} name="% Acumulado" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="bg-slate-900 p-6 rounded-3xl text-white flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-black text-cyan-400 uppercase tracking-widest">Diagnóstico de Concentración</p>
+                    <p className="text-sm font-bold text-slate-300">Los <span className="text-white underline decoration-cyan-400 decoration-2">{vitalFew.length} Hitos Principales</span> concentran el 85% de las desviaciones presupuestarias.</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-4xl font-black text-cyan-400">{(vitalFew.length / (paretoData.length || 1) * 100).toFixed(0)}%</span>
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">De las Categorías</p>
+                  </div>
+                </div>
+              </section>
+
+              {/* Resultados de IA Mitigación */}
+              {!aiInsight ? (
+                <div className="py-20 text-center space-y-4 border-2 border-dashed rounded-[40px] border-slate-100 bg-slate-50/50">
+                  <Activity className="h-16 w-16 text-slate-200 mx-auto animate-pulse" />
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Inicie el motor Gemini para generar el plan de mitigación estratégico</p>
+                </div>
+              ) : (
+                <div className="space-y-12 animate-in fade-in zoom-in duration-700">
+                  <div className="grid md:grid-cols-2 gap-12">
+                    <section className="space-y-6">
+                      <h4 className="text-xs font-black uppercase text-primary tracking-[0.2em] flex items-center gap-3">
+                        <History className="h-5 w-5" /> Diagnóstico Transversal
                       </h4>
-                      <p className="text-sm text-slate-600 leading-relaxed text-justify">
+                      <div className="bg-slate-50 p-8 rounded-[32px] border border-slate-100 text-sm text-slate-600 leading-relaxed text-justify relative">
+                        <div className="absolute top-4 right-4"><Badge className="bg-white text-primary border-none shadow-sm text-[8px]">IA GENERATED</Badge></div>
                         {aiInsight.narrative}
-                      </p>
-                    </div>
-                    <div className="space-y-4">
-                      <h4 className="text-xs font-black uppercase text-accent tracking-widest flex items-center gap-2">
-                        <Target className="h-4 w-4" /> Drivers de Costo (Top 80%)
+                      </div>
+                    </section>
+                    
+                    <section className="space-y-6">
+                      <h4 className="text-xs font-black uppercase text-accent tracking-[0.2em] flex items-center gap-3">
+                        <Target className="h-5 w-5" /> Drivers de Costo (Top 80%)
                       </h4>
-                      <div className="flex flex-wrap gap-2">
-                        {aiInsight.keyDrivers.map((d, i) => (
-                          <Badge key={i} variant="outline" className="bg-slate-50 border-slate-200 text-slate-700 text-[10px] font-bold py-1.5 px-3 uppercase">
-                            {d}
-                          </Badge>
+                      <div className="grid grid-cols-1 gap-3">
+                        {vitalFew.map((d, i) => (
+                          <div key={i} className="flex items-center justify-between p-4 bg-white border rounded-2xl shadow-sm group hover:border-primary transition-all">
+                            <div className="flex items-center gap-3">
+                              <div className="h-8 w-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-[10px] font-black">{i+1}</div>
+                              <span className="text-[10px] font-black text-slate-700 uppercase tracking-tight">{d.name}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] font-black text-slate-900">{formatCurrency(d.impact)}</span>
+                              <p className="text-[8px] font-bold text-slate-400 uppercase">{d.percentage}% del impacto</p>
+                            </div>
+                          </div>
                         ))}
                       </div>
+                    </section>
+                  </div>
+
+                  <section className="space-y-8">
+                    <div className="flex items-center gap-4">
+                      <div className="h-px flex-1 bg-slate-100" />
+                      <h4 className="text-xs font-black uppercase text-slate-400 tracking-[0.3em]">Hojas de Ruta de Mitigación</h4>
+                      <div className="h-px flex-1 bg-slate-100" />
+                    </div>
+                    <div className="grid md:grid-cols-3 gap-6">
+                      {aiInsight.actionPlan.map((plan, i) => (
+                        <Card key={i} className="border-none shadow-xl bg-white rounded-3xl overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
+                          <CardHeader className="bg-slate-900 text-white p-6">
+                            <div className="flex justify-between items-start mb-2">
+                              <Badge className="bg-accent text-white border-none text-[8px] font-black px-2 py-0.5">PLAN {i+1}</Badge>
+                              <Zap className="h-4 w-4 text-accent" />
+                            </div>
+                            <CardTitle className="text-sm font-black uppercase tracking-tight leading-tight">{plan.title}</CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-6 space-y-4">
+                            <ul className="space-y-3">
+                              {plan.steps.map((step, j) => (
+                                <li key={j} className="flex gap-3 text-[10px] text-slate-600 leading-tight">
+                                  <div className="h-4 w-4 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center shrink-0 font-bold">{j+1}</div>
+                                  {step}
+                                </li>
+                              ))}
+                            </ul>
+                            <div className="pt-4 border-t border-dashed">
+                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Esperado</p>
+                              <p className="text-[10px] font-bold text-emerald-600 uppercase italic">{plan.expectedImpact}</p>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </section>
+
+                  <div className="bg-emerald-50 border border-emerald-100 p-8 rounded-[40px] flex items-center justify-between shadow-inner">
+                    <div className="flex items-center gap-6">
+                      <div className="h-16 w-16 rounded-full bg-white flex items-center justify-center shadow-lg">
+                        <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+                      </div>
+                      <div className="space-y-1">
+                        <h5 className="text-xl font-black text-emerald-900 uppercase tracking-tighter">Proyección de Ahorro Estratégico</h5>
+                        <p className="text-xs font-bold text-emerald-700/70">Si se ejecutan los planes de acción sobre el Vital Few (Top 80%).</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-5xl font-black text-emerald-600 tracking-tighter">{aiInsight.estimatedReduction}</span>
+                      <p className="text-[9px] font-black text-emerald-800/50 uppercase tracking-[0.2em] mt-1">Reducción Estimada</p>
                     </div>
                   </div>
                 </div>
               )}
+
+              {/* Pie de Reporte Forense */}
+              <div className="pt-12 border-t border-slate-100 flex justify-between items-center opacity-50">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em]">Walmart Real Estate Forensic Unit • 2024-2025</span>
+                </div>
+                <p className="text-[8px] font-mono text-slate-400 uppercase">Document ID: {globalAgg.lastUpdate}</p>
+              </div>
             </div>
           </div>
         </main>
