@@ -28,25 +28,23 @@
         { "fieldPath": "projectId", "order": "ASCENDING" },
         { "fieldPath": "__name__", "order": "ASCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "orders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "projectId", "order": "ASCENDING" },
-        { "fieldPath": "__name__", "order": "ASCENDING" }
-      ]
     }
   ],
   "fieldOverrides": [
     {
-      "collectionGroup": "orders",
-      "fieldPath": "disciplina_normalizada",
-      "indexes": [
-        { "queryScope": "COLLECTION", "order": "ASCENDING" },
-        { "queryScope": "COLLECTION", "order": "DESCENDING" },
-        { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" }
-      ]
+      "collectionGroup": "aggregates",
+      "fieldPath": "disciplines",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "aggregates",
+      "fieldPath": "rootCauses",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "aggregates",
+      "fieldPath": "formats",
+      "indexes": []
     }
   ]
 }
