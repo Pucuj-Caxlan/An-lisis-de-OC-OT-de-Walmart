@@ -75,31 +75,6 @@ export default function VpDashboard() {
   const paretoData = useMemo(() => {
     if (!taxonomyDocs) return [];
     
-    // Si no hay filtro, usamos la taxonomía agregada
-    if (formatFilter === 'all') {
-      const totalImpact = globalAgg?.totalImpact || 1;
-      let cumulative = 0;
-      
-      return taxonomyDocs.map((d, index) => {
-        cumulative += d.impact || 0;
-        const pct = totalImpact > 0 ? ((d.impact || 0) / totalImpact) * 100 : 0;
-        return {
-          id: d.id,
-          name: d.name || d.id,
-          value: d.impact || 0,
-          impact: d.impact || 0,
-          percentage: Number(pct.toFixed(1)),
-          cumulativePercentage: (cumulative / totalImpact) * 100,
-          count: d.count || 0,
-          color: COLORS[index % COLORS.length],
-          subs: d.subs || {}
-        };
-      });
-    }
-    
-    // Nota: El filtrado por formato idealmente vendría de una agregación por formato en DB.
-    // Para este MVP, mostramos los datos globales pero marcamos que es una visión agregada.
-    // En una fase 2, se recomienda procesar taxonomy_disciplines_{format}
     const totalImpact = globalAgg?.totalImpact || 1;
     let cumulative = 0;
     
@@ -108,7 +83,7 @@ export default function VpDashboard() {
       const pct = totalImpact > 0 ? ((d.impact || 0) / totalImpact) * 100 : 0;
       return {
         id: d.id,
-        name: d.name || d.id,
+        name: d.name || d.id || 'INDEFINIDA',
         value: d.impact || 0,
         impact: d.impact || 0,
         percentage: Number(pct.toFixed(1)),
@@ -141,6 +116,8 @@ export default function VpDashboard() {
     const { root, depth, x, y, width, height, index, name, impact, percentage, color } = props;
     if (width < 40 || height < 40) return null;
 
+    const safeName = String(name || 'INDEFINIDA');
+
     return (
       <g 
         className="cursor-pointer hover:opacity-80 transition-opacity" 
@@ -167,7 +144,7 @@ export default function VpDashboard() {
               fontWeight="900"
               className="uppercase tracking-tighter"
             >
-              {name.substring(0, 20)}
+              {safeName.substring(0, 20)}
             </text>
             <text
               x={x + 10}
@@ -322,7 +299,7 @@ export default function VpDashboard() {
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-8 overflow-y-auto custom-scrollbar">
                 {(activeTab === '80' ? vitalFew : usefulMany).map((item, i) => (
-                  <div key={`${item.name}-${i}`} className="group cursor-pointer" onClick={() => setSelectedDiscipline(item)}>
+                  <div key={`${item.id}-${i}`} className="group cursor-pointer" onClick={() => setSelectedDiscipline(item)}>
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex gap-3">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center text-[10px] font-black shrink-0 ${activeTab === '80' ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-400'}`}>

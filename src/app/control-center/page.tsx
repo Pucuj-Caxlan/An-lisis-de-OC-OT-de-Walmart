@@ -213,7 +213,7 @@ export default function ControlCenterPage() {
                       className="bg-transparent border-none text-[10px] font-black uppercase tracking-widest focus:ring-0 w-full text-slate-600 cursor-pointer"
                     >
                       <option value="all">CONCENTRADO TOTAL</option>
-                      {stats?.paretoDiscs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+                      {stats?.paretoDiscs.map((d, i) => <option key={`${d.id}-${i}`} value={d.name}>{d.name}</option>)}
                     </select>
                   </div>
                 </div>
@@ -227,7 +227,7 @@ export default function ControlCenterPage() {
                         <div className="space-y-1">
                           <div className="text-xs font-black text-slate-800 uppercase group-hover:text-primary transition-colors flex items-center gap-2">
                             {d.name}
-                            {d.cumulativePct <= 85 && <div className="h-1.5 w-1.5 rounded-full bg-orange-500" />}
+                            {d.cumulativePct <= 85 && <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />}
                           </div>
                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Principal Driver: <span className="text-slate-600">{d.topSubName}</span></p>
                         </div>
