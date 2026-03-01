@@ -18,7 +18,9 @@ import {
   Filter,
   PieChart as PieIcon,
   Maximize2,
-  Info,
+  Settings2,
+  Type,
+  Palette,
   ChevronRight,
   TrendingUp,
   X
@@ -45,13 +47,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { ScrollArea } from '@/components/ui/scroll-area';
 
-const COLORS = [
-  '#1E3A8A', '#2563EB', '#3B82F6', '#60A5FA', '#93C5FD', 
-  '#0F172A', '#334155', '#64748B', '#94A3B8', '#CBD5E1',
-  '#7C2D12', '#9A3412', '#C2410C', '#EA580C', '#F97316'
-];
+// Paletas de colores predeterminadas
+const THEMES = {
+  corporate: ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#000000', '#54585A', '#74767B'],
+  vibrant: ['#2563EB', '#D97706', '#059669', '#7C3AED', '#DB2777', '#DC2626', '#4B5563', '#0891B2', '#4F46E5', '#9333EA'],
+  ocean: ['#0C4A6E', '#075985', '#0369A1', '#0284C7', '#0EA5E9', '#38BDF8', '#7DD3FC', '#BAE6FD', '#E0F2FE', '#F0F9FF'],
+  safety: ['#1E3A8A', '#111827', '#B91C1C', '#92400E', '#065F46', '#3730A3', '#831843', '#450A0A', '#1E40AF', '#14532D']
+};
 
 export default function VpDashboard() {
   const db = useFirestore();
@@ -60,13 +69,16 @@ export default function VpDashboard() {
   const [formatFilter, setFormatFilter] = useState('all');
   const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
   const [selectedDiscipline, setSelectedDiscipline] = useState<any | null>(null);
+  
+  // Estados para configuración visual
+  const [colorTheme, setColorTheme] = useState<keyof typeof THEMES>('corporate');
+  const [textSize, setTextSize] = useState<'sm' | 'md' | 'lg'>('md');
 
   useEffect(() => { setMounted(true); }, []);
 
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // Consultar taxonomía (Hitos principales)
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: taxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
@@ -75,6 +87,7 @@ export default function VpDashboard() {
   const paretoData = useMemo(() => {
     if (!taxonomyDocs) return [];
     
+    const colors = THEMES[colorTheme];
     const totalImpact = globalAgg?.totalImpact || 1;
     let cumulative = 0;
     
@@ -89,11 +102,11 @@ export default function VpDashboard() {
         percentage: Number(pct.toFixed(1)),
         cumulativePercentage: (cumulative / totalImpact) * 100,
         count: d.count || 0,
-        color: COLORS[index % COLORS.length],
+        color: colors[index % colors.length],
         subs: d.subs || {}
       };
     });
-  }, [taxonomyDocs, globalAgg, formatFilter]);
+  }, [taxonomyDocs, globalAgg, colorTheme]);
 
   const vitalFew = useMemo(() => paretoData.filter(p => p.cumulativePercentage <= 85), [paretoData]);
   const usefulMany = useMemo(() => paretoData.filter(p => p.cumulativePercentage > 85), [paretoData]);
@@ -114,13 +127,21 @@ export default function VpDashboard() {
 
   const CustomizedContent = (props: any) => {
     const { root, depth, x, y, width, height, index, name, impact, percentage, color } = props;
-    if (width < 40 || height < 40) return null;
+    if (width < 45 || height < 45) return null;
 
     const safeName = String(name || 'INDEFINIDA');
+    
+    // Tamaños de texto dinámicos
+    const sizes = {
+      sm: { title: 9, meta: 8, pct: 12 },
+      md: { title: 11, meta: 9, pct: 16 },
+      lg: { title: 13, meta: 10, pct: 20 }
+    };
+    const currentSize = sizes[textSize];
 
     return (
       <g 
-        className="cursor-pointer hover:opacity-80 transition-opacity" 
+        className="cursor-pointer hover:opacity-90 transition-opacity" 
         onClick={() => setSelectedDiscipline(props)}
       >
         <rect
@@ -129,38 +150,40 @@ export default function VpDashboard() {
           width={width}
           height={height}
           style={{
-            fill: color || COLORS[index % COLORS.length],
+            fill: color,
             stroke: '#fff',
             strokeWidth: 2,
           }}
         />
-        {width > 60 && height > 40 && (
+        {width > 60 && height > 50 && (
           <>
             <text
               x={x + 10}
-              y={y + 20}
+              y={y + 22}
               fill="#fff"
-              fontSize={10}
+              fontSize={currentSize.title}
               fontWeight="900"
-              className="uppercase tracking-tighter"
+              className="uppercase tracking-tighter drop-shadow-md"
             >
-              {safeName.substring(0, 20)}
+              {safeName.substring(0, 25)}
             </text>
             <text
               x={x + 10}
-              y={y + 35}
-              fill="rgba(255,255,255,0.8)"
-              fontSize={9}
+              y={y + 38}
+              fill="rgba(255,255,255,0.9)"
+              fontSize={currentSize.meta}
               fontWeight="bold"
+              className="drop-shadow-sm"
             >
               {formatCurrency(impact)}
             </text>
             <text
               x={x + 10}
-              y={y + height - 10}
-              fill="rgba(255,255,255,0.6)"
-              fontSize={14}
+              y={y + height - 12}
+              fill="rgba(255,255,255,0.7)"
+              fontSize={currentSize.pct}
               fontWeight="900"
+              className="drop-shadow-lg"
             >
               {percentage}%
             </text>
@@ -187,6 +210,55 @@ export default function VpDashboard() {
           </div>
           
           <div className="flex items-center gap-4">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-9 gap-2 border-slate-200 text-[10px] font-black uppercase rounded-xl">
+                  <Settings2 className="h-3.5 w-3.5" /> Estilos
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-6 rounded-2xl shadow-2xl border-none">
+                <div className="space-y-6">
+                  <h4 className="text-xs font-black uppercase tracking-widest border-b pb-2 flex items-center gap-2">
+                    <Palette className="h-4 w-4 text-primary" /> Configuración Visual
+                  </h4>
+                  
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black uppercase text-slate-400">Tema de Colores</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.keys(THEMES).map((t) => (
+                        <Button 
+                          key={t}
+                          variant={colorTheme === t ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setColorTheme(t as any)}
+                          className="h-8 text-[9px] font-bold uppercase rounded-lg"
+                        >
+                          {t === 'corporate' ? 'Corporativo' : t === 'vibrant' ? 'Vibrante' : t === 'ocean' ? 'Océano' : 'Seguridad'}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black uppercase text-slate-400">Tamaño del Texto</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['sm', 'md', 'lg'] as const).map((s) => (
+                        <Button 
+                          key={s}
+                          variant={textSize === s ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setTextSize(s)}
+                          className="h-8 text-[9px] font-bold uppercase rounded-lg"
+                        >
+                          {s === 'sm' ? 'Pequeño' : s === 'md' ? 'Medio' : 'Grande'}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+
             <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border">
               <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={formatFilter} onValueChange={setFormatFilter}>
@@ -255,7 +327,13 @@ export default function VpDashboard() {
                   </CardTitle>
                   <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Visualización por Disciplina y Volumen Económico</CardDescription>
                 </div>
-                <Badge className="bg-primary text-white border-none text-[9px] font-black px-5 py-2 shadow-xl shadow-primary/20 rounded-full">JERARQUÍA PARETO</Badge>
+                <div className="flex items-center gap-3">
+                   <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 rounded-lg border">
+                      <Type className="h-3 w-3 text-slate-400" />
+                      <span className="text-[8px] font-black text-slate-500 uppercase">{textSize === 'sm' ? 'Pequeño' : textSize === 'md' ? 'Mediano' : 'Grande'}</span>
+                   </div>
+                   <Badge className="bg-primary text-white border-none text-[9px] font-black px-5 py-2 shadow-xl shadow-primary/20 rounded-full">JERARQUÍA PARETO</Badge>
+                </div>
               </CardHeader>
               <CardContent className="h-[550px] p-8">
                 <ResponsiveContainer width="100%" height="100%">
