@@ -23,7 +23,8 @@ import {
   Palette,
   ChevronRight,
   TrendingUp,
-  X
+  X,
+  ArrowUpRight
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -31,7 +32,7 @@ import {
   Treemap
 } from 'recharts';
 import { useFirestore, useMemoFirebase, useUser, useDoc, useCollection } from '@/firebase';
-import { doc, collection, orderBy, query, where } from 'firebase/firestore';
+import { doc, collection, orderBy, query, where, limit } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
@@ -76,40 +77,105 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
+  // 1. Datos Globales Pre-calculados
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
-  const { data: taxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
+  const { data: globalTaxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
+
+  // 2. Datos específicos por Formato (Agregación en tiempo real)
+  const formatOrdersQuery = useMemoFirebase(() => {
+    if (!db || formatFilter === 'all') return null;
+    return query(
+      collection(db, 'orders'), 
+      where('format', '==', formatFilter),
+      limit(3000) // Límite razonable para agregación en cliente para el dashboard
+    );
+  }, [db, formatFilter]);
+
+  const { data: formatOrders, isLoading: isOrdersLoading } = useCollection(formatOrdersQuery);
 
   const formats = ["SAMS CLUB", "WALMART SUPERCENTER", "BODEGA AURRERA", "WALMART EXPRESS", "MI BODEGA"];
 
-  const paretoData = useMemo(() => {
-    if (!taxonomyDocs) return [];
-    
+  // 3. Lógica de Procesamiento Pareto & Formato
+  const processedData = useMemo(() => {
     const colors = THEMES[colorTheme];
-    const totalImpact = globalAgg?.totalImpact || 1;
-    let cumulative = 0;
     
-    return taxonomyDocs.map((d, index) => {
-      cumulative += d.impact || 0;
-      const pct = totalImpact > 0 ? ((d.impact || 0) / totalImpact) * 100 : 0;
+    // CASO A: Filtro GLOBAL (Usa taxonomía pre-calculada)
+    if (formatFilter === 'all') {
+      if (!globalTaxonomyDocs) return { pareto: [], totalImpact: globalAgg?.totalImpact || 0, totalCount: globalAgg?.totalProcessed || 0 };
+      
+      const totalImpact = globalAgg?.totalImpact || 1;
+      let cumulative = 0;
+      
+      const pareto = globalTaxonomyDocs.map((d, index) => {
+        cumulative += d.impact || 0;
+        const pct = totalImpact > 0 ? ((d.impact || 0) / totalImpact) * 100 : 0;
+        return {
+          id: d.id,
+          name: d.name || d.id || 'INDEFINIDA',
+          value: d.impact || 0,
+          impact: d.impact || 0,
+          percentage: Number(pct.toFixed(1)),
+          cumulativePercentage: (cumulative / totalImpact) * 100,
+          count: d.count || 0,
+          color: colors[index % colors.length],
+          subs: d.subs || {}
+        };
+      });
+
+      return { pareto, totalImpact, totalCount: globalAgg?.totalProcessed || 0 };
+    }
+
+    // CASO B: Filtro por FORMATO (Agrega desde órdenes cargadas)
+    if (!formatOrders) return { pareto: [], totalImpact: 0, totalCount: 0 };
+
+    const discMap: Record<string, any> = {};
+    let totalFormatImpact = 0;
+
+    formatOrders.forEach(order => {
+      const disc = order.disciplina_normalizada || 'INDEFINIDA';
+      const sub = order.subcausa_normalizada || 'SIN SUB-DISCIPLINA';
+      const impact = order.impactoNeto || 0;
+
+      totalFormatImpact += impact;
+
+      if (!discMap[disc]) {
+        discMap[disc] = { name: disc, impact: 0, count: 0, subs: {} };
+      }
+      discMap[disc].impact += impact;
+      discMap[disc].count += 1;
+
+      if (!discMap[disc].subs[sub]) {
+        discMap[disc].subs[sub] = { impact: 0, count: 0 };
+      }
+      discMap[disc].subs[sub].impact += impact;
+      discMap[disc].subs[sub].count += 1;
+    });
+
+    const sortedDiscs = Object.values(discMap).sort((a: any, b: any) => b.impact - a.impact);
+    let cumulativeFormat = 0;
+
+    const pareto = sortedDiscs.map((d: any, index) => {
+      cumulativeFormat += d.impact;
+      const pct = totalFormatImpact > 0 ? (d.impact / totalFormatImpact) * 100 : 0;
       return {
-        id: d.id,
-        name: d.name || d.id || 'INDEFINIDA',
-        value: d.impact || 0,
-        impact: d.impact || 0,
+        ...d,
+        id: d.name,
+        value: d.impact,
         percentage: Number(pct.toFixed(1)),
-        cumulativePercentage: (cumulative / totalImpact) * 100,
-        count: d.count || 0,
-        color: colors[index % colors.length],
-        subs: d.subs || {}
+        cumulativePercentage: (cumulativeFormat / totalFormatImpact) * 100,
+        color: colors[index % colors.length]
       };
     });
-  }, [taxonomyDocs, globalAgg, colorTheme]);
 
-  const vitalFew = useMemo(() => paretoData.filter(p => p.cumulativePercentage <= 85), [paretoData]);
-  const usefulMany = useMemo(() => paretoData.filter(p => p.cumulativePercentage > 85), [paretoData]);
+    return { pareto, totalImpact: totalFormatImpact, totalCount: formatOrders.length };
+
+  }, [formatFilter, globalTaxonomyDocs, globalAgg, formatOrders, colorTheme]);
+
+  const vitalFew = useMemo(() => processedData.pareto.filter(p => p.cumulativePercentage <= 85), [processedData]);
+  const usefulMany = useMemo(() => processedData.pareto.filter(p => p.cumulativePercentage > 85), [processedData]);
 
   const formatCurrency = (val: number) => {
     if (!mounted) return "$0";
@@ -117,7 +183,7 @@ export default function VpDashboard() {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
   };
 
-  if (isTaxLoading || !isAuthReady) {
+  if ((isTaxLoading || isOrdersLoading) && !processedData.pareto.length) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
         <RefreshCcw className="h-10 w-10 animate-spin text-primary opacity-20" />
@@ -165,7 +231,7 @@ export default function VpDashboard() {
               fontWeight="900"
               className="uppercase tracking-tighter drop-shadow-md"
             >
-              {safeName.substring(0, 25)}
+              {safeName.length > 20 ? safeName.substring(0, 18) + '...' : safeName}
             </text>
             <text
               x={x + 10}
@@ -272,7 +338,7 @@ export default function VpDashboard() {
               </Select>
             </div>
             <Badge variant="outline" className="h-9 bg-emerald-50 text-emerald-700 border-emerald-100 gap-2 px-4 uppercase font-black text-[9px] rounded-xl shadow-sm">
-              <CheckCircle2 className="h-3.5 w-3.5" /> Integridad IA: {globalAgg?.totalProcessed || 0}
+              <CheckCircle2 className="h-3.5 w-3.5" /> Integridad IA: {processedData.totalCount.toLocaleString()}
             </Badge>
           </div>
         </header>
@@ -284,8 +350,10 @@ export default function VpDashboard() {
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Impacto Materializado</p>
                 <DollarSign className="h-4 w-4 text-primary opacity-20 group-hover:scale-110 transition-transform" />
               </div>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(globalAgg?.totalImpact || 0)}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Impacto Acumulado 2024-2025</p>
+              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(processedData.totalImpact)}</h2>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">
+                {formatFilter === 'all' ? 'Impacto Acumulado Global' : `Impacto en ${formatFilter}`}
+              </p>
             </Card>
 
             <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl relative overflow-hidden">
@@ -303,7 +371,7 @@ export default function VpDashboard() {
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Registros Auditados</p>
                 <Layers className="h-4 w-4 text-blue-600 opacity-20" />
               </div>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{(globalAgg?.totalProcessed || 0).toLocaleString()}</h2>
+              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{processedData.totalCount.toLocaleString()}</h2>
               <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Normalizados por Gemini 2.5</p>
             </Card>
 
@@ -325,7 +393,9 @@ export default function VpDashboard() {
                     <Maximize2 className="h-5 w-5" /> 
                     Mapa de Calor: Concentración de Impacto
                   </CardTitle>
-                  <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Visualización por Disciplina y Volumen Económico</CardDescription>
+                  <CardDescription className="text-[10px] font-bold uppercase text-slate-400">
+                    {formatFilter === 'all' ? 'Visualización Global de Disciplinas' : `Impacto Detallado para ${formatFilter}`}
+                  </CardDescription>
                 </div>
                 <div className="flex items-center gap-3">
                    <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 rounded-lg border">
@@ -338,7 +408,7 @@ export default function VpDashboard() {
               <CardContent className="h-[550px] p-8">
                 <ResponsiveContainer width="100%" height="100%">
                   <Treemap
-                    data={paretoData.slice(0, 20)}
+                    data={processedData.pareto.slice(0, 20)}
                     dataKey="value"
                     stroke="#fff"
                     content={<CustomizedContent />}
@@ -396,7 +466,7 @@ export default function VpDashboard() {
                     <div className="relative h-1.5 w-full bg-slate-50 rounded-full overflow-hidden">
                       <div 
                         className={`h-full transition-all duration-1000 ${activeTab === '80' ? 'bg-primary' : 'bg-slate-300'}`} 
-                        style={{ width: `${item.percentage * 4}%` }} 
+                        style={{ width: `${Math.min(100, item.percentage * 4)}%` }} 
                       />
                     </div>
                   </div>
@@ -408,7 +478,7 @@ export default function VpDashboard() {
                   <Zap className="h-4 w-4 text-accent animate-pulse" />
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed italic border-l-2 border-accent pl-4">
-                  En el formato <span className="text-white font-bold">{formatFilter === 'all' ? 'GLOBAL' : formatFilter}</span>, las primeras {vitalFew.length} disciplinas concentran el 85% de la variabilidad presupuestaria. Se recomienda un plan de mitigación enfocado en <span className="text-white font-bold">{vitalFew[0]?.name}</span>.
+                  En el formato <span className="text-white font-bold">{formatFilter === 'all' ? 'GLOBAL' : formatFilter}</span>, las primeras {vitalFew.length} disciplinas concentran el 85% de la variabilidad presupuestaria. Se recomienda un plan de mitigación enfocado en <span className="text-white font-bold">{vitalFew[0]?.name || 'el Hito Principal'}</span>.
                 </p>
               </div>
             </Card>
@@ -426,7 +496,7 @@ export default function VpDashboard() {
                 </div>
               </div>
               <DialogTitle className="text-3xl font-black uppercase tracking-tighter">{selectedDiscipline?.name}</DialogTitle>
-              <p className="text-slate-400 text-sm mt-2 font-medium">Esta disciplina representa el <span className="text-accent font-bold">{selectedDiscipline?.percentage}%</span> de las desviaciones totales de Walmart.</p>
+              <p className="text-slate-400 text-sm mt-2 font-medium">Esta disciplina representa el <span className="text-accent font-bold">{selectedDiscipline?.percentage}%</span> de las desviaciones en el segmento seleccionado.</p>
             </div>
             <ScrollArea className="max-h-[60vh] p-10">
               <div className="space-y-10">
@@ -457,7 +527,7 @@ export default function VpDashboard() {
                     <h4 className="text-xs font-black uppercase text-primary tracking-[0.2em]">Recomendación de Mitigación</h4>
                   </div>
                   <p className="text-xs text-slate-600 leading-relaxed italic">
-                    Debido a que <span className="font-bold text-slate-800">{selectedDiscipline?.name}</span> es un componente del Vital Few, se recomienda realizar una auditoría de diseño inmediata en este rubro para reducir la variabilidad en al menos un <span className="text-primary font-bold">15% anual</span>.
+                    Debido a que <span className="font-bold text-slate-800">{selectedDiscipline?.name}</span> es un componente del Vital Few, se recomienda realizar una auditoría de diseño inmediata en este rubro para reducir la variabilidad presupuestaria.
                   </p>
                 </section>
               </div>
