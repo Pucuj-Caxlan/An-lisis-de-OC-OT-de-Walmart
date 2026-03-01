@@ -28,7 +28,8 @@ import {
   Activity,
   Database,
   Focus,
-  CheckCircle2
+  CheckCircle2,
+  RefreshCcw
 } from 'lucide-react';
 import {
   AreaChart,
@@ -109,7 +110,6 @@ export default function TrendsPage() {
     if (paretoData.length === 0) return;
     setIsAnalyzing(true);
     try {
-      // Mock de datos mensuales para el flujo (basado en el promedio)
       const aggregatedMonthlyData = MONTH_NAMES.map(name => ({
         month: name,
         impact: (globalAgg?.totalImpact || 0) / 12,
@@ -343,7 +343,7 @@ export default function TrendsPage() {
                   <ShieldCheck className="h-4 w-4 text-emerald-600" />
                   <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em]">Walmart Real Estate Forensic Unit • 2024-2025</span>
                 </div>
-                <p className="text-[8px] font-mono text-slate-400 uppercase">Document ID: {globalAgg.lastUpdate}</p>
+                <p className="text-[8px] font-mono text-slate-400 uppercase">Document ID: {globalAgg?.lastUpdate || 'N/A'}</p>
               </div>
             </div>
           </div>
