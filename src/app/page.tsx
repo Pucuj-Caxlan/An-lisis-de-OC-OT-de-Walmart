@@ -45,7 +45,7 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Cargar Global Stats (Para validación SSOT)
+  // 1. Cargar Global Stats (SSOT Real)
   const globalAggRef = doc(db!, 'aggregates', 'global_stats');
   const { data: globalAgg } = useDoc(globalAggRef);
 
@@ -53,7 +53,7 @@ export default function VpDashboard() {
   const formatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('name', 'asc')) : null, [db]);
   const { data: availableFormats } = useCollection(formatsQuery);
 
-  // 3. Cargar Datos Materializados (Agregados optimizados por Purge & Rebuild)
+  // 3. Cargar Datos Materializados
   const analyticsPath = formatFilter === 'all' 
     ? 'taxonomy_disciplines' 
     : `aggregates/format_analytics/formats/${formatFilter}/disciplines_stats`;
@@ -175,7 +175,7 @@ export default function VpDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <Card className="border-none shadow-md bg-white border-l-4 border-l-primary p-6 rounded-3xl">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Materializado</p>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(processedData.totalImpact)}</h2>
+              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(formatFilter === 'all' ? (globalAgg?.totalImpact || 0) : processedData.totalImpact)}</h2>
               <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Segmento: {formatFilter === 'all' ? 'GLOBAL' : formatFilter.toUpperCase()}</p>
             </Card>
             <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl">
@@ -185,7 +185,9 @@ export default function VpDashboard() {
             </Card>
             <Card className="border-none shadow-md bg-white border-l-4 border-l-blue-600 p-6 rounded-3xl">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Muestra de Segmento</p>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{processedData.totalCount.toLocaleString()}</h2>
+              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">
+                {(formatFilter === 'all' ? (globalAgg?.totalOrders || 0) : processedData.totalCount).toLocaleString()}
+              </h2>
               <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Registros en Vista</p>
             </Card>
             <Card className="border-none shadow-md bg-white border-l-4 border-l-emerald-500 p-6 rounded-3xl">

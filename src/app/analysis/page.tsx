@@ -49,11 +49,34 @@ export default function AnalysisPage() {
   const { data: globalAgg } = useDoc(aggRef);
 
   /**
+   * Helper para purgar colecciones de forma recursiva (Elimina el 100% de los residuos)
+   */
+  const purgeCollectionCompletely = async (db: Firestore, collPath: string) => {
+    let hasMore = true;
+    while (hasMore) {
+      const snap = await getDocs(query(collection(db, collPath), limit(500)));
+      if (snap.empty) {
+        hasMore = false;
+        break;
+      }
+      const batch = writeBatch(db);
+      snap.forEach(d => batch.delete(d.ref));
+      await batch.commit().catch(() => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: collPath,
+          operation: 'delete'
+        }));
+      });
+      if (snap.size < 500) hasMore = false;
+    }
+  };
+
+  /**
    * Helper robusto para guardar taxonomías en bloques de 500
    */
   const saveTaxonomyInChunks = async (db: Firestore, collPath: string, stats: Record<string, any>, buildMetadata: any) => {
     const entries = Object.entries(stats);
-    const CHUNK_SIZE = 400; // Conservador frente al límite de 500
+    const CHUNK_SIZE = 400; 
 
     for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
       const chunk = entries.slice(i, i + CHUNK_SIZE);
@@ -90,21 +113,11 @@ export default function AnalysisPage() {
       const totalSnapshot = await getCountFromServer(collection(db, 'orders'));
       const totalCount = totalSnapshot.data().count;
 
-      // 2. FASE DE PURGA
-      setSyncStep('Fase de Purga: Eliminando Agregados Obsoletos...');
+      // 2. FASE DE PURGA PROFUNDA (ELIMINA EL 100% DE LOS RESIDUOS)
+      setSyncStep('Fase de Purga Profunda: Eliminando todos los residuos...');
       const collectionsToPurge = ['taxonomy_formats', 'taxonomy_disciplines', 'taxonomy_causes'];
       for (const coll of collectionsToPurge) {
-        const snap = await getDocs(query(collection(db, coll), limit(500)));
-        if (!snap.empty) {
-          const batch = writeBatch(db);
-          snap.forEach(d => batch.delete(d.ref));
-          await batch.commit().catch(() => {
-             errorEmitter.emit('permission-error', new FirestorePermissionError({
-               path: coll,
-               operation: 'delete'
-             }));
-          });
-        }
+        await purgeCollectionCompletely(db, coll);
       }
 
       // 3. FASE DE ESCANEO Y ACUMULACIÓN
@@ -118,7 +131,7 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '2.0.1-forensic'
+        build_version: '2.0.2-strict'
       };
 
       const globalFormatStats: Record<string, { impact: number, count: number, disciplines: Record<string, { impact: number, count: number }> }> = {};
@@ -212,16 +225,19 @@ export default function AnalysisPage() {
           totalOrders: stats.count
         });
 
-        // Disciplinas por formato (Sub-agregado)
+        // Limpiar sub-colección antes de guardar
+        const discPath = `aggregates/format_analytics/formats/${formatId}/disciplines_stats`;
+        await purgeCollectionCompletely(db, discPath);
+
         await saveTaxonomyInChunks(
           db, 
-          `aggregates/format_analytics/formats/${formatId}/disciplines_stats`, 
+          discPath, 
           stats.disciplines, 
           buildMetadata
         );
       }
 
-      toast({ title: "Sincronización Exitosa", description: "Universo 80/20 reconstruido sin duplicados." });
+      toast({ title: "Sincronización Exitosa", description: "Universo 80/20 reconstruido con limpieza total." });
     } catch (e: any) {
       console.error(e);
       toast({ variant: "destructive", title: "Error en Reconstrucción", description: e.message });
@@ -263,7 +279,7 @@ export default function AnalysisPage() {
                 <span className="text-4xl font-black text-accent">{syncProgress}%</span>
               </div>
               <Progress value={syncProgress} className="h-3 bg-white/10" />
-              <p className="text-xs text-slate-400 italic">Limpiando agregados obsoletos y reconstruyendo SSOT desde la colección orders...</p>
+              <p className="text-xs text-slate-400 italic">Limpiando agregados obsoletos de forma recursiva para garantizar congruencia total.</p>
             </Card>
           )}
 
@@ -294,7 +310,7 @@ export default function AnalysisPage() {
                <History className="h-10 w-10 text-slate-300" />
                <div className="space-y-1">
                  <h4 className="text-sm font-black uppercase text-slate-800">Historial de Integridad</h4>
-                 <p className="text-xs text-slate-500">Cada vez que sincronizas, el sistema borra los conteos previos y vuelve a sumar desde cero para evitar duplicados.</p>
+                 <p className="text-xs text-slate-500">Cada vez que sincronizas, el sistema borra el 100% de los conteos previos para evitar duplicados y "datos fantasma".</p>
                </div>
              </div>
              <div className="space-y-4">
