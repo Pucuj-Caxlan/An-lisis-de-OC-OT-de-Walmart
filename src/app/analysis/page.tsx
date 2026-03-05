@@ -92,6 +92,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -131,7 +133,6 @@ export default function AnalysisPage() {
     } else if (disciplineFilter === 'unclassified') {
       baseQuery = query(q, where('classification_status', '==', 'pending'), orderBy('projectId', 'asc'), limit(pageSize));
     } else {
-      // Búsqueda normalizada en mayúsculas
       const cleanDisc = String(disciplineFilter).trim().toUpperCase();
       baseQuery = query(q, where('disciplina_normalizada', '==', cleanDisc));
       
@@ -224,14 +225,9 @@ export default function AnalysisPage() {
       let hasMore = true;
       const CHUNK_SIZE = 3000;
 
+      // Escaneo integral del 100% de la base para capturar todos los formatos (incluyendo pendientes)
       while (hasMore) {
-        let q = query(
-          colRef, 
-          where('classification_status', '!=', 'pending'), 
-          orderBy('classification_status'),
-          limit(CHUNK_SIZE)
-        );
-        
+        let q = query(colRef, orderBy(documentId(), 'asc'), limit(CHUNK_SIZE));
         if (lastVisible) q = query(q, startAfter(lastVisible));
         const querySnapshot = await getDocs(q);
         
@@ -242,30 +238,35 @@ export default function AnalysisPage() {
 
         querySnapshot.forEach(d => {
           const data = d.data();
-          let disc = String(data.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
-          let sub = String(data.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
-          let cause = String(data.causa_raiz_normalizada || 'SIN DEFINIR').trim().toUpperCase();
-          let format = String(data.format || 'SIN FORMATO').trim().toUpperCase();
-          const impact = data.impactoNeto || 0;
-          
+          const impact = Number(data.impactoNeto || 0);
           totalCalculatedImpact += impact;
-          totalProcessedInSync++;
 
-          if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
-          discMap[disc].impact += impact;
-          discMap[disc].count += 1;
-          
-          if (!discMap[disc].subs[sub]) discMap[disc].subs[sub] = { impact: 0, count: 0 };
-          discMap[disc].subs[sub].impact += impact;
-          discMap[disc].subs[sub].count += 1;
-
-          if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
-          causeMap[cause].impact += impact;
-          causeMap[cause].count += 1;
-
+          // Catalogar Formatos (Independiente del estado de auditoría)
+          let formatRaw = data.format || 'SIN FORMATO';
+          let format = String(formatRaw).trim().toUpperCase();
           if (!formatMap[format]) formatMap[format] = { impact: 0, count: 0 };
           formatMap[format].impact += impact;
           formatMap[format].count += 1;
+
+          // Solo catalogar Disciplinas/Causas para registros ya auditados
+          if (data.classification_status !== 'pending') {
+            totalProcessedInSync++;
+            let disc = String(data.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
+            let sub = String(data.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
+            let cause = String(data.causa_raiz_normalizada || 'SIN DEFINIR').trim().toUpperCase();
+
+            if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
+            discMap[disc].impact += impact;
+            discMap[disc].count += 1;
+            
+            if (!discMap[disc].subs[sub]) discMap[disc].subs[sub] = { impact: 0, count: 0 };
+            discMap[disc].subs[sub].impact += impact;
+            discMap[disc].subs[sub].count += 1;
+
+            if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
+            causeMap[cause].impact += impact;
+            causeMap[cause].count += 1;
+          }
         });
 
         lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
@@ -281,7 +282,13 @@ export default function AnalysisPage() {
             const safeId = name.replace(/[\/\s\.]+/g, '_').substring(0, 100);
             batch.set(doc(db, coll, safeId), { ...data, id: safeId, name: name, lastUpdate: new Date().toISOString() });
           });
-          await batch.commit();
+          await batch.commit().catch(async (e) => {
+             errorEmitter.emit('permission-error', new FirestorePermissionError({
+               path: coll,
+               operation: 'write'
+             }));
+             throw e;
+          });
         }
       };
 
@@ -298,10 +305,12 @@ export default function AnalysisPage() {
 
       toast({ 
         title: "Hitos Sincronizados", 
-        description: `Se procesaron ${totalProcessedInSync} registros del universo.` 
+        description: `Se detectaron ${Object.keys(formatMap).length} formatos en ${totalInDbCount} registros.` 
       });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Fallo de Sincronización", description: e.message });
+      if (e.code !== 'permission-denied') {
+        toast({ variant: "destructive", title: "Fallo de Sincronización", description: e.message });
+      }
     } finally {
       setIsRefreshingStats(false);
     }
