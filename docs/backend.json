@@ -6,58 +6,22 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "importBatchId": { "type": "string" },
-        "envelopeId": { "type": "string", "description": "DocuSign Envelope ID" },
-        "orderNumber": { "type": "string", "description": "#" },
-        "projectId": { "type": "string", "description": "PID/ID TRIRIGA" },
+        "format_origin": { "type": "string", "description": "Valor original del Excel" },
+        "format_normalized": { "type": "string", "enum": ["BAE", "BA", "MB", "SC", "WSC", "WE", "OTRO"] },
+        "projectId": { "type": "string" },
         "projectName": { "type": "string" },
-        "type": { "type": "string" },
-        "format": { "type": "string" },
-        "country": { "type": "string", "description": "País" },
-        "state": { "type": "string", "description": "Estado" },
-        "municipality": { "type": "string", "description": "Municipio" },
-        "coordinador": { "type": "string" },
-        "plan": { "type": "string" },
-        "projectStage": { "type": "string", "description": "Etapa del Proyecto" },
-        "causaRaiz": { "type": "string" },
-        "descripcion": { "type": "string" },
-        "montoDeductiva": { "type": "number" },
-        "montoAditiva": { "type": "number" },
         "impactoNeto": { "type": "number" },
-        "areaSolicitante": { "type": "string" },
-        "generadorDesviacion": { "type": "string" },
-        "areaEjerceRecursoDeductiva": { "type": "string" },
-        "areaEjerceRecursoAditiva": { "type": "string" },
-        "estatus": { "type": "string" },
-        "fechaSolicitud": { "type": "string", "format": "date-time" },
-        "fechaAprobacionGerente": { "type": "string", "format": "date-time" },
-        "fechaPptoProyectista": { "type": "string", "format": "date-time" },
-        "noRechazo": { "type": "string" },
-        "motivoRechazo": { "type": "string" },
-        "fechaRetraso": { "type": "string", "format": "date-time" },
-        "fechaAprobacionLider": { "type": "string", "format": "date-time" },
-        "importeProy": { "type": "number" },
-        "importeObra": { "type": "number" },
-        "importeCompras": { "type": "number" },
-        "proveedor": { "type": "string" },
-        "isSigned": { "type": "boolean" },
         "disciplina_normalizada": { "type": "string" },
-        "causa_raiz_normalizada": { "type": "string" },
-        "classification_status": { "type": "string", "enum": ["pending", "auto", "reviewed"] },
-        "processedAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["projectId", "impactoNeto"]
+        "classification_status": { "type": "string" }
+      }
     },
-    "GlobalAggregate": {
-      "title": "Global Aggregate",
+    "FormatAggregate": {
+      "title": "Format Aggregate",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "totalOrders": { "type": "number" },
         "totalImpact": { "type": "number" },
-        "lastUpdate": { "type": "string", "format": "date-time" },
-        "disciplines": { "type": "object" },
-        "rootCauses": { "type": "object" }
+        "totalOrders": { "type": "number" },
+        "lastUpdate": { "type": "string", "format": "date-time" }
       }
     }
   },
@@ -65,11 +29,8 @@
     "providers": ["password", "anonymous"]
   },
   "firestore": {
-    "/orders/{orderId}": { 
-      "schema": "Order", 
-      "description": "Universo de registros OC/OT. Requiere índices compuestos para filtros por estatus y PID." 
-    },
-    "/aggregates/{aggId}": { "schema": "GlobalAggregate", "description": "Metadatos materializados para dashboards" },
-    "/audit_logs/{logId}": { "schema": "AuditLog", "description": "Logs de auditoría" }
+    "/orders/{orderId}": { "schema": "Order", "description": "Registros de órdenes normalizados" },
+    "/aggregates/format_analytics/formats/{formatId}": { "schema": "FormatAggregate", "description": "Totales por formato" },
+    "/aggregates/format_analytics/formats/{formatId}/disciplines/{discId}": { "schema": "object", "description": "Desglose de impacto por disciplina y formato" }
   }
 }

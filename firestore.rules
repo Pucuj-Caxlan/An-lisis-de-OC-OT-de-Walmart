@@ -2,42 +2,30 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Versión 2.5.0 - Optimización para Sincronización Masiva y Auditoría Forense
-    
-    // 1. Acceso a Órdenes
+    // Reglas de Auditoría Walmart - Acceso Total a Usuarios Autenticados
     match /orders/{id} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read, write: if request.auth != null;
     }
     
-    // 2. Colecciones de Soporte y Taxonomía (Permitir acceso total a usuarios autenticados)
-    // Usamos {document=**} para asegurar que cualquier sub-ruta o ID complejo sea permitido
-    match /taxonomy_disciplines/{document=**} { allow read, write: if request.auth != null; }
-    match /taxonomy_causes/{document=**} { allow read, write: if request.auth != null; }
-    match /taxonomy_formats/{document=**} { allow read, write: if request.auth != null; }
-    match /classification_overrides/{document=**} { allow read, write: if request.auth != null; }
-    
-    // Agregados y Estadísticas
-    match /aggregates/{document=**} { 
-      allow read, write: if request.auth != null; 
+    match /aggregates/{document=**} {
+      allow read, write: if request.auth != null;
     }
 
-    // 3. Procesos Operativos y Auditoría
-    match /audits/{id} { allow read, write: if request.auth != null; }
-    match /audit_logs/{id} { allow read, write: if request.auth != null; }
-    match /deletion_jobs/{id} { allow read, write: if request.auth != null; }
-    match /word_cloud_snapshots/{id} { allow read, write: if request.auth != null; }
-    match /importBatches/{id} { allow read, write: if request.auth != null; }
-    
-    // 4. Perfiles de Usuario
+    match /taxonomy_formats/{id} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /taxonomy_disciplines/{id} {
+      allow read, write: if request.auth != null;
+    }
+
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // 5. Regla Global de Respaldo (Bloqueo preventivo de escritura no especificada)
     match /{document=**} {
       allow read: if request.auth != null;
-      allow write: if false; 
+      allow write: if request.auth != null;
     }
   }
 }
