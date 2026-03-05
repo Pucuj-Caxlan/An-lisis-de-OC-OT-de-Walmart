@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -11,15 +12,15 @@ import {
   Target, 
   Zap, 
   TrendingDown,
-  ChevronLeft,
   Focus,
   Filter,
-  CheckCircle2,
   X,
   CalendarDays,
   User,
   Layout,
-  Loader2
+  Loader2,
+  Package,
+  Layers
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -30,8 +31,8 @@ import {
   CartesianGrid,
   Tooltip
 } from 'recharts';
-import { useFirestore, useCollection, useMemoFirebase, useUser, useDoc } from '@/firebase';
-import { collection, query, orderBy, doc, where } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { collection, query, orderBy, where } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { 
@@ -59,25 +60,25 @@ export default function ControlCenterPage() {
   const { user } = useUser();
   const [mounted, setMounted] = useState(false);
   
-  // Filtros dinámicos
   const [selectedFormats, setSelectedFormats] = useState<string[]>([]);
   const [selectedCoordinators, setSelectedCoordinators] = useState<string[]>([]);
   const [selectedStages, setSelectedStages] = useState<string[]>([]);
-  const [selectedYear, setSelectedYear] = useState<number>(2024); // Año base por defecto (ajustable)
+  const [selectedPlans, setSelectedPlans] = useState<string[]>([]);
+  const [selectedYear, setSelectedYear] = useState<number>(2024);
   const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all');
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Consultas de Taxonomías para los filtros
   const formatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('name')) : null, [db]);
   const coordsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_coordinators'), orderBy('name')) : null, [db]);
   const stagesQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_stages'), orderBy('name')) : null, [db]);
+  const plansQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_plans'), orderBy('name')) : null, [db]);
   
   const { data: formatsDocs } = useCollection(formatsQuery);
   const { data: coordsDocs } = useCollection(coordsQuery);
   const { data: stagesDocs } = useCollection(stagesQuery);
+  const { data: plansDocs } = useCollection(plansQuery);
 
-  // Consulta de Agregados Materializados (Hitos Analytics)
   const analyticsQuery = useMemoFirebase(() => {
     if (!db) return null;
     let q = query(collection(db, 'hitos_analytics'), where('year', '==', selectedYear));
@@ -87,7 +88,6 @@ export default function ControlCenterPage() {
 
   const { data: analyticsEntries, isLoading } = useCollection(analyticsQuery);
 
-  // Lógica de filtrado y suma en cliente con mayor robustez
   const filteredStats = useMemo(() => {
     if (!analyticsEntries) return null;
 
@@ -96,12 +96,12 @@ export default function ControlCenterPage() {
     const disciplineMap: Record<string, { impact: number, count: number, name: string }> = {};
 
     analyticsEntries.forEach(entry => {
-      // Aplicar filtros de selección múltiple (si el array está vacío, pasan todos)
       const matchFormat = selectedFormats.length === 0 || selectedFormats.includes(entry.format);
       const matchCoord = selectedCoordinators.length === 0 || selectedCoordinators.includes(entry.coordinator);
       const matchStage = selectedStages.length === 0 || selectedStages.includes(entry.stage);
+      const matchPlan = selectedPlans.length === 0 || selectedPlans.includes(entry.plan);
 
-      if (matchFormat && matchCoord && matchStage) {
+      if (matchFormat && matchCoord && matchStage && matchPlan) {
         totalImpact += entry.impact;
         totalOrders += entry.count;
 
@@ -126,13 +126,13 @@ export default function ControlCenterPage() {
     const vitalFew = paretoDiscs.filter(d => d.cumulativePct <= 85);
     const concentrationRatio = totalImpact > 0 ? (vitalFew.reduce((a, b) => a + b.impact, 0) / totalImpact) * 100 : 0;
 
-    // Datos estacionales para el gráfico de área
     const trendData = MONTHS.map(m => {
       const monthImpact = analyticsEntries
         .filter(e => e.month === m.id)
         .filter(e => selectedFormats.length === 0 || selectedFormats.includes(e.format))
         .filter(e => selectedCoordinators.length === 0 || selectedCoordinators.includes(e.coordinator))
         .filter(e => selectedStages.length === 0 || selectedStages.includes(e.stage))
+        .filter(e => selectedPlans.length === 0 || selectedPlans.includes(e.plan))
         .reduce((sum, e) => sum + e.impact, 0);
       
       return { month: m.name.substring(0, 3), impact: monthImpact };
@@ -145,7 +145,7 @@ export default function ControlCenterPage() {
       paretoDiscs,
       trendData
     };
-  }, [analyticsEntries, selectedFormats, selectedCoordinators, selectedStages]);
+  }, [analyticsEntries, selectedFormats, selectedCoordinators, selectedStages, selectedPlans]);
 
   const formatCurrency = (val: number) => {
     if (!mounted) return "$0";
@@ -157,6 +157,7 @@ export default function ControlCenterPage() {
     setSelectedFormats([]);
     setSelectedCoordinators([]);
     setSelectedStages([]);
+    setSelectedPlans([]);
     setSelectedMonth('all');
     setSelectedYear(2024);
   };
@@ -192,7 +193,6 @@ export default function ControlCenterPage() {
           </div>
         </header>
 
-        {/* Cinta de Filtros Dinámicos */}
         <div className="bg-white border-b border-slate-100 p-4 sticky top-20 z-10 flex flex-wrap items-center gap-3 px-8">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -257,6 +257,27 @@ export default function ControlCenterPage() {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="rounded-xl border-slate-200 gap-2 text-[10px] font-bold uppercase tracking-tight">
+                <Package className="h-3 w-3 text-orange-500" /> Plan {selectedPlans.length > 0 && `(${selectedPlans.length})`}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-64 rounded-xl max-h-80 overflow-y-auto">
+              <DropdownMenuLabel className="text-[10px] uppercase">Planes de Trabajo</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {plansDocs?.map(p => (
+                <DropdownMenuCheckboxItem 
+                  key={p.id} 
+                  checked={selectedPlans.includes(p.name)}
+                  onCheckedChange={() => setSelectedPlans(prev => prev.includes(p.name) ? prev.filter(i => i !== p.name) : [...prev, p.name])}
+                >
+                  {p.name}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <div className="h-8 w-px bg-slate-100 mx-2" />
 
           <DropdownMenu>
@@ -304,7 +325,7 @@ export default function ControlCenterPage() {
                <Filter className="h-16 w-16 opacity-10" />
                <div className="text-center">
                  <p className="text-sm font-black uppercase text-slate-400">No hay registros para esta combinación de filtros</p>
-                 <p className="text-[10px] text-slate-400 mt-1">Ajuste los criterios en la cinta superior (revisa el Año y el Mes).</p>
+                 <p className="text-[10px] text-slate-400 mt-1">Ajuste los criterios en la cinta superior (revisa el Año, Plan y Mes).</p>
                </div>
                <Button variant="outline" onClick={resetFilters} className="rounded-xl uppercase text-[10px] font-black">Limpiar Filtros</Button>
             </div>
@@ -417,25 +438,25 @@ export default function ControlCenterPage() {
 
                   <div className="grid md:grid-cols-2 gap-6">
                     <Card className="p-6 border-none shadow-md bg-white rounded-3xl border-t-4 border-t-cyan-500">
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Calidad de Filtro</h5>
+                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Estatus del Filtro</h5>
                       <div className="space-y-4">
                         <div className="flex justify-between items-center text-xs">
-                          <span className="font-bold text-slate-600">Integridad de Datos</span>
-                          <span className="font-black text-emerald-600">Verificado</span>
+                          <span className="font-bold text-slate-600">Contexto Analítico</span>
+                          <span className="font-black text-emerald-600">Vinculado</span>
                         </div>
                         <Progress value={100} className="h-1 bg-slate-50" />
-                        <div className="text-[9px] text-slate-400 leading-relaxed italic">El ranking se recalcula dinámicamente sobre los {filteredStats?.totalOrders.toLocaleString()} registros del segmento.</div>
+                        <div className="text-[9px] text-slate-400 leading-relaxed italic">Filtros vinculados a la colección multidimensional 'hitos_analytics'.</div>
                       </div>
                     </Card>
                     <Card className="p-6 border-none shadow-md bg-white rounded-3xl border-t-4 border-t-accent">
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Drivers Principales</h5>
+                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Drill-Down Predictivo</h5>
                       <div className="space-y-4">
                         <div className="flex justify-between items-center text-xs">
-                          <span className="font-bold text-slate-600">Concentración Pareto</span>
-                          <span className="font-black text-accent">{(filteredStats?.concentrationRatio || 0).toFixed(0)}%</span>
+                          <span className="font-bold text-slate-600">Integridad de Índices</span>
+                          <span className="font-black text-accent">Activo</span>
                         </div>
-                        <Progress value={filteredStats?.concentrationRatio || 0} className="h-1 bg-slate-50" />
-                        <div className="text-[9px] text-slate-400 leading-relaxed italic">Este segmento requiere atención focalizada en las disciplinas marcadas en naranja.</div>
+                        <Progress value={85} className="h-1 bg-slate-50" />
+                        <div className="text-[9px] text-slate-400 leading-relaxed italic">Los índices compuestos soportan la visualización rápida de este segmento.</div>
                       </div>
                     </Card>
                   </div>

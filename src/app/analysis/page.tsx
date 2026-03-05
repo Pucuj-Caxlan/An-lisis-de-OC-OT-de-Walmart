@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useEffect } from 'react';
@@ -9,8 +10,6 @@ import {
   RefreshCcw, 
   ShieldCheck,
   Loader2,
-  History,
-  Database,
   Layers
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -33,6 +32,7 @@ import {
   normalizeFormatName, 
   normalizeCoordinator, 
   normalizeStage,
+  normalizePlan,
   FORMAT_LABELS, 
   NormalizedFormat 
 } from '@/lib/excel-processor';
@@ -90,7 +90,8 @@ export default function AnalysisPage() {
         'taxonomy_disciplines', 
         'hitos_analytics',
         'taxonomy_coordinators',
-        'taxonomy_stages'
+        'taxonomy_stages',
+        'taxonomy_plans'
       ];
       for (const coll of collectionsToPurge) {
         await purgeCollectionCompletely(db, coll);
@@ -100,23 +101,21 @@ export default function AnalysisPage() {
       let processed = 0;
       let lastVisible = null;
       let hasMore = true;
-      const CHUNK_SIZE = 500;
+      const CHUNK_SIZE = 400;
 
       const buildMetadata = {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '3.0.0-multidimensional'
+        build_version: '4.0.0-multidimensional-plan'
       };
 
-      // Agregadores en memoria para taxonomías básicas
       const globalFormatStats: Record<string, any> = {};
       const globalDisciplineStats: Record<string, any> = {};
       const coordinators = new Set<string>();
       const stages = new Set<string>();
+      const plans = new Set<string>();
 
-      // Agregador Multidimensional para Hitos Principales
-      // Key: year_month_format_coord_stage_disc
       const hitosAgg: Record<string, { 
         impact: number, 
         count: number, 
@@ -125,6 +124,7 @@ export default function AnalysisPage() {
         format: string, 
         coordinator: string, 
         stage: string, 
+        plan: string,
         discipline: string 
       }> = {};
 
@@ -141,43 +141,42 @@ export default function AnalysisPage() {
           const data = d.data();
           const impact = Number(data.impactoNeto || 0);
           
-          // Normalización de campos clave
           const format = normalizeFormatName(data.format || data.format_origin || 'OTRO');
           const disc = String(data.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
-          const subDisc = String(data.subcausa_normalizada || 'GENERAL').trim().toUpperCase();
           const coord = normalizeCoordinator(data.coordinador || data.coordinador_normalizado);
           const stage = normalizeStage(data.etapa || data.etapa_proyecto_normalizada);
+          const plan = normalizePlan(data.plan || data.plan_nombre_normalizado);
+          
           const date = new Date(data.fecha_oc_ot || data.processedAt || new Date().toISOString());
-          const year = isNaN(date.getFullYear()) ? new Date().getFullYear() : date.getFullYear();
-          const month = isNaN(date.getMonth()) ? new Date().getMonth() + 1 : date.getMonth() + 1;
+          const year = isNaN(date.getFullYear()) ? 2024 : date.getFullYear();
+          const month = isNaN(date.getMonth()) ? 1 : date.getMonth() + 1;
 
-          // Enriquecer el registro original
           batch.update(doc(db, 'orders', d.id), {
             format_normalized: format,
             coordinador_normalizado: coord,
             etapa_proyecto_normalizada: stage,
+            plan_nombre_normalizado: plan,
             year,
             month,
             lastSync: buildMetadata.build_timestamp
           });
 
-          // Taxonomías
           coordinators.add(coord);
           stages.add(stage);
+          plans.add(plan);
 
           if (!globalFormatStats[format]) globalFormatStats[format] = { impact: 0, count: 0 };
           globalFormatStats[format].impact += impact;
           globalFormatStats[format].count += 1;
 
-          if (!globalDisciplineStats[disc]) globalDisciplineStats[disc] = { impact: 0, count: 0, subs: {} };
+          if (!globalDisciplineStats[disc]) globalDisciplineStats[disc] = { impact: 0, count: 0, name: disc };
           globalDisciplineStats[disc].impact += impact;
           globalDisciplineStats[disc].count += 1;
 
-          // Hitos Multidimensionales
-          const aggKey = `${year}_${month}_${format}_${coord.replace(/\s+/g, '_')}_${stage.replace(/\s+/g, '_')}_${disc.replace(/\s+/g, '_')}`;
+          const aggKey = `${year}_${month}_${format}_${coord.replace(/\s+/g, '_')}_${stage.replace(/\s+/g, '_')}_${plan.replace(/\s+/g, '_')}_${disc.replace(/\s+/g, '_')}`.substring(0, 500);
           if (!hitosAgg[aggKey]) {
             hitosAgg[aggKey] = { 
-              impact: 0, count: 0, year, month, format, coordinator: coord, stage, discipline: disc 
+              impact: 0, count: 0, year, month, format, coordinator: coord, stage, plan, discipline: disc 
             };
           }
           hitosAgg[aggKey].impact += impact;
@@ -193,7 +192,6 @@ export default function AnalysisPage() {
 
       setSyncStep('Guardando Vistas Materializadas...');
       
-      // Guardar Global Stats
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         ...buildMetadata,
         totalImpact: Object.values(globalDisciplineStats).reduce((a: any, b: any) => a + b.impact, 0),
@@ -201,33 +199,34 @@ export default function AnalysisPage() {
         totalProcessed: processed
       });
 
-      // Guardar Taxonomía de Formatos
       for (const [id, data] of Object.entries(globalFormatStats)) {
         await setDoc(doc(db, 'taxonomy_formats', id), {
           ...data, id, name: FORMAT_LABELS[id as NormalizedFormat] || id, updatedAt: buildMetadata.build_timestamp
         });
       }
 
-      // Guardar Taxonomía de Disciplinas
       for (const [id, data] of Object.entries(globalDisciplineStats)) {
-        await setDoc(doc(db, 'taxonomy_disciplines', id), {
-          ...data, id, name: id, updatedAt: buildMetadata.build_timestamp
+        const safeId = id.replace(/\s+/g, '_').substring(0, 100);
+        await setDoc(doc(db, 'taxonomy_disciplines', safeId), {
+          ...data, id: safeId, name: id, updatedAt: buildMetadata.build_timestamp
         });
       }
 
-      // Guardar Taxonomía de Coordinadores
       for (const coord of Array.from(coordinators)) {
-        const safeId = coord.replace(/\s+/g, '_').substring(0, 50);
+        const safeId = coord.replace(/[\/\s\.]+/g, '_').substring(0, 100);
         await setDoc(doc(db, 'taxonomy_coordinators', safeId), { id: safeId, name: coord });
       }
 
-      // Guardar Taxonomía de Etapas
       for (const stage of Array.from(stages)) {
-        const safeId = stage.replace(/\s+/g, '_').substring(0, 50);
+        const safeId = stage.replace(/[\/\s\.]+/g, '_').substring(0, 100);
         await setDoc(doc(db, 'taxonomy_stages', safeId), { id: safeId, name: stage });
       }
 
-      // Guardar Hitos Analytics (Chunked)
+      for (const plan of Array.from(plans)) {
+        const safeId = plan.replace(/[\/\s\.]+/g, '_').substring(0, 100);
+        await setDoc(doc(db, 'taxonomy_plans', safeId), { id: safeId, name: plan });
+      }
+
       setSyncStep('Finalizando Agregados Multidimensionales...');
       const hitosEntries = Object.entries(hitosAgg);
       for (let i = 0; i < hitosEntries.length; i += 400) {
@@ -239,7 +238,7 @@ export default function AnalysisPage() {
         await batch.commit();
       }
 
-      toast({ title: "Sincronización Exitosa", description: "Universo reconstruido con agregados multidimensionales." });
+      toast({ title: "Sincronización Exitosa", description: "Universo reconstruido con agregados multidimensionales de Plan." });
     } catch (e: any) {
       console.error(e);
       toast({ variant: "destructive", title: "Error en Sincronización", description: e.message });
@@ -275,13 +274,13 @@ export default function AnalysisPage() {
             <Card className="p-8 border-none shadow-xl bg-slate-900 text-white space-y-6">
               <div className="flex justify-between items-end">
                 <div className="space-y-1">
-                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Protocolo Forense 3.0 Activo</p>
+                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Protocolo Forense 4.0 Activo</p>
                   <h3 className="text-2xl font-bold uppercase">{syncStep}</h3>
                 </div>
                 <span className="text-4xl font-black text-accent">{syncProgress}%</span>
               </div>
               <Progress value={syncProgress} className="h-3 bg-white/10" />
-              <p className="text-xs text-slate-400 italic">Construyendo agregados por Coordinador, Etapa y Formato para análisis de Hitos Principales.</p>
+              <p className="text-xs text-slate-400 italic">Construyendo agregados por Coordinador, Etapa, Plan y Formato para análisis de Hitos Principales.</p>
             </Card>
           )}
 
@@ -297,7 +296,7 @@ export default function AnalysisPage() {
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-accent">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estatus de Analítica</p>
               <div className="flex items-center gap-2 text-emerald-600 font-bold">
-                <ShieldCheck className="h-5 w-5" /> SSOT 3.0 Multidimensional
+                <ShieldCheck className="h-5 w-5" /> SSOT 4.0 Multidimensional
               </div>
             </Card>
           </div>
@@ -306,8 +305,8 @@ export default function AnalysisPage() {
              <div className="flex items-center gap-4 mb-6">
                <Layers className="h-10 w-10 text-slate-300" />
                <div className="space-y-1">
-                 <h4 className="text-sm font-black uppercase text-slate-800">Trazabilidad Multidimensional</h4>
-                 <p className="text-xs text-slate-500">La nueva arquitectura permite segmentar por Coordinador y Etapa del Proyecto sin degradar el rendimiento.</p>
+                 <h4 className="text-sm font-black uppercase text-slate-800">Trazabilidad Multidimensional (Plan included)</h4>
+                 <p className="text-xs text-slate-500">La nueva arquitectura permite segmentar por Plan, Coordinador y Etapa del Proyecto con alto rendimiento.</p>
                </div>
              </div>
              <div className="space-y-4">

@@ -1,3 +1,4 @@
+
 import * as XLSX from 'xlsx';
 
 export type NormalizedFormat = 'BAE' | 'BA' | 'MB' | 'SC' | 'WSC' | 'WE' | 'OTRO';
@@ -40,6 +41,11 @@ export function normalizeStage(raw: any): string {
   return stage || 'CONSTRUCCIÓN';
 }
 
+export function normalizePlan(raw: any): string {
+  const plan = String(raw || 'PLAN MAESTRO').trim().toUpperCase();
+  return plan || 'PLAN MAESTRO';
+}
+
 export interface NormalizedRow {
   projectId: string;
   projectName: string;
@@ -51,6 +57,7 @@ export interface NormalizedRow {
   subcausa_normalizada: string;
   coordinador_normalizado: string;
   etapa_proyecto_normalizada: string;
+  plan_nombre_normalizado: string;
   year: number;
   month: number;
   rowNumber: number;
@@ -66,6 +73,7 @@ export const CANONICAL_SCHEMA = [
   'causa_raiz_normalizada',
   'coordinador',
   'etapa',
+  'plan',
   'fecha'
 ];
 
@@ -88,6 +96,7 @@ export function processExcelFile(buffer: ArrayBuffer): { data: NormalizedRow[] }
       impactoNeto: parseFloat(row['impactoNeto'] || row['Monto'] || '0'),
       coordinador_normalizado: normalizeCoordinator(row['coordinador'] || row['Coordinador']),
       etapa_proyecto_normalizada: normalizeStage(row['etapa'] || row['Etapa']),
+      plan_nombre_normalizado: normalizePlan(row['plan'] || row['Plan']),
       year: isNaN(dateObj.getFullYear()) ? new Date().getFullYear() : dateObj.getFullYear(),
       month: isNaN(dateObj.getMonth()) ? new Date().getMonth() + 1 : dateObj.getMonth() + 1,
       rowNumber: idx + 2

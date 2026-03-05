@@ -1,3 +1,4 @@
+
 {
   "entities": {
     "Order": {
@@ -9,6 +10,7 @@
         "format_normalized": { "type": "string" },
         "coordinador_normalizado": { "type": "string" },
         "etapa_proyecto_normalizada": { "type": "string" },
+        "plan_nombre_normalizado": { "type": "string" },
         "year": { "type": "number" },
         "month": { "type": "number" },
         "projectId": { "type": "string" },
@@ -27,6 +29,7 @@
         "format": { "type": "string" },
         "coordinator": { "type": "string" },
         "stage": { "type": "string" },
+        "plan": { "type": "string" },
         "discipline": { "type": "string" },
         "impact": { "type": "number" },
         "count": { "type": "number" },
@@ -42,6 +45,7 @@
     "/hitos_analytics/{aggKey}": { "schema": "HitosAnalytics", "description": "Agregados multidimensionales para Hitos Principales" },
     "/taxonomy_formats/{formatId}": { "schema": "object", "description": "Catálogo de formatos" },
     "/taxonomy_coordinators/{coordId}": { "schema": "object", "description": "Catálogo de coordinadores" },
-    "/taxonomy_stages/{stageId}": { "schema": "object", "description": "Catálogo de etapas del proyecto" }
+    "/taxonomy_stages/{stageId}": { "schema": "object", "description": "Catálogo de etapas del proyecto" },
+    "/taxonomy_plans/{planId}": { "schema": "object", "description": "Catálogo de planes" }
   }
 }
