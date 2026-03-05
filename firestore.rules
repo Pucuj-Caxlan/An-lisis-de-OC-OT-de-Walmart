@@ -2,7 +2,7 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Versión 2.3.9 - Soporte para Taxonomía de Formatos y Auditoría Global
+    // Versión 2.4.1 - Soporte para Sincronización Universal y Auditoría Forense
     
     // 1. Acceso a Órdenes
     match /orders/{id} {
@@ -10,13 +10,13 @@ service cloud.firestore {
       allow write: if request.auth != null;
     }
     
-    // 2. Colecciones de Soporte y Taxonomía (Permitir escritura para sincronización)
+    // 2. Colecciones de Soporte y Taxonomía (Permitir lectura y escritura autenticada)
     match /taxonomy_disciplines/{id} { allow read, write: if request.auth != null; }
     match /taxonomy_causes/{id} { allow read, write: if request.auth != null; }
     match /taxonomy_formats/{id} { allow read, write: if request.auth != null; }
     match /classification_overrides/{id} { allow read, write: if request.auth != null; }
     
-    // PERMISO DE ESCRITURA EN AGREGADOS PARA SINCRONIZACIÓN DE UNIVERSO
+    // Agregados y Estadísticas
     match /aggregates/{document=**} { 
       allow read, write: if request.auth != null; 
     }
@@ -33,7 +33,7 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // 5. Regla Global de Respaldo (Fallback)
+    // 5. Regla Global de Respaldo (Bloqueo preventivo)
     match /{document=**} {
       allow read: if request.auth != null;
       allow write: if false; 

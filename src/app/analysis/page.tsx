@@ -226,7 +226,6 @@ export default function AnalysisPage() {
       let hasMore = true;
       const CHUNK_SIZE = 3000;
 
-      // Escaneo integral del 100% de la base para capturar todos los formatos (incluyendo pendientes)
       while (hasMore) {
         let q = query(colRef, orderBy(documentId(), 'asc'), limit(CHUNK_SIZE));
         if (lastVisible) q = query(q, startAfter(lastVisible));
@@ -242,14 +241,14 @@ export default function AnalysisPage() {
           const impact = Number(data.impactoNeto || 0);
           totalCalculatedImpact += impact;
 
-          // Catalogar Formatos (Independiente del estado de auditoría)
           let formatRaw = data.format || 'SIN FORMATO';
           let format = String(formatRaw).trim().toUpperCase();
+          if (!format) format = 'SIN_FORMATO';
+          
           if (!formatMap[format]) formatMap[format] = { impact: 0, count: 0 };
           formatMap[format].impact += impact;
           formatMap[format].count += 1;
 
-          // Solo catalogar Disciplinas/Causas para registros ya auditados
           if (data.classification_status !== 'pending') {
             totalProcessedInSync++;
             let disc = String(data.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
@@ -267,6 +266,12 @@ export default function AnalysisPage() {
             if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
             causeMap[cause].impact += impact;
             causeMap[cause].count += 1;
+          } else {
+            // Asegurar que el impacto de pendientes aparezca en la taxonomía global para que el Treemap cuadre
+            let disc = 'PENDIENTE DE CLASIFICACIÓN';
+            if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
+            discMap[disc].impact += impact;
+            discMap[disc].count += 1;
           }
         });
 
@@ -280,12 +285,16 @@ export default function AnalysisPage() {
           const chunk = entries.slice(i, i + 400);
           const batch = writeBatch(db);
           chunk.forEach(([name, data]) => {
-            const safeId = name.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-            batch.set(doc(db, coll, safeId), { ...data, id: safeId, name: name, lastUpdate: new Date().toISOString() });
+            const cleanName = String(name || '').trim();
+            if (!cleanName) return;
+            const safeId = cleanName.replace(/[\/\s\.]+/g, '_').substring(0, 100);
+            if (!safeId) return;
+            
+            batch.set(doc(db, coll, safeId), { ...data, id: safeId, name: cleanName, lastUpdate: new Date().toISOString() });
           });
           await batch.commit().catch(async (e) => {
              errorEmitter.emit('permission-error', new FirestorePermissionError({
-               path: coll,
+               path: `${coll}/batch_commit`,
                operation: 'write'
              }));
              throw e;
@@ -305,8 +314,8 @@ export default function AnalysisPage() {
       }, { merge: true });
 
       toast({ 
-        title: "Hitos Sincronizados", 
-        description: `Se detectaron ${Object.keys(formatMap).length} formatos en ${totalInDbCount} registros.` 
+        title: "Sincronización Exitosa", 
+        description: `Universo de ${totalInDbCount} registros consolidado.` 
       });
     } catch (e: any) {
       if (e.code !== 'permission-denied') {
