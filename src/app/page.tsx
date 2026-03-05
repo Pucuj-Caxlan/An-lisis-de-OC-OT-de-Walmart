@@ -30,7 +30,7 @@ import {
   Treemap
 } from 'recharts';
 import { useFirestore, useMemoFirebase, useUser, useDoc, useCollection } from '@/firebase';
-import { doc, collection, orderBy, query, where, limit, getDocs } from 'firebase/firestore';
+import { doc, collection, orderBy, query, where, limit, getDocs, documentId } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
@@ -66,6 +66,7 @@ export default function VpDashboard() {
   const [mounted, setMounted] = useState(false);
   const [formatFilter, setFormatFilter] = useState('all');
   const [availableFormats, setAvailableFormats] = useState<string[]>([]);
+  const [formatMap, setFormatMap] = useState<Record<string, string>>({});
   const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
   const [selectedDiscipline, setSelectedDiscipline] = useState<any | null>(null);
   
@@ -74,19 +75,28 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Descubrimiento dinámico de formatos disponibles (SSOT)
+  // Descubrimiento dinámico de formatos disponibles con mapa de normalización
   useEffect(() => {
     if (!db || !isAuthReady) return;
     const fetchFormats = async () => {
       try {
-        const q = query(collection(db, 'orders'), limit(5000));
+        const q = query(collection(db, 'orders'), limit(3000));
         const snap = await getDocs(q);
-        const formats = new Set<string>();
+        const fMap: Record<string, string> = {};
+        const formatsSet = new Set<string>();
+        
         snap.forEach(doc => {
-          const f = doc.data().format;
-          if (f) formats.add(String(f).trim().toUpperCase());
+          const raw = doc.data().format;
+          if (raw) {
+            const normalized = String(raw).trim().toUpperCase();
+            if (!fMap[normalized]) fMap[normalized] = String(raw);
+            formatsSet.add(normalized);
+          }
         });
-        setAvailableFormats(Array.from(formats).sort());
+        
+        setFormatMap(fMap);
+        setAvailableFormats(Array.from(formatsSet).sort());
+        console.log("[Dashboard Debug] Formatos detectados:", formatsSet);
       } catch (e) {
         console.error("Error descubriendo formatos:", e);
       }
@@ -100,16 +110,21 @@ export default function VpDashboard() {
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: globalTaxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
-  // Consulta OPTIMIZADA: Utiliza el índice compuesto (format ASC, impactoNeto DESC)
+  // Consulta OPTIMIZADA: Sincronizada exactamente con el Índice Compuesto
   const formatOrdersQuery = useMemoFirebase(() => {
     if (!db || formatFilter === 'all') return null;
+    
+    const rawValueToQuery = formatMap[formatFilter] || formatFilter;
+    console.log(`[Dashboard Debug] Ejecutando consulta para Formato: ${rawValueToQuery}`);
+    
     return query(
       collection(db, 'orders'), 
-      where('format', '==', formatFilter.toUpperCase()),
+      where('format', '==', rawValueToQuery),
       orderBy('impactoNeto', 'desc'),
+      orderBy(documentId(), 'desc'), // Requerido por el índice compuesto manual
       limit(3000)
     );
-  }, [db, formatFilter]);
+  }, [db, formatFilter, formatMap]);
 
   const { data: formatOrders, isLoading: isOrdersLoading } = useCollection(formatOrdersQuery);
 
@@ -147,6 +162,7 @@ export default function VpDashboard() {
 
     // CASO 2: Visión por Formato (Agregación dinámica en tiempo real)
     if (!formatOrders || formatOrders.length === 0) {
+      console.log("[Dashboard Debug] No se encontraron órdenes para el formato seleccionado.");
       return { pareto: [], totalImpact: 0, totalCount: 0 };
     }
 
@@ -191,6 +207,7 @@ export default function VpDashboard() {
       };
     });
 
+    console.log(`[Dashboard Debug] Datos procesados para ${formatFilter}:`, pareto.length, "disciplinas.");
     return { pareto, totalImpact: totalFormatImpact, totalCount: formatOrders.length };
 
   }, [formatFilter, globalTaxonomyDocs, globalAgg, formatOrders, colorTheme]);
