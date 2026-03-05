@@ -20,7 +20,9 @@ import {
   Layout,
   Loader2,
   Package,
-  Layers
+  Layers,
+  BarChart3,
+  ChevronRight
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -29,7 +31,10 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip
+  Tooltip,
+  BarChart,
+  Bar,
+  Cell
 } from 'recharts';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, orderBy, where } from 'firebase/firestore';
@@ -45,7 +50,8 @@ import {
   DropdownMenuCheckboxItem
 } from '@/components/ui/dropdown-menu';
 
-const CYAN_PRIMARY = "#00D8FF";
+const CYAN_PRIMARY = "#2962FF";
+const ACCENT_ORANGE = "#FF8F00";
 
 const MONTHS = [
   { id: 1, name: 'Enero' }, { id: 2, name: 'Febrero' }, { id: 3, name: 'Marzo' },
@@ -94,6 +100,7 @@ export default function ControlCenterPage() {
     let totalImpact = 0;
     let totalOrders = 0;
     const disciplineMap: Record<string, { impact: number, count: number, name: string }> = {};
+    const formatMap: Record<string, number> = {};
 
     analyticsEntries.forEach(entry => {
       const matchFormat = selectedFormats.length === 0 || selectedFormats.includes(entry.format);
@@ -109,6 +116,9 @@ export default function ControlCenterPage() {
         if (!disciplineMap[disc]) disciplineMap[disc] = { impact: 0, count: 0, name: disc };
         disciplineMap[disc].impact += entry.impact;
         disciplineMap[disc].count += entry.count;
+
+        const fmt = entry.format || 'OTRO';
+        formatMap[fmt] = (formatMap[fmt] || 0) + entry.impact;
       }
     });
 
@@ -122,6 +132,10 @@ export default function ControlCenterPage() {
           cumulativePct: totalImpact > 0 ? (cumulative / totalImpact) * 100 : 0
         };
       });
+
+    const formatDistribution = Object.entries(formatMap)
+      .map(([name, impact]) => ({ name, impact }))
+      .sort((a, b) => b.impact - a.impact);
 
     const vitalFew = paretoDiscs.filter(d => d.cumulativePct <= 85);
     const concentrationRatio = totalImpact > 0 ? (vitalFew.reduce((a, b) => a + b.impact, 0) / totalImpact) * 100 : 0;
@@ -143,7 +157,8 @@ export default function ControlCenterPage() {
       totalOrders,
       concentrationRatio,
       paretoDiscs,
-      trendData
+      trendData,
+      formatDistribution
     };
   }, [analyticsEntries, selectedFormats, selectedCoordinators, selectedStages, selectedPlans]);
 
@@ -164,7 +179,7 @@ export default function ControlCenterPage() {
 
   if (!user?.uid || !mounted) return (
     <div className="flex h-screen items-center justify-center bg-slate-100 flex-col gap-4">
-      <Activity className="h-12 w-12 text-cyan-500 animate-spin" />
+      <Activity className="h-12 w-12 text-primary animate-spin" />
       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Cargando Centro de Control...</p>
     </div>
   );
@@ -178,7 +193,7 @@ export default function ControlCenterPage() {
             <SidebarTrigger />
             <div className="flex flex-col">
               <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tighter font-headline flex items-center gap-3">
-                <div className="h-2.5 w-2.5 rounded-full bg-cyan-500 shadow-[0_0_10px_rgba(0,216,255,0.8)]" />
+                <div className="h-2.5 w-2.5 rounded-full bg-primary shadow-[0_0_10px_rgba(41,98,255,0.6)]" />
                 Operational Control Center
               </h1>
             </div>
@@ -325,18 +340,16 @@ export default function ControlCenterPage() {
                <Filter className="h-16 w-16 opacity-10" />
                <div className="text-center">
                  <p className="text-sm font-black uppercase text-slate-400">No hay registros para esta combinación de filtros</p>
-                 <p className="text-[10px] text-slate-400 mt-1">Ajuste los criterios en la cinta superior (revisa el Año, Plan y Mes).</p>
+                 <p className="text-[10px] text-slate-400 mt-1">Ajuste los criterios en la cinta superior.</p>
                </div>
                <Button variant="outline" onClick={resetFilters} className="rounded-xl uppercase text-[10px] font-black">Limpiar Filtros</Button>
             </div>
           ) : (
             <>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <Card className="p-6 border-none shadow-md bg-white rounded-3xl">
-                  <div className="flex items-center justify-between mb-4">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Impacto Filtrado</p>
-                    <div className="p-2 bg-primary/5 rounded-lg"><Activity className="h-4 w-4 text-primary" /></div>
-                  </div>
+                <Card className="p-6 border-none shadow-md bg-white rounded-3xl overflow-hidden relative">
+                  <div className="absolute top-0 right-0 p-6 opacity-5"><Activity className="h-16 w-16" /></div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Impacto Total Filtrado</p>
                   <h3 className="text-3xl font-black text-slate-900 font-headline">{formatCurrency(filteredStats?.totalImpact || 0)}</h3>
                 </Card>
 
@@ -352,14 +365,14 @@ export default function ControlCenterPage() {
                   </div>
                 </Card>
 
-                <Card className="p-6 border-none shadow-md bg-white rounded-3xl border-l-4 border-l-rose-500">
+                <Card className="p-6 border-none shadow-md bg-white rounded-3xl border-l-4 border-l-primary">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Registros Segmentados</p>
                   <h3 className="text-3xl font-black text-slate-900 font-headline">{(filteredStats?.totalOrders || 0).toLocaleString()}</h3>
                 </Card>
 
                 <Card className="p-6 border-none shadow-md bg-white rounded-3xl">
                   <div className="flex items-center justify-between mb-4">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Periodo de Auditoría</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Periodo Seleccionado</p>
                     <div className="p-2 bg-emerald-50 rounded-lg"><CalendarDays className="h-4 w-4 text-emerald-500" /></div>
                   </div>
                   <div className="flex items-baseline gap-2">
@@ -370,15 +383,16 @@ export default function ControlCenterPage() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <Card className="border-none shadow-xl bg-white rounded-3xl p-8 flex flex-col min-h-[650px]">
+                <Card className="border-none shadow-xl bg-white rounded-3xl p-8 flex flex-col min-h-[700px]">
                   <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 mb-8">
                     <div className="flex justify-between items-center">
                       <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-3">
-                        <Focus className="h-5 w-5 text-cyan-500" /> 
-                        Hitos Principales (Filtrados)
+                        <Focus className="h-5 w-5 text-primary" /> 
+                        Hitos Principales (80/20)
                       </h4>
-                      <Badge variant="outline" className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Ranking Pareto</Badge>
+                      <Badge variant="outline" className="text-[8px] font-black text-slate-400 uppercase">Ranking Pareto</Badge>
                     </div>
+                    <p className="text-[10px] text-slate-400 italic">Disciplinas que concentran el mayor driver de costo en el segmento.</p>
                   </div>
 
                   <div className="flex-1 space-y-8 overflow-y-auto pr-2 custom-scrollbar">
@@ -388,13 +402,15 @@ export default function ControlCenterPage() {
                           <div className="space-y-1">
                             <div className="text-xs font-black text-slate-800 uppercase group-hover:text-primary transition-colors flex items-center gap-2">
                               {d.name}
-                              {d.cumulativePct <= 85 && <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />}
+                              {d.cumulativePct <= 85 && <span className="h-1.5 w-1.5 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(255,143,0,0.8)]" />}
                             </div>
                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{d.count} Órdenes detectadas</p>
                           </div>
                           <div className="text-right">
                             <span className="text-[11px] font-black text-slate-900">{formatCurrency(d.impact)}</span>
-                            <p className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest">{d.participationPct.toFixed(1)}%</p>
+                            <p className={`text-[8px] font-bold uppercase tracking-widest ${d.cumulativePct <= 85 ? 'text-orange-500' : 'text-slate-400'}`}>
+                              {d.participationPct.toFixed(1)}% participación
+                            </p>
                           </div>
                         </div>
                         <div className="relative">
@@ -406,60 +422,78 @@ export default function ControlCenterPage() {
                 </Card>
 
                 <div className="lg:col-span-2 space-y-8">
-                  <Card className="border-none shadow-xl bg-white rounded-3xl p-8 h-fit">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
-                      <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-3">
-                        <TrendingDown className="h-5 w-5 text-rose-500" /> 
-                        Impacto Mensual ({selectedYear})
-                      </h4>
-                    </div>
-                    <div className="h-[350px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={filteredStats?.trendData}>
-                          <defs>
-                            <linearGradient id="colorImpact" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={CYAN_PRIMARY} stopOpacity={0.2}/>
-                              <stop offset="95%" stopColor={CYAN_PRIMARY} stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                          <XAxis dataKey="month" axisLine={false} tick={{ fontSize: 10, fill: '#94A3B8', fontWeight: 'bold' }} />
-                          <YAxis axisLine={false} tick={{ fontSize: 10, fill: '#94A3B8', fontWeight: 'bold' }} tickFormatter={(v) => `$${v/1000000}M`} />
-                          <Tooltip 
-                            contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: '#0F172A', color: '#fff', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}
-                            itemStyle={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' }}
-                            formatter={(val: number) => [formatCurrency(val), 'Impacto']}
-                          />
-                          <Area type="monotone" dataKey="impact" stroke={CYAN_PRIMARY} strokeWidth={4} fill="url(#colorImpact)" animationDuration={1000} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </Card>
-
-                  <div className="grid md:grid-cols-2 gap-6">
-                    <Card className="p-6 border-none shadow-md bg-white rounded-3xl border-t-4 border-t-cyan-500">
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Estatus del Filtro</h5>
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center text-xs">
-                          <span className="font-bold text-slate-600">Contexto Analítico</span>
-                          <span className="font-black text-emerald-600">Vinculado</span>
-                        </div>
-                        <Progress value={100} className="h-1 bg-slate-50" />
-                        <div className="text-[9px] text-slate-400 leading-relaxed italic">Filtros vinculados a la colección multidimensional 'hitos_analytics'.</div>
+                  <div className="grid md:grid-cols-2 gap-8">
+                    <Card className="border-none shadow-xl bg-white rounded-3xl p-8 h-[400px]">
+                      <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
+                        <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-3">
+                          <BarChart3 className="h-5 w-5 text-accent" /> 
+                          Distribución por Formato
+                        </h4>
+                      </div>
+                      <div className="h-[250px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={filteredStats?.formatDistribution}>
+                            <XAxis dataKey="name" axisLine={false} tick={{ fontSize: 9, fill: '#94A3B8', fontWeight: 'bold' }} />
+                            <Tooltip 
+                              cursor={{fill: 'transparent'}}
+                              contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: '#0F172A', color: '#fff' }}
+                              formatter={(val: number) => [formatCurrency(val), 'Impacto']}
+                            />
+                            <Bar dataKey="impact" radius={[6, 6, 0, 0]} barSize={30}>
+                              {filteredStats?.formatDistribution.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={index === 0 ? ACCENT_ORANGE : '#E2E8F0'} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
                       </div>
                     </Card>
-                    <Card className="p-6 border-none shadow-md bg-white rounded-3xl border-t-4 border-t-accent">
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Drill-Down Predictivo</h5>
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center text-xs">
-                          <span className="font-bold text-slate-600">Integridad de Índices</span>
-                          <span className="font-black text-accent">Activo</span>
-                        </div>
-                        <Progress value={85} className="h-1 bg-slate-50" />
-                        <div className="text-[9px] text-slate-400 leading-relaxed italic">Los índices compuestos soportan la visualización rápida de este segmento.</div>
+
+                    <Card className="border-none shadow-xl bg-white rounded-3xl p-8 h-[400px]">
+                      <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
+                        <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-3">
+                          <TrendingDown className="h-5 w-5 text-rose-500" /> 
+                          Impacto Mensual ({selectedYear})
+                        </h4>
+                      </div>
+                      <div className="h-[250px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={filteredStats?.trendData}>
+                            <defs>
+                              <linearGradient id="colorImpact" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor={CYAN_PRIMARY} stopOpacity={0.2}/>
+                                <stop offset="95%" stopColor={CYAN_PRIMARY} stopOpacity={0}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                            <XAxis dataKey="month" axisLine={false} tick={{ fontSize: 9, fill: '#94A3B8', fontWeight: 'bold' }} />
+                            <Tooltip 
+                              contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: '#0F172A', color: '#fff' }}
+                              formatter={(val: number) => [formatCurrency(val), 'Impacto']}
+                            />
+                            <Area type="monotone" dataKey="impact" stroke={CYAN_PRIMARY} strokeWidth={3} fill="url(#colorImpact)" animationDuration={1000} />
+                          </AreaChart>
+                        </ResponsiveContainer>
                       </div>
                     </Card>
                   </div>
+
+                  <Card className="p-10 border-none shadow-sm bg-white/50 border-2 border-dashed rounded-[40px]">
+                    <div className="flex items-center gap-6">
+                      <div className="h-16 w-16 rounded-full bg-slate-900 text-white flex items-center justify-center shadow-2xl">
+                        <Layers className="h-8 w-8" />
+                      </div>
+                      <div className="space-y-1 flex-1">
+                        <h4 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Resumen Estratégico del Segmento</h4>
+                        <p className="text-xs text-slate-500 leading-relaxed italic">
+                          Análisis basado en el universo de {filteredStats?.totalOrders.toLocaleString()} registros filtrados. El "Vital Few" concentra el {(filteredStats?.concentrationRatio || 0).toFixed(1)}% del impacto financiero total en este segmento.
+                        </p>
+                      </div>
+                      <Button variant="outline" className="rounded-xl gap-2 h-12 px-6 border-slate-200 text-[10px] font-black uppercase tracking-widest">
+                        Ver Detalle de Registros <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </Card>
                 </div>
               </div>
             </>
