@@ -74,7 +74,7 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Descubrimiento dinámico de formatos disponibles (Sincronizado con la base de datos real)
+  // Descubrimiento dinámico de formatos disponibles
   useEffect(() => {
     if (!db || !isAuthReady) return;
     const fetchFormats = async () => {
@@ -100,7 +100,7 @@ export default function VpDashboard() {
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: globalTaxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
-  // Consulta optimizada usando Índice Compuesto para filtros por Formato
+  // Consulta optimizada usando Índice Compuesto: format + impactoNeto
   const formatOrdersQuery = useMemoFirebase(() => {
     if (!db || formatFilter === 'all') return null;
     return query(
