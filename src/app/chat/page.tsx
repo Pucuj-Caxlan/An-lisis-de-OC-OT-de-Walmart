@@ -16,8 +16,8 @@ import {
   Sparkles,
   Database
 } from 'lucide-react';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, query, limit, getCountFromServer } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase, useUser, useDoc } from '@/firebase';
+import { collection, query, limit, orderBy, doc } from 'firebase/firestore';
 import { chatWithAi } from '@/ai/flows/chat-assistant-flow';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -36,29 +36,25 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [totalInDb, setTotalInDb] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // SSOT: Conteo global real
-  useEffect(() => {
-    if (!db || !user?.uid) return;
-    const fetchTotal = async () => {
-      try {
-        const snapshot = await getCountFromServer(collection(db, 'orders'));
-        setTotalInDb(snapshot.data().count);
-      } catch (e) {
-        console.warn("Failed to fetch total count:", e);
-      }
-    };
-    fetchTotal();
-  }, [db, user?.uid]);
+  // 1. Cargar Metadatos Globales (SSOT)
+  const globalAggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
+  const { data: globalAgg } = useDoc(globalAggRef);
 
-  // Consulta de órdenes para el contexto (Sincronizado con UID)
-  const ordersQuery = useMemoFirebase(() => {
-    if (!db || !user?.uid) return null;
-    return query(collection(db, 'orders'), limit(10000));
-  }, [db, user?.uid]);
-  const { data: orders } = useCollection(ordersQuery);
+  // 2. Cargar Resúmenes de Taxonomía para Contexto IA
+  const topDisciplinesQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc'), limit(20)) : null, [db]);
+  const topFormatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('impact', 'desc'), limit(10)) : null, [db]);
+  
+  const { data: disciplines } = useCollection(topDisciplinesQuery);
+  const { data: formats } = useCollection(topFormatsQuery);
+
+  // 3. Cargar Muestra de Alto Impacto (Solo registros críticos para no saturar payload)
+  const highImpactQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(40));
+  }, [db]);
+  const { data: samples } = useCollection(highImpactQuery);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -88,7 +84,13 @@ export default function ChatPage() {
       const response = await chatWithAi({
         message: userInput,
         history: messages.map(m => ({ role: m.role, content: m.content })),
-        ordersContext: orders || [],
+        summaryContext: {
+          totalImpact: globalAgg?.totalImpact || 0,
+          totalOrders: globalAgg?.totalOrders || 0,
+          topDisciplines: disciplines || [],
+          topFormats: formats || [],
+          sampleHighImpact: samples || []
+        }
       });
 
       const aiMessage: Message = {
@@ -102,8 +104,8 @@ export default function ChatPage() {
     } catch (error: any) {
       toast({
         variant: "destructive",
-        title: "Error de Asistente",
-        description: error.message || "No se pudo obtener respuesta de la IA.",
+        title: "Error de Motor IA",
+        description: error.message || "Fallo en la comunicación con Gemini.",
       });
     } finally {
       setIsLoading(false);
@@ -129,10 +131,10 @@ export default function ChatPage() {
           </div>
           <div className="flex items-center gap-3">
             <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 gap-2 px-3 py-1 uppercase font-black">
-              <Database className="h-3 w-3" /> Base Global: {totalInDb || 0}
+              <Database className="h-3 w-3" /> Base Global: {globalAgg?.totalOrders || 0}
             </Badge>
             <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-2 px-3 py-1 uppercase font-black">
-              <RefreshCcw className="h-3 w-3" /> Contexto IA: {orders?.length || 0}
+              <RefreshCcw className="h-3 w-3" /> Contexto IA: Optimizado (Sumarizado)
             </Badge>
             <Button variant="ghost" size="sm" onClick={handleReset} className="text-slate-400 hover:text-rose-500">
               Reiniciar
@@ -150,14 +152,14 @@ export default function ChatPage() {
                   </div>
                   <div className="space-y-2">
                     <h2 className="text-2xl font-headline font-bold text-slate-800 tracking-tight uppercase">Auditoría Inteligente de Construcción</h2>
-                    <p className="text-slate-500 max-w-md mx-auto text-sm">WAI tiene acceso al 100% de los registros normalizados ({totalInDb || 0}). Pregunta sobre montos acumulados, causas de Pareto o riesgos de firmas.</p>
+                    <p className="text-slate-500 max-w-md mx-auto text-sm">WAI ha analizado el universo de {globalAgg?.totalOrders || 0} registros. Haz consultas sobre impactos económicos, disciplinas críticas o casos de alto valor.</p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
                     {[
                       "Resumen del impacto económico total",
                       "¿Cuáles son las 3 disciplinas con mayor impacto?",
-                      "Identifica riesgos por falta de firmas DocuSign",
-                      "Analiza la tendencia de costos entre 2024 y 2025"
+                      "Identifica riesgos en registros de alto monto",
+                      "Analiza la distribución por formato"
                     ].map((q, i) => (
                       <Button 
                         key={i} 
@@ -180,7 +182,7 @@ export default function ChatPage() {
                       {m.role === 'user' ? <User className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
                     </div>
                     <div className={`p-5 rounded-2xl shadow-sm text-sm leading-relaxed ${m.role === 'user' ? 'bg-slate-800 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}`}>
-                      <div className="whitespace-pre-wrap">{m.content}</div>
+                      <div className="whitespace-pre-wrap prose prose-sm max-w-none">{m.content}</div>
                       <p className={`text-[8px] mt-2 opacity-50 uppercase font-black tracking-widest ${m.role === 'user' ? 'text-right' : ''}`}>
                         {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </p>
@@ -197,7 +199,7 @@ export default function ChatPage() {
                     </div>
                     <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center gap-3">
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest italic">WAI Analizando {orders?.length || 0} registros...</span>
+                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest italic">WAI procesando inteligencia forense...</span>
                     </div>
                   </div>
                 </div>
@@ -227,7 +229,7 @@ export default function ChatPage() {
               </div>
               <div className="flex justify-center mt-3 px-2">
                 <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight text-slate-400 border-slate-200 bg-white">
-                  Motor Forense Gemini 2.5 Flash • Contexto Full SSOT
+                  Contexto Multidimensional • IA Optimizada para Gran Volumen
                 </Badge>
               </div>
             </div>
