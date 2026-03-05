@@ -352,7 +352,7 @@ export default function VpDashboard() {
 
             <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl relative overflow-hidden">
               <div className="absolute top-0 right-0 p-4 opacity-10"><Target className="h-12 w-12" /></div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Vital Few</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Pocos Críticos</p>
               <h2 className="text-3xl font-black text-white tracking-tighter">85%</h2>
               <div className="flex items-center gap-2 mt-2">
                 <Progress value={85} className="h-1 bg-white/10" />
@@ -429,13 +429,13 @@ export default function VpDashboard() {
                       size="sm" 
                       onClick={() => setActivePieTab('80')}
                       className="h-7 text-[8px] font-black uppercase px-3 rounded-lg"
-                    >Vital Few</Button>
+                    >Pocos Críticos</Button>
                     <Button 
                       variant={activeTab === '20' ? 'default' : 'ghost'} 
                       size="sm" 
                       onClick={() => setActivePieTab('20')}
                       className="h-7 text-[8px] font-black uppercase px-3 rounded-lg"
-                    >Useful Many</Button>
+                    >Muchos Útiles</Button>
                   </div>
                 </div>
               </CardHeader>
@@ -521,7 +521,7 @@ export default function VpDashboard() {
                     <h4 className="text-xs font-black uppercase text-primary tracking-[0.2em]">Recomendación de Mitigación</h4>
                   </div>
                   <p className="text-xs text-slate-600 leading-relaxed italic">
-                    Debido a que <span className="font-bold text-slate-800">{selectedDiscipline?.name}</span> es un componente del Vital Few, se recomienda realizar una auditoría de diseño inmediata en este rubro para reducir la variabilidad presupuestaria.
+                    Debido a que <span className="font-bold text-slate-800">{selectedDiscipline?.name}</span> es un componente del Vital Few (Pocos Críticos), se recomienda realizar una auditoría de diseño inmediata en este rubro para reducir la variabilidad presupuestaria.
                   </p>
                 </section>
               </div>
