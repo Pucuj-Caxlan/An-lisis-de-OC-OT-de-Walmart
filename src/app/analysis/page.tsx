@@ -9,11 +9,8 @@ import { Button } from '@/components/ui/button';
 import { 
   Database, 
   RefreshCcw, 
-  CheckCircle2, 
-  Trash2,
   ShieldCheck,
   Loader2,
-  AlertTriangle,
   History
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -30,11 +27,12 @@ import {
   setDoc,
   orderBy,
   getCountFromServer,
-  deleteDoc
+  Firestore
 } from 'firebase/firestore';
 import { normalizeFormatName, FORMAT_LABELS, NormalizedFormat } from '@/lib/excel-processor';
 import { Progress } from '@/components/ui/progress';
-import { Badge } from '@/components/ui/badge';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -51,9 +49,36 @@ export default function AnalysisPage() {
   const { data: globalAgg } = useDoc(aggRef);
 
   /**
-   * PURGE & REBUILD PROTOCOL
-   * Garantiza que SUM(aggregates) == orders.count eliminando residuos previos.
+   * Helper robusto para guardar taxonomías en bloques de 500
    */
+  const saveTaxonomyInChunks = async (db: Firestore, collPath: string, stats: Record<string, any>, buildMetadata: any) => {
+    const entries = Object.entries(stats);
+    const CHUNK_SIZE = 400; // Conservador frente al límite de 500
+
+    for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
+      const chunk = entries.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      
+      chunk.forEach(([id, data]) => {
+        const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
+        const docRef = doc(db, collPath, safeId);
+        batch.set(docRef, {
+          ...data,
+          ...buildMetadata,
+          id: safeId,
+          updatedAt: new Date().toISOString()
+        });
+      });
+
+      await batch.commit().catch(async () => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: collPath,
+          operation: 'write'
+        }));
+      });
+    }
+  };
+
   const handleDeepSyncAndBackfill = async () => {
     if (!db || !user) return;
     setIsSyncing(true);
@@ -65,18 +90,25 @@ export default function AnalysisPage() {
       const totalSnapshot = await getCountFromServer(collection(db, 'orders'));
       const totalCount = totalSnapshot.data().count;
 
-      // 2. FASE DE PURGA (Eliminar taxonomías y agregados viejos)
+      // 2. FASE DE PURGA
       setSyncStep('Fase de Purga: Eliminando Agregados Obsoletos...');
       const collectionsToPurge = ['taxonomy_formats', 'taxonomy_disciplines', 'taxonomy_causes'];
       for (const coll of collectionsToPurge) {
         const snap = await getDocs(query(collection(db, coll), limit(500)));
-        const batch = writeBatch(db);
-        snap.forEach(d => batch.delete(d.ref));
-        await batch.commit();
+        if (!snap.empty) {
+          const batch = writeBatch(db);
+          snap.forEach(d => batch.delete(d.ref));
+          await batch.commit().catch(() => {
+             errorEmitter.emit('permission-error', new FirestorePermissionError({
+               path: coll,
+               operation: 'delete'
+             }));
+          });
+        }
       }
 
       // 3. FASE DE ESCANEO Y ACUMULACIÓN
-      setSyncStep('Fase de Escaneo: Procesando 10,900+ registros...');
+      setSyncStep('Fase de Escaneo: Procesando registros...');
       let processed = 0;
       let lastVisible = null;
       let hasMore = true;
@@ -86,7 +118,7 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '2.0.0-forensic'
+        build_version: '2.0.1-forensic'
       };
 
       const globalFormatStats: Record<string, { impact: number, count: number, disciplines: Record<string, { impact: number, count: number }> }> = {};
@@ -108,27 +140,23 @@ export default function AnalysisPage() {
           const impact = Number(data.impactoNeto || 0);
           const disc = String(data.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
 
-          // Enriquecer registro base para coherencia
           batch.update(doc(db, 'orders', d.id), {
             format_normalized: normalized,
             lastSync: buildMetadata.build_timestamp
           });
 
-          // Acumular Formatos
           if (!globalFormatStats[normalized]) {
             globalFormatStats[normalized] = { impact: 0, count: 0, disciplines: {} };
           }
           globalFormatStats[normalized].impact += impact;
           globalFormatStats[normalized].count += 1;
 
-          // Acumular Disciplinas dentro del formato
           if (!globalFormatStats[normalized].disciplines[disc]) {
             globalFormatStats[normalized].disciplines[disc] = { impact: 0, count: 0 };
           }
           globalFormatStats[normalized].disciplines[disc].impact += impact;
           globalFormatStats[normalized].disciplines[disc].count += 1;
 
-          // Acumular Global Disciplinas (para vista de "Todos los Formatos")
           if (!globalDisciplineStats[disc]) {
             globalDisciplineStats[disc] = { impact: 0, count: 0 };
           }
@@ -136,9 +164,15 @@ export default function AnalysisPage() {
           globalDisciplineStats[disc].count += 1;
         });
 
-        await batch.commit();
+        await batch.commit().catch(() => {
+           errorEmitter.emit('permission-error', new FirestorePermissionError({
+             path: 'orders',
+             operation: 'update'
+           }));
+        });
+        
         processed += snap.size;
-        setSyncSyncProgress(Math.round((processed / totalCount) * 100));
+        setSyncSyncProgress(Math.round((processed / Math.max(1, totalCount)) * 100));
         lastVisible = snap.docs[snap.docs.length - 1];
         if (snap.size < CHUNK_SIZE) hasMore = false;
       }
@@ -146,31 +180,25 @@ export default function AnalysisPage() {
       // 4. PERSISTENCIA DE VISTAS MATERIALIZADAS
       setSyncStep('Finalizando Vistas Materializadas...');
       
-      // Escribir Global Stats Final
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         ...buildMetadata,
         totalImpact: Object.values(globalDisciplineStats).reduce((a, b) => a + b.impact, 0),
         totalOrders: totalCount,
         totalProcessed: processed
+      }).catch(() => {
+         errorEmitter.emit('permission-error', new FirestorePermissionError({
+           path: 'aggregates/global_stats',
+           operation: 'write'
+         }));
       });
 
-      // Escribir Taxonomía de Disciplinas Global (SSOT para Dashboard VP "Todos")
-      const discBatch = writeBatch(db);
-      Object.entries(globalDisciplineStats).forEach(([name, stats]) => {
-        const safeId = name.replace(/[\/\s\.]+/g, '_');
-        discBatch.set(doc(db, 'taxonomy_disciplines', safeId), {
-          ...buildMetadata,
-          id: safeId,
-          name: name,
-          impact: stats.impact,
-          count: stats.count
-        });
-      });
-      await discBatch.commit();
+      // Guardar Taxonomía de Disciplinas
+      await saveTaxonomyInChunks(db, 'taxonomy_disciplines', globalDisciplineStats, buildMetadata);
 
-      // Escribir Formatos y sus desgloses internos
+      // Guardar Formatos y sus desgloses
       for (const [formatId, stats] of Object.entries(globalFormatStats)) {
-        await setDoc(doc(db, 'taxonomy_formats', formatId), {
+        const formatRef = doc(db, 'taxonomy_formats', formatId);
+        await setDoc(formatRef, {
           ...buildMetadata,
           id: formatId,
           name: FORMAT_LABELS[formatId as NormalizedFormat] || formatId,
@@ -184,20 +212,16 @@ export default function AnalysisPage() {
           totalOrders: stats.count
         });
 
-        const subBatch = writeBatch(db);
-        Object.entries(stats.disciplines).forEach(([discName, dStats]) => {
-          const safeId = discName.replace(/[\/\s\.]+/g, '_');
-          subBatch.set(doc(db, 'aggregates', 'format_analytics', 'formats', formatId, 'disciplines_stats', safeId), {
-            ...buildMetadata,
-            name: discName,
-            impact: dStats.impact,
-            count: dStats.count
-          });
-        });
-        await subBatch.commit();
+        // Disciplinas por formato (Sub-agregado)
+        await saveTaxonomyInChunks(
+          db, 
+          `aggregates/format_analytics/formats/${formatId}/disciplines_stats`, 
+          stats.disciplines, 
+          buildMetadata
+        );
       }
 
-      toast({ title: "Sincronización Exitosa", description: "Universo 80/20 reconstruido con trazabilidad total." });
+      toast({ title: "Sincronización Exitosa", description: "Universo 80/20 reconstruido sin duplicados." });
     } catch (e: any) {
       console.error(e);
       toast({ variant: "destructive", title: "Error en Reconstrucción", description: e.message });
