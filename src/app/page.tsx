@@ -21,10 +21,7 @@ import {
   Settings2,
   Type,
   Palette,
-  ChevronRight,
-  TrendingUp,
-  X,
-  ArrowUpRight
+  TrendingUp
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -55,7 +52,7 @@ import {
 } from "@/components/ui/popover";
 import { ScrollArea } from '@/components/ui/scroll-area';
 
-// Paletas de colores predeterminadas
+// Paletas de colores predeterminadas de alta visibilidad
 const THEMES = {
   corporate: ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#000000', '#54585A', '#74767B'],
   vibrant: ['#2563EB', '#D97706', '#059669', '#7C3AED', '#DB2777', '#DC2626', '#4B5563', '#0891B2', '#4F46E5', '#9333EA'],
@@ -71,26 +68,27 @@ export default function VpDashboard() {
   const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
   const [selectedDiscipline, setSelectedDiscipline] = useState<any | null>(null);
   
-  // Estados para configuración visual
   const [colorTheme, setColorTheme] = useState<keyof typeof THEMES>('corporate');
   const [textSize, setTextSize] = useState<'sm' | 'md' | 'lg'>('md');
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Datos Globales Pre-calculados
+  // 1. Datos Globales
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: globalTaxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
-  // 2. Datos específicos por Formato (Agregación en tiempo real)
+  // 2. Datos específicos por Formato (Agregación dinámica)
   const formatOrdersQuery = useMemoFirebase(() => {
     if (!db || formatFilter === 'all') return null;
+    // Utilizamos el índice compuesto [format + impactoNeto]
     return query(
       collection(db, 'orders'), 
       where('format', '==', formatFilter),
-      limit(3000) // Límite razonable para agregación en cliente para el dashboard
+      orderBy('impactoNeto', 'desc'),
+      limit(3000)
     );
   }, [db, formatFilter]);
 
@@ -98,11 +96,10 @@ export default function VpDashboard() {
 
   const formats = ["SAMS CLUB", "WALMART SUPERCENTER", "BODEGA AURRERA", "WALMART EXPRESS", "MI BODEGA"];
 
-  // 3. Lógica de Procesamiento Pareto & Formato
+  // 3. Procesamiento Pareto & Mapa de Calor
   const processedData = useMemo(() => {
     const colors = THEMES[colorTheme];
     
-    // CASO A: Filtro GLOBAL (Usa taxonomía pre-calculada)
     if (formatFilter === 'all') {
       if (!globalTaxonomyDocs) return { pareto: [], totalImpact: globalAgg?.totalImpact || 0, totalCount: globalAgg?.totalProcessed || 0 };
       
@@ -114,7 +111,7 @@ export default function VpDashboard() {
         const pct = totalImpact > 0 ? ((d.impact || 0) / totalImpact) * 100 : 0;
         return {
           id: d.id,
-          name: d.name || d.id || 'INDEFINIDA',
+          name: d.name || d.id || 'SIN NOMBRE',
           value: d.impact || 0,
           impact: d.impact || 0,
           percentage: Number(pct.toFixed(1)),
@@ -128,7 +125,6 @@ export default function VpDashboard() {
       return { pareto, totalImpact, totalCount: globalAgg?.totalProcessed || 0 };
     }
 
-    // CASO B: Filtro por FORMATO (Agrega desde órdenes cargadas)
     if (!formatOrders) return { pareto: [], totalImpact: 0, totalCount: 0 };
 
     const discMap: Record<string, any> = {};
@@ -192,12 +188,10 @@ export default function VpDashboard() {
   }
 
   const CustomizedContent = (props: any) => {
-    const { root, depth, x, y, width, height, index, name, impact, percentage, color } = props;
+    const { x, y, width, height, name, impact, percentage, color } = props;
     if (width < 45 || height < 45) return null;
 
-    const safeName = String(name || 'INDEFINIDA');
-    
-    // Tamaños de texto dinámicos
+    const safeName = String(name || 'SIN NOMBRE');
     const sizes = {
       sm: { title: 9, meta: 8, pct: 12 },
       md: { title: 11, meta: 9, pct: 16 },
@@ -299,7 +293,7 @@ export default function VpDashboard() {
                           onClick={() => setColorTheme(t as any)}
                           className="h-8 text-[9px] font-bold uppercase rounded-lg"
                         >
-                          {t === 'corporate' ? 'Corporativo' : t === 'vibrant' ? 'Vibrante' : t === 'ocean' ? 'Océano' : 'Seguridad'}
+                          {t === 'corporate' ? 'Corp' : t === 'vibrant' ? 'Vibra' : t === 'ocean' ? 'Ocea' : 'Segur'}
                         </Button>
                       ))}
                     </div>
@@ -316,7 +310,7 @@ export default function VpDashboard() {
                           onClick={() => setTextSize(s)}
                           className="h-8 text-[9px] font-bold uppercase rounded-lg"
                         >
-                          {s === 'sm' ? 'Pequeño' : s === 'md' ? 'Medio' : 'Grande'}
+                          {s === 'sm' ? 'Peque' : s === 'md' ? 'Medio' : 'Gran'}
                         </Button>
                       ))}
                     </div>
@@ -400,15 +394,15 @@ export default function VpDashboard() {
                 <div className="flex items-center gap-3">
                    <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 rounded-lg border">
                       <Type className="h-3 w-3 text-slate-400" />
-                      <span className="text-[8px] font-black text-slate-500 uppercase">{textSize === 'sm' ? 'Pequeño' : textSize === 'md' ? 'Mediano' : 'Grande'}</span>
+                      <span className="text-[8px] font-black text-slate-500 uppercase">{textSize === 'sm' ? 'Pequ' : textSize === 'md' ? 'Med' : 'Gran'}</span>
                    </div>
-                   <Badge className="bg-primary text-white border-none text-[9px] font-black px-5 py-2 shadow-xl shadow-primary/20 rounded-full">JERARQUÍA PARETO</Badge>
+                   <Badge className="bg-primary text-white border-none text-[9px] font-black px-5 py-2 shadow-xl shadow-primary/20 rounded-full uppercase">Jerarquía Pareto</Badge>
                 </div>
               </CardHeader>
               <CardContent className="h-[550px] p-8">
                 <ResponsiveContainer width="100%" height="100%">
                   <Treemap
-                    data={processedData.pareto.slice(0, 20)}
+                    data={processedData.pareto.slice(0, 30)}
                     dataKey="value"
                     stroke="#fff"
                     content={<CustomizedContent />}
@@ -477,9 +471,9 @@ export default function VpDashboard() {
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-accent">Diagnóstico Estratégico</p>
                   <Zap className="h-4 w-4 text-accent animate-pulse" />
                 </div>
-                <p className="text-xs text-slate-300 leading-relaxed italic border-l-2 border-accent pl-4">
+                <div className="text-xs text-slate-300 leading-relaxed italic border-l-2 border-accent pl-4">
                   En el formato <span className="text-white font-bold">{formatFilter === 'all' ? 'GLOBAL' : formatFilter}</span>, las primeras {vitalFew.length} disciplinas concentran el 85% de la variabilidad presupuestaria. Se recomienda un plan de mitigación enfocado en <span className="text-white font-bold">{vitalFew[0]?.name || 'el Hito Principal'}</span>.
-                </p>
+                </div>
               </div>
             </Card>
           </div>
