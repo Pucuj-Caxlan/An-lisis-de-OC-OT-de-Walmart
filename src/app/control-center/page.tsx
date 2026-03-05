@@ -11,17 +11,15 @@ import {
   Target, 
   Zap, 
   TrendingDown,
-  ArrowRight,
   ChevronLeft,
-  ArrowUpRight,
   Focus,
   Filter,
   CheckCircle2,
   X,
-  ChevronDown,
   CalendarDays,
   User,
-  Layout
+  Layout,
+  Loader2
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -65,9 +63,8 @@ export default function ControlCenterPage() {
   const [selectedFormats, setSelectedFormats] = useState<string[]>([]);
   const [selectedCoordinators, setSelectedCoordinators] = useState<string[]>([]);
   const [selectedStages, setSelectedStages] = useState<string[]>([]);
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [selectedYear, setSelectedYear] = useState<number>(2024); // Año base por defecto (ajustable)
   const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all');
-  const [selectedDiscipline, setSelectedDiscipline] = useState<string>('all');
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -90,7 +87,7 @@ export default function ControlCenterPage() {
 
   const { data: analyticsEntries, isLoading } = useCollection(analyticsQuery);
 
-  // Lógica de filtrado y suma en cliente (High Performance)
+  // Lógica de filtrado y suma en cliente con mayor robustez
   const filteredStats = useMemo(() => {
     if (!analyticsEntries) return null;
 
@@ -99,7 +96,7 @@ export default function ControlCenterPage() {
     const disciplineMap: Record<string, { impact: number, count: number, name: string }> = {};
 
     analyticsEntries.forEach(entry => {
-      // Aplicar filtros de selección múltiple
+      // Aplicar filtros de selección múltiple (si el array está vacío, pasan todos)
       const matchFormat = selectedFormats.length === 0 || selectedFormats.includes(entry.format);
       const matchCoord = selectedCoordinators.length === 0 || selectedCoordinators.includes(entry.coordinator);
       const matchStage = selectedStages.length === 0 || selectedStages.includes(entry.stage);
@@ -129,18 +126,24 @@ export default function ControlCenterPage() {
     const vitalFew = paretoDiscs.filter(d => d.cumulativePct <= 85);
     const concentrationRatio = totalImpact > 0 ? (vitalFew.reduce((a, b) => a + b.impact, 0) / totalImpact) * 100 : 0;
 
+    // Datos estacionales para el gráfico de área
+    const trendData = MONTHS.map(m => {
+      const monthImpact = analyticsEntries
+        .filter(e => e.month === m.id)
+        .filter(e => selectedFormats.length === 0 || selectedFormats.includes(e.format))
+        .filter(e => selectedCoordinators.length === 0 || selectedCoordinators.includes(e.coordinator))
+        .filter(e => selectedStages.length === 0 || selectedStages.includes(e.stage))
+        .reduce((sum, e) => sum + e.impact, 0);
+      
+      return { month: m.name.substring(0, 3), impact: monthImpact };
+    });
+
     return {
       totalImpact,
       totalOrders,
       concentrationRatio,
       paretoDiscs,
-      trendData: Array.from({ length: 12 }).map((_, i) => {
-        const monthEntry = analyticsEntries.filter(e => e.month === (i + 1));
-        return {
-          month: MONTHS[i].name.substring(0, 3),
-          impact: monthEntry.reduce((sum, e) => sum + e.impact, 0)
-        };
-      })
+      trendData
     };
   }, [analyticsEntries, selectedFormats, selectedCoordinators, selectedStages]);
 
@@ -155,7 +158,7 @@ export default function ControlCenterPage() {
     setSelectedCoordinators([]);
     setSelectedStages([]);
     setSelectedMonth('all');
-    setSelectedYear(new Date().getFullYear());
+    setSelectedYear(2024);
   };
 
   if (!user?.uid || !mounted) return (
@@ -285,12 +288,14 @@ export default function ControlCenterPage() {
 
           {isLoading && <Loader2 className="h-4 w-4 animate-spin text-primary ml-auto" />}
           
-          <div className="ml-auto flex items-center gap-4">
-             <div className="text-right">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Universo Filtrado</p>
-                <p className="text-xs font-black text-primary">{(filteredStats?.totalOrders || 0).toLocaleString()} Registros</p>
-             </div>
-          </div>
+          {!isLoading && (
+            <div className="ml-auto flex items-center gap-4">
+               <div className="text-right">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Universo Filtrado</p>
+                  <p className="text-xs font-black text-primary">{(filteredStats?.totalOrders || 0).toLocaleString()} Registros</p>
+               </div>
+            </div>
+          )}
         </div>
 
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
@@ -299,7 +304,7 @@ export default function ControlCenterPage() {
                <Filter className="h-16 w-16 opacity-10" />
                <div className="text-center">
                  <p className="text-sm font-black uppercase text-slate-400">No hay registros para esta combinación de filtros</p>
-                 <p className="text-[10px] text-slate-400 mt-1">Ajuste los criterios en la cinta superior o reinicie la búsqueda.</p>
+                 <p className="text-[10px] text-slate-400 mt-1">Ajuste los criterios en la cinta superior (revisa el Año y el Mes).</p>
                </div>
                <Button variant="outline" onClick={resetFilters} className="rounded-xl uppercase text-[10px] font-black">Limpiar Filtros</Button>
             </div>
@@ -333,14 +338,12 @@ export default function ControlCenterPage() {
 
                 <Card className="p-6 border-none shadow-md bg-white rounded-3xl">
                   <div className="flex items-center justify-between mb-4">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Filtros Activos</p>
-                    <div className="p-2 bg-emerald-50 rounded-lg"><CheckCircle2 className="h-4 w-4 text-emerald-500" /></div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Periodo de Auditoría</p>
+                    <div className="p-2 bg-emerald-50 rounded-lg"><CalendarDays className="h-4 w-4 text-emerald-500" /></div>
                   </div>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedFormats.length > 0 && <Badge className="text-[8px] bg-slate-100 text-slate-600">Formato</Badge>}
-                    {selectedCoordinators.length > 0 && <Badge className="text-[8px] bg-slate-100 text-slate-600">Coordinador</Badge>}
-                    {selectedStages.length > 0 && <Badge className="text-[8px] bg-slate-100 text-slate-600">Etapa</Badge>}
-                    {selectedMonth !== 'all' && <Badge className="text-[8px] bg-slate-100 text-slate-600">Mes</Badge>}
+                  <div className="flex items-baseline gap-2">
+                    <h3 className="text-3xl font-black text-slate-900 font-headline">{selectedYear}</h3>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">{selectedMonth === 'all' ? 'Anual' : MONTHS.find(m => m.id === selectedMonth)?.name}</span>
                   </div>
                 </Card>
               </div>
@@ -351,9 +354,9 @@ export default function ControlCenterPage() {
                     <div className="flex justify-between items-center">
                       <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-3">
                         <Focus className="h-5 w-5 text-cyan-500" /> 
-                        Hitos Principales
+                        Hitos Principales (Filtrados)
                       </h4>
-                      <Badge variant="outline" className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Ranking Filtrado</Badge>
+                      <Badge variant="outline" className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Ranking Pareto</Badge>
                     </div>
                   </div>
 
@@ -370,7 +373,7 @@ export default function ControlCenterPage() {
                           </div>
                           <div className="text-right">
                             <span className="text-[11px] font-black text-slate-900">{formatCurrency(d.impact)}</span>
-                            <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">{d.participationPct.toFixed(1)}% de la muestra</p>
+                            <p className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest">{d.participationPct.toFixed(1)}%</p>
                           </div>
                         </div>
                         <div className="relative">
@@ -386,7 +389,7 @@ export default function ControlCenterPage() {
                     <div className="flex justify-between items-center border-b border-slate-100 pb-6 mb-8">
                       <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-3">
                         <TrendingDown className="h-5 w-5 text-rose-500" /> 
-                        Curva Estacional (Impacto Mensual {selectedYear})
+                        Impacto Mensual ({selectedYear})
                       </h4>
                     </div>
                     <div className="h-[350px]">
@@ -414,25 +417,25 @@ export default function ControlCenterPage() {
 
                   <div className="grid md:grid-cols-2 gap-6">
                     <Card className="p-6 border-none shadow-md bg-white rounded-3xl border-t-4 border-t-cyan-500">
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Eficiencia Forense</h5>
+                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Calidad de Filtro</h5>
                       <div className="space-y-4">
                         <div className="flex justify-between items-center text-xs">
-                          <span className="font-bold text-slate-600">Ranking Calibrado</span>
-                          <span className="font-black text-emerald-600">Basado en Agregados</span>
+                          <span className="font-bold text-slate-600">Integridad de Datos</span>
+                          <span className="font-black text-emerald-600">Verificado</span>
                         </div>
                         <Progress value={100} className="h-1 bg-slate-50" />
-                        <div className="text-[9px] text-slate-400 leading-relaxed italic">El análisis 80/20 se recalcula automáticamente sobre el universo filtrado garantizando congruencia total.</div>
+                        <div className="text-[9px] text-slate-400 leading-relaxed italic">El ranking se recalcula dinámicamente sobre los {filteredStats?.totalOrders.toLocaleString()} registros del segmento.</div>
                       </div>
                     </Card>
                     <Card className="p-6 border-none shadow-md bg-white rounded-3xl border-t-4 border-t-accent">
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Mitigación Focalizada</h5>
+                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Drivers Principales</h5>
                       <div className="space-y-4">
                         <div className="flex justify-between items-center text-xs">
-                          <span className="font-bold text-slate-600">Vital Few del Segmento</span>
+                          <span className="font-bold text-slate-600">Concentración Pareto</span>
                           <span className="font-black text-accent">{(filteredStats?.concentrationRatio || 0).toFixed(0)}%</span>
                         </div>
                         <Progress value={filteredStats?.concentrationRatio || 0} className="h-1 bg-slate-50" />
-                        <div className="text-[9px] text-slate-400 leading-relaxed italic">La concentración del impacto bajo estos criterios permite priorizar acciones de mitigación locales.</div>
+                        <div className="text-[9px] text-slate-400 leading-relaxed italic">Este segmento requiere atención focalizada en las disciplinas marcadas en naranja.</div>
                       </div>
                     </Card>
                   </div>
@@ -445,27 +448,3 @@ export default function ControlCenterPage() {
     </div>
   );
 }
-
-const Loader2 = ({ className }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="24"
-    height="24"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <path d="M12 2v4" />
-    <path d="m16.2 7.8 2.9-2.9" />
-    <path d="M18 12h4" />
-    <path d="m16.2 16.2 2.9 2.9" />
-    <path d="M12 18v4" />
-    <path d="m4.9 19.1 2.9-2.9" />
-    <path d="M2 12h4" />
-    <path d="m4.9 4.9 2.9 2.9" />
-  </svg>
-);
