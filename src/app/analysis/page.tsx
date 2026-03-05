@@ -59,7 +59,8 @@ import {
   writeBatch,
   getCountFromServer,
   getDocs,
-  updateDoc
+  updateDoc,
+  documentId
 } from 'firebase/firestore';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import {
