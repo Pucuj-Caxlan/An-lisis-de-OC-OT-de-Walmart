@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useEffect } from 'react';
@@ -7,11 +6,12 @@ import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { 
-  Database, 
   RefreshCcw, 
   ShieldCheck,
   Loader2,
-  History
+  History,
+  Database,
+  Layers
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useUser, useDoc } from '@/firebase';
@@ -29,7 +29,13 @@ import {
   getCountFromServer,
   Firestore
 } from 'firebase/firestore';
-import { normalizeFormatName, FORMAT_LABELS, NormalizedFormat } from '@/lib/excel-processor';
+import { 
+  normalizeFormatName, 
+  normalizeCoordinator, 
+  normalizeStage,
+  FORMAT_LABELS, 
+  NormalizedFormat 
+} from '@/lib/excel-processor';
 import { Progress } from '@/components/ui/progress';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
@@ -48,9 +54,6 @@ export default function AnalysisPage() {
   const aggRef = doc(db!, 'aggregates', 'global_stats');
   const { data: globalAgg } = useDoc(aggRef);
 
-  /**
-   * Helper para purgar colecciones de forma recursiva (Elimina el 100% de los residuos)
-   */
   const purgeCollectionCompletely = async (db: Firestore, collPath: string) => {
     let hasMore = true;
     while (hasMore) {
@@ -71,58 +74,29 @@ export default function AnalysisPage() {
     }
   };
 
-  /**
-   * Helper robusto para guardar taxonomías en bloques de 400
-   */
-  const saveTaxonomyInChunks = async (db: Firestore, collPath: string, stats: Record<string, any>, buildMetadata: any) => {
-    const entries = Object.entries(stats);
-    const CHUNK_SIZE = 400; 
-
-    for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
-      const chunk = entries.slice(i, i + CHUNK_SIZE);
-      const batch = writeBatch(db);
-      
-      chunk.forEach(([id, data]) => {
-        const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        const docRef = doc(db, collPath, safeId);
-        batch.set(docRef, {
-          ...data,
-          ...buildMetadata,
-          id: safeId,
-          name: id,
-          updatedAt: new Date().toISOString()
-        });
-      });
-
-      await batch.commit().catch(async () => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: collPath,
-          operation: 'write'
-        }));
-      });
-    }
-  };
-
   const handleDeepSyncAndBackfill = async () => {
     if (!db || !user) return;
     setIsSyncing(true);
     setSyncSyncProgress(0);
 
     try {
-      // 1. OBTENER CUENTA SSOT
       setSyncStep('Validando Universo Base (orders)...');
       const totalSnapshot = await getCountFromServer(collection(db, 'orders'));
       const totalCount = totalSnapshot.data().count;
 
-      // 2. FASE DE PURGA PROFUNDA
-      setSyncStep('Fase de Purga Profunda: Eliminando todos los residuos...');
-      const collectionsToPurge = ['taxonomy_formats', 'taxonomy_disciplines', 'taxonomy_causes'];
+      setSyncStep('Fase de Purga Profunda: Limpiando agregados antiguos...');
+      const collectionsToPurge = [
+        'taxonomy_formats', 
+        'taxonomy_disciplines', 
+        'hitos_analytics',
+        'taxonomy_coordinators',
+        'taxonomy_stages'
+      ];
       for (const coll of collectionsToPurge) {
         await purgeCollectionCompletely(db, coll);
       }
 
-      // 3. FASE DE ESCANEO Y ACUMULACIÓN
-      setSyncStep('Fase de Escaneo: Procesando registros...');
+      setSyncStep('Fase de Backfill & Normalización...');
       let processed = 0;
       let lastVisible = null;
       let hasMore = true;
@@ -132,11 +106,27 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '2.5.0-forensic'
+        build_version: '3.0.0-multidimensional'
       };
 
-      const globalFormatStats: Record<string, { impact: number, count: number, disciplines: Record<string, { impact: number, count: number }> }> = {};
-      const globalDisciplineStats: Record<string, { impact: number, count: number, subs: Record<string, { impact: number, count: number }> }> = {};
+      // Agregadores en memoria para taxonomías básicas
+      const globalFormatStats: Record<string, any> = {};
+      const globalDisciplineStats: Record<string, any> = {};
+      const coordinators = new Set<string>();
+      const stages = new Set<string>();
+
+      // Agregador Multidimensional para Hitos Principales
+      // Key: year_month_format_coord_stage_disc
+      const hitosAgg: Record<string, { 
+        impact: number, 
+        count: number, 
+        year: number, 
+        month: number, 
+        format: string, 
+        coordinator: string, 
+        stage: string, 
+        discipline: string 
+      }> = {};
 
       while (hasMore) {
         let q = query(collection(db, 'orders'), orderBy(documentId()), limit(CHUNK_SIZE));
@@ -149,107 +139,110 @@ export default function AnalysisPage() {
         
         snap.forEach(d => {
           const data = d.data();
-          const rawFormat = data.format || data.format_origin || data.format_normalized || 'OTRO';
-          const normalized = normalizeFormatName(rawFormat);
           const impact = Number(data.impactoNeto || 0);
+          
+          // Normalización de campos clave
+          const format = normalizeFormatName(data.format || data.format_origin || 'OTRO');
           const disc = String(data.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
           const subDisc = String(data.subcausa_normalizada || 'GENERAL').trim().toUpperCase();
+          const coord = normalizeCoordinator(data.coordinador || data.coordinador_normalizado);
+          const stage = normalizeStage(data.etapa || data.etapa_proyecto_normalizada);
+          const date = new Date(data.fecha_oc_ot || data.processedAt || new Date().toISOString());
+          const year = isNaN(date.getFullYear()) ? new Date().getFullYear() : date.getFullYear();
+          const month = isNaN(date.getMonth()) ? new Date().getMonth() + 1 : date.getMonth() + 1;
 
+          // Enriquecer el registro original
           batch.update(doc(db, 'orders', d.id), {
-            format_normalized: normalized,
+            format_normalized: format,
+            coordinador_normalizado: coord,
+            etapa_proyecto_normalizada: stage,
+            year,
+            month,
             lastSync: buildMetadata.build_timestamp
           });
 
-          // Acumulado por Formato
-          if (!globalFormatStats[normalized]) {
-            globalFormatStats[normalized] = { impact: 0, count: 0, disciplines: {} };
-          }
-          globalFormatStats[normalized].impact += impact;
-          globalFormatStats[normalized].count += 1;
+          // Taxonomías
+          coordinators.add(coord);
+          stages.add(stage);
 
-          if (!globalFormatStats[normalized].disciplines[disc]) {
-            globalFormatStats[normalized].disciplines[disc] = { impact: 0, count: 0 };
-          }
-          globalFormatStats[normalized].disciplines[disc].impact += impact;
-          globalFormatStats[normalized].disciplines[disc].count += 1;
+          if (!globalFormatStats[format]) globalFormatStats[format] = { impact: 0, count: 0 };
+          globalFormatStats[format].impact += impact;
+          globalFormatStats[format].count += 1;
 
-          // Acumulado Global por Disciplina + Sub-disciplina (Para Control Center)
-          if (!globalDisciplineStats[disc]) {
-            globalDisciplineStats[disc] = { impact: 0, count: 0, subs: {} };
-          }
+          if (!globalDisciplineStats[disc]) globalDisciplineStats[disc] = { impact: 0, count: 0, subs: {} };
           globalDisciplineStats[disc].impact += impact;
           globalDisciplineStats[disc].count += 1;
 
-          if (!globalDisciplineStats[disc].subs[subDisc]) {
-            globalDisciplineStats[disc].subs[subDisc] = { impact: 0, count: 0 };
+          // Hitos Multidimensionales
+          const aggKey = `${year}_${month}_${format}_${coord.replace(/\s+/g, '_')}_${stage.replace(/\s+/g, '_')}_${disc.replace(/\s+/g, '_')}`;
+          if (!hitosAgg[aggKey]) {
+            hitosAgg[aggKey] = { 
+              impact: 0, count: 0, year, month, format, coordinator: coord, stage, discipline: disc 
+            };
           }
-          globalDisciplineStats[disc].subs[subDisc].impact += impact;
-          globalDisciplineStats[disc].subs[subDisc].count += 1;
+          hitosAgg[aggKey].impact += impact;
+          hitosAgg[aggKey].count += 1;
         });
 
-        await batch.commit().catch(() => {
-           errorEmitter.emit('permission-error', new FirestorePermissionError({
-             path: 'orders',
-             operation: 'update'
-           }));
-        });
-        
+        await batch.commit();
         processed += snap.size;
         setSyncSyncProgress(Math.round((processed / Math.max(1, totalCount)) * 100));
         lastVisible = snap.docs[snap.docs.length - 1];
         if (snap.size < CHUNK_SIZE) hasMore = false;
       }
 
-      // 4. PERSISTENCIA DE VISTAS MATERIALIZADAS
-      setSyncStep('Finalizando Vistas Materializadas...');
+      setSyncStep('Guardando Vistas Materializadas...');
       
+      // Guardar Global Stats
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         ...buildMetadata,
-        totalImpact: Object.values(globalDisciplineStats).reduce((a, b) => a + b.impact, 0),
+        totalImpact: Object.values(globalDisciplineStats).reduce((a: any, b: any) => a + b.impact, 0),
         totalOrders: totalCount,
         totalProcessed: processed
-      }).catch(() => {
-         errorEmitter.emit('permission-error', new FirestorePermissionError({
-           path: 'aggregates/global_stats',
-           operation: 'write'
-         }));
       });
 
-      // Guardar Taxonomía de Disciplinas (Con Subs)
-      await saveTaxonomyInChunks(db, 'taxonomy_disciplines', globalDisciplineStats, buildMetadata);
-
-      // Guardar Formatos y sus desgloses
-      for (const [formatId, stats] of Object.entries(globalFormatStats)) {
-        const formatRef = doc(db, 'taxonomy_formats', formatId);
-        await setDoc(formatRef, {
-          ...buildMetadata,
-          id: formatId,
-          name: FORMAT_LABELS[formatId as NormalizedFormat] || formatId,
-          impact: stats.impact,
-          count: stats.count
+      // Guardar Taxonomía de Formatos
+      for (const [id, data] of Object.entries(globalFormatStats)) {
+        await setDoc(doc(db, 'taxonomy_formats', id), {
+          ...data, id, name: FORMAT_LABELS[id as NormalizedFormat] || id, updatedAt: buildMetadata.build_timestamp
         });
-
-        await setDoc(doc(db, 'aggregates', 'format_analytics', 'formats', formatId), {
-          ...buildMetadata,
-          totalImpact: stats.impact,
-          totalOrders: stats.count
-        });
-
-        const discPath = `aggregates/format_analytics/formats/${formatId}/disciplines_stats`;
-        await purgeCollectionCompletely(db, discPath);
-
-        await saveTaxonomyInChunks(
-          db, 
-          discPath, 
-          stats.disciplines, 
-          buildMetadata
-        );
       }
 
-      toast({ title: "Sincronización Exitosa", description: "Universo reconstruido con trazabilidad de sub-disciplinas." });
+      // Guardar Taxonomía de Disciplinas
+      for (const [id, data] of Object.entries(globalDisciplineStats)) {
+        await setDoc(doc(db, 'taxonomy_disciplines', id), {
+          ...data, id, name: id, updatedAt: buildMetadata.build_timestamp
+        });
+      }
+
+      // Guardar Taxonomía de Coordinadores
+      for (const coord of Array.from(coordinators)) {
+        const safeId = coord.replace(/\s+/g, '_').substring(0, 50);
+        await setDoc(doc(db, 'taxonomy_coordinators', safeId), { id: safeId, name: coord });
+      }
+
+      // Guardar Taxonomía de Etapas
+      for (const stage of Array.from(stages)) {
+        const safeId = stage.replace(/\s+/g, '_').substring(0, 50);
+        await setDoc(doc(db, 'taxonomy_stages', safeId), { id: safeId, name: stage });
+      }
+
+      // Guardar Hitos Analytics (Chunked)
+      setSyncStep('Finalizando Agregados Multidimensionales...');
+      const hitosEntries = Object.entries(hitosAgg);
+      for (let i = 0; i < hitosEntries.length; i += 400) {
+        const chunk = hitosEntries.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(([key, val]) => {
+          batch.set(doc(db, 'hitos_analytics', key), { ...val, lastUpdate: buildMetadata.build_timestamp });
+        });
+        await batch.commit();
+      }
+
+      toast({ title: "Sincronización Exitosa", description: "Universo reconstruido con agregados multidimensionales." });
     } catch (e: any) {
       console.error(e);
-      toast({ variant: "destructive", title: "Error en Reconstrucción", description: e.message });
+      toast({ variant: "destructive", title: "Error en Sincronización", description: e.message });
     } finally {
       setIsSyncing(false);
       setSyncStep('');
@@ -282,13 +275,13 @@ export default function AnalysisPage() {
             <Card className="p-8 border-none shadow-xl bg-slate-900 text-white space-y-6">
               <div className="flex justify-between items-end">
                 <div className="space-y-1">
-                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Protocolo Forense Activo</p>
+                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Protocolo Forense 3.0 Activo</p>
                   <h3 className="text-2xl font-bold uppercase">{syncStep}</h3>
                 </div>
                 <span className="text-4xl font-black text-accent">{syncProgress}%</span>
               </div>
               <Progress value={syncProgress} className="h-3 bg-white/10" />
-              <p className="text-xs text-slate-400 italic">Reconstruyendo jerarquía de disciplinas y sub-causas para alineación 80/20.</p>
+              <p className="text-xs text-slate-400 italic">Construyendo agregados por Coordinador, Etapa y Formato para análisis de Hitos Principales.</p>
             </Card>
           )}
 
@@ -296,30 +289,25 @@ export default function AnalysisPage() {
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-primary">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Universo Base (Orders)</p>
               <h2 className="text-3xl font-black">{(globalAgg?.totalOrders || 0).toLocaleString()}</h2>
-              {globalAgg?.build_timestamp && (
-                <p className="text-[8px] text-slate-400 mt-2 uppercase font-bold">Build: {new Date(globalAgg.build_timestamp).toLocaleString()}</p>
-              )}
             </Card>
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-emerald-500">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impacto Global Acumulado</p>
               <h2 className="text-3xl font-black">${(Number(globalAgg?.totalImpact || 0) / 1000000).toFixed(1)}M</h2>
-              <p className="text-[8px] text-slate-400 mt-2 uppercase font-bold">Ver: {globalAgg?.build_version || 'N/A'}</p>
             </Card>
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-accent">
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Trazabilidad de Vistas</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estatus de Analítica</p>
               <div className="flex items-center gap-2 text-emerald-600 font-bold">
-                <ShieldCheck className="h-5 w-5" /> SSOT Sincronizado
+                <ShieldCheck className="h-5 w-5" /> SSOT 3.0 Multidimensional
               </div>
-              <p className="text-[8px] text-slate-400 mt-2 uppercase font-bold">Source: {globalAgg?.source_collection || 'orders'}</p>
             </Card>
           </div>
 
           <Card className="p-10 border-none shadow-sm bg-white/50 border-2 border-dashed">
              <div className="flex items-center gap-4 mb-6">
-               <History className="h-10 w-10 text-slate-300" />
+               <Layers className="h-10 w-10 text-slate-300" />
                <div className="space-y-1">
-                 <h4 className="text-sm font-black uppercase text-slate-800">Historial de Integridad</h4>
-                 <p className="text-xs text-slate-500">Cada sincronización garantiza que el impacto neto y los conteos de disciplinas cuadren con el universo base de Walmart.</p>
+                 <h4 className="text-sm font-black uppercase text-slate-800">Trazabilidad Multidimensional</h4>
+                 <p className="text-xs text-slate-500">La nueva arquitectura permite segmentar por Coordinador y Etapa del Proyecto sin degradar el rendimiento.</p>
                </div>
              </div>
              <div className="space-y-4">
@@ -328,17 +316,17 @@ export default function AnalysisPage() {
                   <span>Valor en Base</span>
                 </div>
                 <div className="flex justify-between text-xs py-2 border-b border-slate-100">
-                  <span className="text-slate-500">Build Timestamp</span>
-                  <span className="font-bold">{globalAgg?.build_timestamp || 'Pendiente'}</span>
+                  <span className="text-slate-500">Versión del Agregado</span>
+                  <span className="font-bold">{globalAgg?.build_version || 'N/A'}</span>
                 </div>
                 <div className="flex justify-between text-xs py-2 border-b border-slate-100">
-                  <span className="text-slate-500">Registros Procesados</span>
-                  <span className="font-bold">{globalAgg?.totalProcessed || 0}</span>
+                  <span className="text-slate-500">Última Sincronización</span>
+                  <span className="font-bold">{globalAgg?.build_timestamp ? new Date(globalAgg.build_timestamp).toLocaleString() : 'Pendiente'}</span>
                 </div>
                 <div className="flex justify-between text-xs py-2">
-                  <span className="text-slate-500">Diferencia orders vs aggregates</span>
+                  <span className="text-slate-500">Integridad de Registros</span>
                   <span className={`font-black ${globalAgg?.totalOrders === globalAgg?.totalProcessed ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    {(globalAgg?.totalOrders || 0) - (globalAgg?.totalProcessed || 0)}
+                    {globalAgg?.totalOrders === globalAgg?.totalProcessed ? 'Sincronizado' : 'Desajustado'}
                   </span>
                 </div>
              </div>

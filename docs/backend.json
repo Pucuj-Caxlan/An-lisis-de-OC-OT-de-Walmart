@@ -1,4 +1,3 @@
-
 {
   "entities": {
     "Order": {
@@ -6,8 +5,12 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "format_origin": { "type": "string", "description": "Valor original del Excel" },
-        "format_normalized": { "type": "string", "enum": ["BAE", "BA", "MB", "SC", "WSC", "WE", "OTRO"] },
+        "format_origin": { "type": "string" },
+        "format_normalized": { "type": "string" },
+        "coordinador_normalizado": { "type": "string" },
+        "etapa_proyecto_normalizada": { "type": "string" },
+        "year": { "type": "number" },
+        "month": { "type": "number" },
         "projectId": { "type": "string" },
         "projectName": { "type": "string" },
         "impactoNeto": { "type": "number" },
@@ -15,12 +18,18 @@
         "classification_status": { "type": "string" }
       }
     },
-    "FormatAggregate": {
-      "title": "Format Aggregate",
+    "HitosAnalytics": {
+      "title": "Hitos Analytics",
       "type": "object",
       "properties": {
-        "totalImpact": { "type": "number" },
-        "totalOrders": { "type": "number" },
+        "year": { "type": "number" },
+        "month": { "type": "number" },
+        "format": { "type": "string" },
+        "coordinator": { "type": "string" },
+        "stage": { "type": "string" },
+        "discipline": { "type": "string" },
+        "impact": { "type": "number" },
+        "count": { "type": "number" },
         "lastUpdate": { "type": "string", "format": "date-time" }
       }
     }
@@ -30,7 +39,9 @@
   },
   "firestore": {
     "/orders/{orderId}": { "schema": "Order", "description": "Registros de órdenes normalizados" },
-    "/aggregates/format_analytics/formats/{formatId}": { "schema": "FormatAggregate", "description": "Totales por formato" },
-    "/aggregates/format_analytics/formats/{formatId}/disciplines/{discId}": { "schema": "object", "description": "Desglose de impacto por disciplina y formato" }
+    "/hitos_analytics/{aggKey}": { "schema": "HitosAnalytics", "description": "Agregados multidimensionales para Hitos Principales" },
+    "/taxonomy_formats/{formatId}": { "schema": "object", "description": "Catálogo de formatos" },
+    "/taxonomy_coordinators/{coordId}": { "schema": "object", "description": "Catálogo de coordinadores" },
+    "/taxonomy_stages/{stageId}": { "schema": "object", "description": "Catálogo de etapas del proyecto" }
   }
 }

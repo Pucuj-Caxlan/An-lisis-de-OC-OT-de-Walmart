@@ -1,4 +1,3 @@
-
 import * as XLSX from 'xlsx';
 
 export type NormalizedFormat = 'BAE' | 'BA' | 'MB' | 'SC' | 'WSC' | 'WE' | 'OTRO';
@@ -27,6 +26,20 @@ export function normalizeFormatName(raw: string): NormalizedFormat {
   return 'OTRO';
 }
 
+export function normalizeCoordinator(raw: any): string {
+  const name = String(raw || 'SIN ASIGNAR').trim().toUpperCase();
+  return name || 'SIN ASIGNAR';
+}
+
+export function normalizeStage(raw: any): string {
+  const stage = String(raw || 'CONSTRUCCIÓN').trim().toUpperCase();
+  if (stage.includes('DISEÑO')) return 'DISEÑO';
+  if (stage.includes('PERMISO')) return 'PERMISOS';
+  if (stage.includes('CONSTRU')) return 'CONSTRUCCIÓN';
+  if (stage.includes('LIVE') || stage.includes('CIERRE')) return 'GO-LIVE / CIERRE';
+  return stage || 'CONSTRUCCIÓN';
+}
+
 export interface NormalizedRow {
   projectId: string;
   projectName: string;
@@ -36,12 +49,24 @@ export interface NormalizedRow {
   disciplina_normalizada: string;
   causa_raiz_normalizada: string;
   subcausa_normalizada: string;
+  coordinador_normalizado: string;
+  etapa_proyecto_normalizada: string;
+  year: number;
+  month: number;
   rowNumber: number;
   [key: string]: any;
 }
 
 export const CANONICAL_SCHEMA = [
-  'projectId', 'projectName', 'format', 'impactoNeto', 'disciplina_normalizada', 'causa_raiz_normalizada'
+  'projectId', 
+  'projectName', 
+  'format', 
+  'impactoNeto', 
+  'disciplina_normalizada', 
+  'causa_raiz_normalizada',
+  'coordinador',
+  'etapa',
+  'fecha'
 ];
 
 export function processExcelFile(buffer: ArrayBuffer): { data: NormalizedRow[] } {
@@ -51,13 +76,20 @@ export function processExcelFile(buffer: ArrayBuffer): { data: NormalizedRow[] }
 
   const data = rawData.map((row, idx) => {
     const rawFormat = row['formato'] || row['format'] || '';
+    const rawDate = row['fecha'] || row['createdAt'] || new Date().toISOString();
+    const dateObj = new Date(rawDate);
+    
     return {
       ...row,
-      projectId: String(row['projectId'] || row['PID'] || ''),
+      projectId: String(row['projectId'] || row['PID'] || row['Folio'] || ''),
       projectName: String(row['projectName'] || row['Nombre'] || ''),
       format_origin: rawFormat,
       format_normalized: normalizeFormatName(rawFormat),
       impactoNeto: parseFloat(row['impactoNeto'] || row['Monto'] || '0'),
+      coordinador_normalizado: normalizeCoordinator(row['coordinador'] || row['Coordinador']),
+      etapa_proyecto_normalizada: normalizeStage(row['etapa'] || row['Etapa']),
+      year: isNaN(dateObj.getFullYear()) ? new Date().getFullYear() : dateObj.getFullYear(),
+      month: isNaN(dateObj.getMonth()) ? new Date().getMonth() + 1 : dateObj.getMonth() + 1,
       rowNumber: idx + 2
     } as NormalizedRow;
   });
