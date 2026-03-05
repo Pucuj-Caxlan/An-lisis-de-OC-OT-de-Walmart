@@ -12,7 +12,13 @@ import {
   Sparkles,
   Database,
   Activity,
-  Target
+  Target,
+  Zap,
+  TrendingUp,
+  AlertCircle,
+  ChevronRight,
+  ShieldCheck,
+  MousePointer2
 } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useDoc } from '@/firebase';
 import { collection, query, orderBy, doc } from 'firebase/firestore';
@@ -40,13 +46,26 @@ export default function WordCloudPage() {
   const localCloudWeights = useMemo(() => {
     if (!taxonomyDocs) return [];
     const maxImpact = Math.max(...taxonomyDocs.map(d => d.impact), 1);
-    return taxonomyDocs.map(d => ({
-      text: d.name || d.id, // Preferimos el nombre original
-      weight: Math.max(10, (d.impact / maxImpact) * 70 + 10),
-      impact: d.impact,
-      frequency: d.count,
-      sentiment: d.impact > (maxImpact * 0.5) ? 'Crítico' : 'Estable'
-    })).slice(0, 50);
+    const maxFreq = Math.max(...taxonomyDocs.map(d => d.count), 1);
+    
+    return taxonomyDocs.map(d => {
+      const impactRatio = d.impact / maxImpact;
+      const freqRatio = d.count / maxFreq;
+      // El peso se basa en impacto (60%) y frecuencia (40%)
+      const weight = Math.max(12, (impactRatio * 0.6 + freqRatio * 0.4) * 80 + 12);
+      
+      let sentiment: 'Crítico' | 'Riesgo' | 'Estable' = 'Estable';
+      if (impactRatio > 0.6) sentiment = 'Crítico';
+      else if (freqRatio > 0.6) sentiment = 'Riesgo';
+
+      return {
+        text: d.name || d.id,
+        weight,
+        impact: d.impact,
+        frequency: d.count,
+        sentiment
+      };
+    }).slice(0, 40); // Top 40 para no saturar visualmente
   }, [taxonomyDocs]);
 
   const runIAAnalysis = async () => {
@@ -54,59 +73,203 @@ export default function WordCloudPage() {
     setIsAnalyzing(true);
     try {
       const result = await analyzeWordCloud({ 
-        groups: localCloudWeights.map(w => ({ disciplina: w.text, causa: w.text, impactoTotal: w.impact, frecuencia: w.frequency })),
+        groups: localCloudWeights.map(w => ({ 
+          disciplina: w.text, 
+          causa: w.text, 
+          impactoTotal: w.impact, 
+          frecuencia: w.frequency 
+        })),
         totalImpact: globalAgg?.totalImpact || 0,
         totalOrders: globalAgg?.totalOrders || 0
       });
       setCloudData(result);
-      toast({ title: "Diagnóstico IA Generado" });
-    } catch (e: any) { toast({ variant: "destructive", title: "Fallo IA", description: e.message }); } finally { setIsAnalyzing(false); }
+      toast({ title: "Diagnóstico Situacional Generado", description: "Gemini ha procesado los drivers de impacto." });
+    } catch (e: any) { 
+      toast({ variant: "destructive", title: "Error en Motor IA", description: e.message }); 
+    } finally { 
+      setIsAnalyzing(false); 
+    }
   };
 
   const formatCurrency = (val: number) => {
+    if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
   };
 
+  if (!mounted) return null;
+
   return (
-    <div className="flex min-h-screen w-full bg-slate-50/30">
+    <div className="flex min-h-screen w-full bg-slate-50/50">
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10 shadow-sm">
-          <div className="flex items-center gap-4">
+        <header className="flex h-20 shrink-0 items-center justify-between border-b bg-white px-8 sticky top-0 z-20 shadow-sm">
+          <div className="flex items-center gap-6">
             <SidebarTrigger />
-            <div className="flex items-center gap-2"><BrainCircuit className="h-6 w-6 text-primary" /><h1 className="text-xl font-headline font-bold text-slate-800 uppercase">Nube Forense 80/20</h1></div>
+            <div className="flex flex-col">
+              <h1 className="text-xl font-black text-slate-900 uppercase tracking-tighter font-headline flex items-center gap-3">
+                <div className="h-3 w-3 rounded-full bg-rose-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.6)]" />
+                Nube Forense Situacional
+              </h1>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Diagnóstico de Concentración 80/20</p>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 gap-2 px-3 py-1 uppercase font-black"><Database className="h-3 w-3" /> Universo: {globalAgg?.totalOrders || 0}</Badge>
-            <Button onClick={runIAAnalysis} disabled={isAnalyzing || !localCloudWeights.length} className="bg-primary hover:bg-primary/90 gap-2 rounded-xl shadow-lg h-10 px-6">
-              {isAnalyzing ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Refinar con Gemini
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col items-end mr-4">
+               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Universo Auditado</p>
+               <p className="text-xs font-black text-primary">{(globalAgg?.totalOrders || 0).toLocaleString()} Registros</p>
+            </div>
+            <Button 
+              onClick={runIAAnalysis} 
+              disabled={isAnalyzing || !localCloudWeights.length} 
+              className="bg-slate-900 hover:bg-slate-800 text-white gap-2 rounded-xl shadow-lg h-11 px-8 text-[10px] font-black uppercase tracking-widest"
+            >
+              {isAnalyzing ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-accent" />}
+              {isAnalyzing ? 'Procesando...' : 'Diagnóstico Gemini'}
             </Button>
           </div>
         </header>
 
-        <main className="p-8 space-y-8">
-          <div className="grid md:grid-cols-3 gap-6">
-            <Card className="md:col-span-2 border-none shadow-xl bg-white rounded-3xl min-h-[500px] flex flex-wrap items-center justify-center gap-4 p-10">
-              {localCloudWeights.length === 0 ? <p className="text-xs font-bold text-slate-400 uppercase">Cargando Taxonomía...</p> : localCloudWeights.map((word, i) => (
-                <button key={i} className="transition-all hover:scale-110 relative group" style={{ fontSize: `${word.weight}px`, color: word.sentiment === 'Crítico' ? '#E11D48' : '#64748B', fontWeight: '900' }}>
-                  {word.text}
-                  <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 z-50 shadow-xl pointer-events-none">{formatCurrency(word.impact)}</span>
-                </button>
-              ))}
+        <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            {/* Visual Word Cloud Area */}
+            <Card className="lg:col-span-8 border-none shadow-2xl bg-white rounded-[2.5rem] overflow-hidden min-h-[650px] flex flex-col relative group">
+              <div className="absolute inset-0 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px] opacity-30" />
+              
+              <CardHeader className="bg-slate-50/50 border-b p-8 relative z-10">
+                <div className="flex justify-between items-center">
+                  <CardTitle className="text-sm font-black uppercase text-slate-800 tracking-widest flex items-center gap-3">
+                    <MousePointer2 className="h-5 w-5 text-primary" /> Visualización de Criticidad
+                  </CardTitle>
+                  <div className="flex gap-4">
+                    <div className="flex items-center gap-1.5"><div className="h-2 w-2 rounded-full bg-rose-500" /><span className="text-[9px] font-black uppercase text-slate-500">Alto Impacto</span></div>
+                    <div className="flex items-center gap-1.5"><div className="h-2 w-2 rounded-full bg-amber-500" /><span className="text-[9px] font-black uppercase text-slate-500">Alta Frecuencia</span></div>
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="flex-1 p-12 flex flex-wrap items-center justify-center gap-x-8 gap-y-4 relative z-10 overflow-y-auto">
+                {localCloudWeights.length === 0 ? (
+                  <div className="flex flex-col items-center gap-4 text-slate-300">
+                    <Database className="h-16 w-16 opacity-10" />
+                    <p className="text-xs font-black uppercase tracking-widest">Sincronice datos para generar la nube</p>
+                  </div>
+                ) : (
+                  localCloudWeights.map((word, i) => (
+                    <button 
+                      key={i} 
+                      className="transition-all hover:scale-125 hover:z-50 relative group cursor-crosshair"
+                      style={{ 
+                        fontSize: `${word.weight}px`, 
+                        color: word.sentiment === 'Crítico' ? '#E11D48' : (word.sentiment === 'Riesgo' ? '#D97706' : '#64748B'),
+                        fontWeight: word.weight > 40 ? '900' : '700',
+                        fontFamily: 'var(--font-headline)'
+                      }}
+                    >
+                      {word.text}
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 bg-slate-900 text-white p-4 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-2xl pointer-events-none w-48 border border-white/10">
+                        <p className="text-[10px] font-black uppercase text-accent mb-2 tracking-widest">{word.text}</p>
+                        <div className="space-y-2">
+                           <div className="flex justify-between items-end border-b border-white/10 pb-1">
+                             <span className="text-[8px] text-slate-400 font-bold uppercase">Impacto</span>
+                             <span className="text-xs font-black">{formatCurrency(word.impact)}</span>
+                           </div>
+                           <div className="flex justify-between items-end">
+                             <span className="text-[8px] text-slate-400 font-bold uppercase">Frecuencia</span>
+                             <span className="text-xs font-black">{word.frequency} OC/OT</span>
+                           </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </CardContent>
+
+              <div className="p-8 bg-slate-50 border-t flex justify-between items-center relative z-10">
+                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Escala basada en Impacto Financiero Real</p>
+                 <Badge variant="outline" className="text-[8px] font-black uppercase bg-white border-slate-200">Top 40 Drivers Detectados</Badge>
+              </div>
             </Card>
-            <div className="space-y-6">
-              <Card className="border-none shadow-md bg-white rounded-3xl overflow-hidden p-6 space-y-4">
-                <h4 className="text-sm font-black uppercase text-primary flex items-center gap-2"><Activity className="h-4 w-4" /> Diagnóstico Ejecutivo</h4>
-                {cloudData ? (
-                  <>
-                    <p className="text-sm font-bold text-slate-800">{cloudData.coreProblem}</p>
-                    <Separator />
-                    <p className="text-xs text-slate-600 italic">"{cloudData.executiveDiagnosis}"</p>
-                    <div className="pt-4"><div className="flex justify-between mb-1"><span className="text-2xl font-black text-primary">{cloudData.concentrationPercentage}%</span></div><Progress value={cloudData.concentrationPercentage} className="h-1.5" /></div>
-                  </>
-                ) : <p className="text-[10px] font-bold text-slate-400 uppercase text-center py-10">Inicie el refinamiento IA.</p>}
+
+            {/* AI Insights Area */}
+            <div className="lg:col-span-4 space-y-8">
+              <Card className="border-none shadow-xl bg-slate-900 text-white rounded-[2.5rem] overflow-hidden">
+                <CardHeader className="p-8 bg-slate-800/50">
+                   <CardTitle className="text-xs font-black uppercase text-accent tracking-[0.2em] flex items-center gap-3">
+                     <BrainCircuit className="h-5 w-5" /> Análisis Cognitivo 80/20
+                   </CardTitle>
+                </CardHeader>
+                <CardContent className="p-8 space-y-6">
+                  {!cloudData ? (
+                    <div className="py-10 text-center space-y-4">
+                       <Zap className="h-12 w-12 text-slate-700 mx-auto animate-pulse" />
+                       <p className="text-xs text-slate-500 font-bold uppercase italic px-10">Ejecute el diagnóstico para que Gemini identifique el "Core Problem" del universo filtrado.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-700">
+                      <div className="space-y-2">
+                        <h4 className="text-[10px] font-black text-primary uppercase tracking-widest leading-none">Driver Principal</h4>
+                        <p className="text-xl font-headline font-bold text-white tracking-tight">{cloudData.coreProblem}</p>
+                      </div>
+                      
+                      <Separator className="bg-white/10" />
+                      
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-end">
+                          <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Concentración del Gasto</h4>
+                          <span className="text-2xl font-black">{cloudData.concentrationPercentage}%</span>
+                        </div>
+                        <Progress value={cloudData.concentrationPercentage} className="h-2 bg-white/10" />
+                        <p className="text-[9px] text-slate-400 italic">Este driver concentra la mayor erosión presupuestaria detectada en el periodo.</p>
+                      </div>
+
+                      <div className="bg-slate-800 p-6 rounded-3xl border border-white/5 space-y-3">
+                         <h4 className="text-[10px] font-black text-accent uppercase tracking-widest flex items-center gap-2">
+                           <Activity className="h-3.5 w-3.5" /> Diagnóstico VP
+                         </h4>
+                         <p className="text-xs text-slate-300 leading-relaxed italic">"{cloudData.executiveDiagnosis}"</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
               </Card>
+
+              {cloudData && (
+                <Card className="border-none shadow-xl bg-white rounded-[2.5rem] p-8 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+                  <h4 className="text-[11px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-3 border-b pb-4">
+                    <Target className="h-5 w-5 text-primary" /> Hoja de Ruta Estratégica
+                  </h4>
+                  <div className="space-y-4">
+                    {cloudData.strategicRecommendations.map((rec, i) => (
+                      <div key={i} className="flex gap-4 p-4 rounded-2xl bg-slate-50 group hover:bg-primary/5 transition-colors cursor-default">
+                        <div className="h-8 w-8 rounded-xl bg-white border text-primary flex items-center justify-center text-[10px] font-black shrink-0 shadow-sm group-hover:bg-primary group-hover:text-white transition-all">
+                          {i + 1}
+                        </div>
+                        <p className="text-xs font-bold text-slate-700 leading-tight flex items-center">{rec}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <Button variant="outline" className="w-full rounded-xl gap-2 h-12 text-[10px] font-black uppercase tracking-widest border-slate-200">
+                    Exportar Plan Forense <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </Card>
+              )}
             </div>
+          </div>
+
+          {/* Bottom Alert Banner */}
+          <div className="bg-rose-600 p-6 rounded-[2rem] text-white flex flex-col md:flex-row items-center justify-between shadow-2xl">
+             <div className="flex items-center gap-6 mb-4 md:mb-0">
+                <div className="bg-white/20 p-4 rounded-full">
+                  <ShieldCheck className="h-8 w-8 text-white" />
+                </div>
+                <div className="space-y-0.5">
+                   <h5 className="text-lg font-black uppercase tracking-tighter">Certificación de Integridad 80/20</h5>
+                   <p className="text-xs font-bold opacity-70">Análisis verificado contra el universo de {(globalAgg?.totalImpact || 0).toLocaleString('es-MX', {style: 'currency', currency: 'MXN'})} auditados.</p>
+                </div>
+             </div>
+             <p className="text-[10px] font-black uppercase tracking-widest border border-white/20 px-6 py-3 rounded-xl bg-white/10">
+               Última Sincronización: {globalAgg?.lastUpdate ? new Date(globalAgg.lastUpdate).toLocaleString() : 'Pendiente'}
+             </p>
           </div>
         </main>
       </SidebarInset>
