@@ -75,34 +75,45 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Descubrimiento dinámico de formatos disponibles con mapa de normalización
+  // Taxonomía oficial de formatos (SSOT)
+  const taxonomyFormatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('name', 'asc')) : null, [db]);
+  const { data: taxonomyFormats } = useCollection(taxonomyFormatsQuery);
+
   useEffect(() => {
-    if (!db || !isAuthReady) return;
-    const fetchFormats = async () => {
-      try {
-        const q = query(collection(db, 'orders'), limit(3000));
-        const snap = await getDocs(q);
-        const fMap: Record<string, string> = {};
-        const formatsSet = new Set<string>();
-        
-        snap.forEach(doc => {
-          const raw = doc.data().format;
-          if (raw) {
-            const normalized = String(raw).trim().toUpperCase();
-            if (!fMap[normalized]) fMap[normalized] = String(raw);
-            formatsSet.add(normalized);
-          }
-        });
-        
-        setFormatMap(fMap);
-        setAvailableFormats(Array.from(formatsSet).sort());
-        console.log("[Dashboard Debug] Formatos detectados:", formatsSet);
-      } catch (e) {
-        console.error("Error descubriendo formatos:", e);
-      }
-    };
-    fetchFormats();
-  }, [db, isAuthReady]);
+    if (taxonomyFormats && taxonomyFormats.length > 0) {
+      const fMap: Record<string, string> = {};
+      const fList: string[] = [];
+      taxonomyFormats.forEach(f => {
+        const name = f.name || f.id;
+        fMap[name] = name;
+        fList.push(name);
+      });
+      setFormatMap(fMap);
+      setAvailableFormats(fList);
+      console.log("[Dashboard Debug] Formatos cargados desde taxonomía:", fList);
+    } else if (db && isAuthReady) {
+      // Fallback: Descubrimiento dinámico si la taxonomía está vacía
+      const fetchFormatsFallback = async () => {
+        try {
+          const q = query(collection(db, 'orders'), limit(3000));
+          const snap = await getDocs(q);
+          const fMap: Record<string, string> = {};
+          const formatsSet = new Set<string>();
+          snap.forEach(doc => {
+            const raw = doc.data().format;
+            if (raw) {
+              const normalized = String(raw).trim().toUpperCase();
+              fMap[normalized] = String(raw);
+              formatsSet.add(normalized);
+            }
+          });
+          setFormatMap(fMap);
+          setAvailableFormats(Array.from(formatsSet).sort());
+        } catch (e) { console.error("Fallback discovery failed:", e); }
+      };
+      fetchFormatsFallback();
+    }
+  }, [taxonomyFormats, db, isAuthReady]);
 
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
@@ -110,18 +121,14 @@ export default function VpDashboard() {
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: globalTaxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
-  // Consulta OPTIMIZADA: Sincronizada exactamente con el Índice Compuesto
   const formatOrdersQuery = useMemoFirebase(() => {
     if (!db || formatFilter === 'all') return null;
-    
     const rawValueToQuery = formatMap[formatFilter] || formatFilter;
-    console.log(`[Dashboard Debug] Ejecutando consulta para Formato: ${rawValueToQuery}`);
-    
     return query(
       collection(db, 'orders'), 
       where('format', '==', rawValueToQuery),
       orderBy('impactoNeto', 'desc'),
-      orderBy(documentId(), 'desc'), // Requerido por el índice compuesto manual
+      orderBy(documentId(), 'desc'),
       limit(3000)
     );
   }, [db, formatFilter, formatMap]);
@@ -131,60 +138,45 @@ export default function VpDashboard() {
   const processedData = useMemo(() => {
     const colors = THEMES[colorTheme];
     
-    // CASO 1: Visión Global (Agregados pre-calculados)
     if (formatFilter === 'all') {
       if (!globalTaxonomyDocs || globalTaxonomyDocs.length === 0) {
         return { pareto: [], totalImpact: globalAgg?.totalImpact || 0, totalCount: globalAgg?.totalOrders || 0 };
       }
-      
       const totalImpact = globalAgg?.totalImpact || 1;
       let cumulative = 0;
-      
       const pareto = globalTaxonomyDocs.map((d, index) => {
         const impact = Number(d.impact || 0);
         cumulative += impact;
-        const pct = (impact / totalImpact) * 100;
         return {
           id: d.id || `${d.name}-${index}`,
           name: d.name || d.id || 'SIN CLASIFICAR',
           value: impact > 0 ? impact : 0.01,
           impact: impact,
-          percentage: Number(pct.toFixed(1)),
+          percentage: Number(((impact / totalImpact) * 100).toFixed(1)),
           cumulativePercentage: (cumulative / totalImpact) * 100,
           count: d.count || 0,
           color: colors[index % colors.length],
           subs: d.subs || {}
         };
       });
-
       return { pareto, totalImpact, totalCount: globalAgg?.totalOrders || 0 };
     }
 
-    // CASO 2: Visión por Formato (Agregación dinámica en tiempo real)
     if (!formatOrders || formatOrders.length === 0) {
-      console.log("[Dashboard Debug] No se encontraron órdenes para el formato seleccionado.");
       return { pareto: [], totalImpact: 0, totalCount: 0 };
     }
 
     const discMap: Record<string, any> = {};
     let totalFormatImpact = 0;
-
     formatOrders.forEach(order => {
       const disc = String(order.disciplina_normalizada || 'PENDIENTE DE CLASIFICACIÓN').trim().toUpperCase();
       const sub = String(order.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
       const impact = Number(order.impactoNeto || 0);
-
       totalFormatImpact += impact;
-
-      if (!discMap[disc]) {
-        discMap[disc] = { name: disc, impact: 0, count: 0, subs: {} };
-      }
+      if (!discMap[disc]) discMap[disc] = { name: disc, impact: 0, count: 0, subs: {} };
       discMap[disc].impact += impact;
       discMap[disc].count += 1;
-
-      if (!discMap[disc].subs[sub]) {
-        discMap[disc].subs[sub] = { impact: 0, count: 0 };
-      }
+      if (!discMap[disc].subs[sub]) discMap[disc].subs[sub] = { impact: 0, count: 0 };
       discMap[disc].subs[sub].impact += impact;
       discMap[disc].subs[sub].count += 1;
     });
@@ -192,24 +184,19 @@ export default function VpDashboard() {
     const sortedDiscs = Object.values(discMap).sort((a: any, b: any) => b.impact - a.impact);
     let cumulativeFormat = 0;
     const finalTotalImpact = totalFormatImpact || 1;
-
     const pareto = sortedDiscs.map((d: any, index) => {
       cumulativeFormat += d.impact;
-      const pct = (d.impact / finalTotalImpact) * 100;
       return {
         ...d,
         id: `${d.name}-${index}`,
         value: d.impact > 0 ? d.impact : 0.01,
         impact: d.impact,
-        percentage: Number(pct.toFixed(1)),
+        percentage: Number(((d.impact / finalTotalImpact) * 100).toFixed(1)),
         cumulativePercentage: (cumulativeFormat / finalTotalImpact) * 100,
         color: colors[index % colors.length]
       };
     });
-
-    console.log(`[Dashboard Debug] Datos procesados para ${formatFilter}:`, pareto.length, "disciplinas.");
     return { pareto, totalImpact: totalFormatImpact, totalCount: formatOrders.length };
-
   }, [formatFilter, globalTaxonomyDocs, globalAgg, formatOrders, colorTheme]);
 
   const vitalFew = useMemo(() => processedData.pareto.filter(p => p.cumulativePercentage <= 85), [processedData]);
@@ -225,48 +212,27 @@ export default function VpDashboard() {
   const CustomizedContent = (props: any) => {
     const { x, y, width, height, name, impact, percentage, color } = props;
     if (width < 40 || height < 40) return null;
-
-    const safeName = String(name || 'SIN NOMBRE');
-    const safeImpact = Number(impact || 0);
-    const safePct = Number(percentage || 0);
-
-    const sizes = {
-      sm: { title: 8, meta: 7, pct: 10 },
-      md: { title: 10, meta: 8, pct: 14 },
-      lg: { title: 12, meta: 9, pct: 18 }
-    };
+    const sizes = { sm: { title: 8, meta: 7, pct: 10 }, md: { title: 10, meta: 8, pct: 14 }, lg: { title: 12, meta: 9, pct: 18 } };
     const currentSize = sizes[textSize];
-
     return (
       <g className="cursor-pointer hover:opacity-90 transition-all" onClick={() => setSelectedDiscipline(props)}>
         <rect x={x} y={y} width={width} height={height} style={{ fill: color, stroke: '#fff', strokeWidth: 1.5 }} />
         {width > 50 && height > 40 && (
           <>
             <text x={x + 8} y={y + 18} fill="#fff" fontSize={currentSize.title} fontWeight="900" className="uppercase tracking-tighter drop-shadow-md">
-              {safeName.length > 15 ? safeName.substring(0, 13) + '..' : safeName}
+              {String(name).length > 15 ? String(name).substring(0, 13) + '..' : name}
             </text>
             <text x={x + 8} y={y + 32} fill="rgba(255,255,255,0.95)" fontSize={currentSize.meta} fontWeight="bold" className="drop-shadow-sm">
-              {formatCurrency(safeImpact)}
+              {formatCurrency(Number(impact))}
             </text>
             <text x={x + 8} y={y + height - 8} fill="rgba(255,255,255,0.8)" fontSize={currentSize.pct} fontWeight="900" className="drop-shadow-lg">
-              {safePct}%
+              {percentage}%
             </text>
           </>
         )}
       </g>
     );
   };
-
-  if ((isTaxLoading || isOrdersLoading) && !processedData.pareto.length) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-slate-50">
-        <div className="flex flex-col items-center gap-4">
-          <RefreshCcw className="h-10 w-10 animate-spin text-primary opacity-20" />
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sincronizando Desviaciones por Formato...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50/30">
@@ -285,45 +251,10 @@ export default function VpDashboard() {
           </div>
           
           <div className="flex items-center gap-4">
-            <Popover>
-              <PopoverTrigger asChild>
-                <button className="flex items-center gap-2 border border-slate-200 bg-white px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm hover:bg-slate-50 transition-colors">
-                  <Settings2 className="h-3.5 w-3.5" /> Estilos
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80 p-6 rounded-2xl shadow-2xl border-none">
-                <div className="space-y-6">
-                  <h4 className="text-xs font-black uppercase tracking-widest border-b pb-2 flex items-center gap-2">
-                    <Palette className="h-4 w-4 text-primary" /> Configuración Visual
-                  </h4>
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black uppercase text-slate-400">Paleta de Colores</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {Object.keys(THEMES).map((t) => (
-                        <Button key={t} variant={colorTheme === t ? 'default' : 'outline'} size="sm" onClick={() => setColorTheme(t as any)} className="h-8 text-[9px] font-bold uppercase rounded-lg">
-                          {t === 'corporate' ? 'Corporativo' : t === 'vibrant' ? 'Vibrante' : t === 'ocean' ? 'Océano' : 'Seguridad'}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black uppercase text-slate-400">Tamaño de Texto</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {(['sm', 'md', 'lg'] as const).map((s) => (
-                        <Button key={s} variant={textSize === s ? 'default' : 'outline'} size="sm" onClick={() => setTextSize(s)} className="h-8 text-[9px] font-bold uppercase rounded-lg">
-                          {s === 'sm' ? 'Pequeño' : s === 'md' ? 'Mediano' : 'Grande'}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-
             <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border">
               <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={formatFilter} onValueChange={setFormatFilter}>
-                <SelectTrigger className="h-9 w-56 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm focus:ring-0">
+                <SelectTrigger className="h-9 w-64 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm focus:ring-0">
                   <SelectValue placeholder="Filtrar por Formato" />
                 </SelectTrigger>
                 <SelectContent>
@@ -333,77 +264,47 @@ export default function VpDashboard() {
               </Select>
             </div>
             <Badge variant="outline" className="h-9 bg-emerald-50 text-emerald-700 border-emerald-100 gap-2 px-4 uppercase font-black text-[9px] rounded-xl shadow-sm">
-              <CheckCircle2 className="h-3.5 w-3.5" /> Integridad IA: {processedData.totalCount.toLocaleString()}
+              <CheckCircle2 className="h-3.5 w-3.5" /> Registros Auditados: {processedData.totalCount.toLocaleString()}
             </Badge>
           </div>
         </header>
 
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
-          {/* Tarjetas de KPI Dinámicas */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <Card className="border-none shadow-md bg-white border-l-4 border-l-primary p-6 rounded-3xl group hover:shadow-lg transition-all">
-              <div className="flex justify-between items-start mb-4">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Impacto Materializado</p>
-                <DollarSign className="h-4 w-4 text-primary opacity-20 group-hover:scale-110 transition-transform" />
-              </div>
+            <Card className="border-none shadow-md bg-white border-l-4 border-l-primary p-6 rounded-3xl">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Materializado</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(processedData.totalImpact)}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Impacto en {formatFilter === 'all' ? 'Walmart Global' : formatFilter}</p>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">{formatFilter === 'all' ? 'Walmart Global' : formatFilter}</p>
             </Card>
-
-            <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4 opacity-10"><Target className="h-12 w-12" /></div>
+            <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Pocos Críticos</p>
               <h2 className="text-3xl font-black text-white tracking-tighter">85%</h2>
-              <div className="flex items-center gap-2 mt-2">
-                <Progress value={85} className="h-1 bg-white/10" />
-                <span className="text-[8px] font-black uppercase text-accent">Modelo Pareto</span>
-              </div>
+              <Progress value={85} className="h-1 bg-white/10 mt-2" />
             </Card>
-
             <Card className="border-none shadow-md bg-white border-l-4 border-l-blue-600 p-6 rounded-3xl">
-              <div className="flex justify-between items-start mb-4">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Registros Auditados</p>
-                <Layers className="h-4 w-4 text-blue-600 opacity-20" />
-              </div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Muestra de Análisis</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{processedData.totalCount.toLocaleString()}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Normalizados por Gemini 2.5</p>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Registros Normalizados</p>
             </Card>
-
             <Card className="border-none shadow-md bg-white border-l-4 border-l-emerald-500 p-6 rounded-3xl">
-              <div className="flex justify-between items-start mb-4">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Categorías Vitales</p>
-                <Focus className="h-4 w-4 text-emerald-500 opacity-20" />
-              </div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Hitos Vitales</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{vitalFew.length}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Hitos que generan el 85%</p>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Generan el 85% del impacto</p>
             </Card>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Mapa de Calor dinámico por Formato */}
             <Card className="lg:col-span-2 border-none shadow-xl bg-white overflow-hidden rounded-[2.5rem]">
-              <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between py-8 px-10">
-                <div className="space-y-1">
-                  <CardTitle className="text-sm font-black uppercase text-primary tracking-[0.2em] flex items-center gap-3">
-                    <Maximize2 className="h-5 w-5" /> 
-                    Mapa de Calor: Concentración de Impacto
-                  </CardTitle>
-                  <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Impacto detallado para {formatFilter === 'all' ? 'Walmart International' : formatFilter}</CardDescription>
-                </div>
-                <div className="flex gap-2">
-                   <Badge variant="outline" className="text-[8px] font-black uppercase">Formato: {formatFilter === 'all' ? 'GLOBAL' : formatFilter}</Badge>
-                   <Badge className="bg-primary text-white border-none text-[9px] font-black px-4 py-1.5 rounded-full uppercase shadow-lg shadow-primary/20">Jerarquía Pareto</Badge>
-                </div>
+              <CardHeader className="bg-slate-50/50 border-b py-8 px-10">
+                <CardTitle className="text-sm font-black uppercase text-primary tracking-[0.2em] flex items-center gap-3">
+                  <Maximize2 className="h-5 w-5" /> Mapa de Calor: Concentración de Impacto
+                </CardTitle>
+                <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Desglose técnico para {formatFilter === 'all' ? 'Walmart International' : formatFilter}</CardDescription>
               </CardHeader>
               <CardContent className="h-[550px] p-8">
                 {processedData.pareto.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <Treemap 
-                      data={processedData.pareto.slice(0, 40)} 
-                      dataKey="value" 
-                      stroke="#fff" 
-                      content={<CustomizedContent />}
-                    >
+                    <Treemap data={processedData.pareto.slice(0, 40)} dataKey="value" stroke="#fff" content={<CustomizedContent />}>
                       <Tooltip 
                         contentStyle={{ borderRadius: '20px', border: 'none', backgroundColor: '#0F172A', color: '#fff', padding: '15px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}
                         formatter={(val: number) => [formatCurrency(val), 'Impacto Económico']}
@@ -419,20 +320,17 @@ export default function VpDashboard() {
               </CardContent>
             </Card>
 
-            {/* Análisis 80/20 segregado */}
             <Card className="border-none shadow-xl bg-white rounded-[2.5rem] flex flex-col">
               <CardHeader className="py-8 px-10 border-b bg-slate-50/30">
                 <div className="flex items-center justify-between mb-4">
                   <CardTitle className="text-sm font-black uppercase text-slate-800 tracking-widest flex items-center gap-3">
-                    <PieIcon className="h-5 w-5 text-accent" /> 
-                    Análisis 80/20
+                    <PieIcon className="h-5 w-5 text-accent" /> Análisis 80/20
                   </CardTitle>
                   <div className="flex gap-1 bg-slate-100 p-1 rounded-xl border">
                     <Button variant={activeTab === '80' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('80')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Pocos Críticos</Button>
                     <Button variant={activeTab === '20' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('20')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Muchos Útiles</Button>
                   </div>
                 </div>
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{formatFilter === 'all' ? 'Universo Global' : `Formato: ${formatFilter}`}</p>
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-8 overflow-y-auto custom-scrollbar">
                 {(activeTab === '80' ? vitalFew : usefulMany).map((item, i) => (
@@ -442,12 +340,12 @@ export default function VpDashboard() {
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center text-[10px] font-black shrink-0 ${activeTab === '80' ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-400'}`}>{i + 1}</div>
                         <div className="space-y-0.5">
                           <p className="text-[11px] font-black text-slate-800 uppercase tracking-tight group-hover:text-primary transition-colors leading-none">{item.name}</p>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{item.count} Órdenes de Cambio</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{item.count} Órdenes Detectadas</p>
                         </div>
                       </div>
                       <div className="text-right">
                         <p className="text-[11px] font-black text-slate-900">{formatCurrency(item.impact)}</p>
-                        <p className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest">{item.percentage}% del total</p>
+                        <p className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest">{item.percentage}% participación</p>
                       </div>
                     </div>
                     <div className="relative h-1.5 w-full bg-slate-50 rounded-full overflow-hidden">
@@ -457,71 +355,38 @@ export default function VpDashboard() {
                 ))}
               </CardContent>
               <div className="p-10 bg-slate-900 text-white rounded-b-[2.5rem]">
-                <div className="flex justify-between items-center mb-4">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-accent">Diagnóstico Estratégico</p>
-                  <Zap className="h-4 w-4 text-accent animate-pulse" />
-                </div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-accent mb-2">Diagnóstico de Segmento</p>
                 <div className="text-xs text-slate-300 leading-relaxed italic border-l-2 border-accent pl-4">
-                  En el formato <span className="text-white font-bold">{formatFilter === 'all' ? 'GLOBAL' : formatFilter}</span>, las primeras {vitalFew.length} disciplinas concentran el 85% de la variabilidad presupuestaria. Se recomienda un plan de mitigación enfocado en <span className="text-white font-bold">{vitalFew[0]?.name || 'el Hito Principal'}</span>.
+                  En <span className="text-white font-bold">{formatFilter === 'all' ? 'Walmart Global' : formatFilter}</span>, el análisis identifica que {vitalFew.length} categorías concentran el 85% de las desviaciones.
                 </div>
               </div>
             </Card>
           </div>
         </main>
 
-        {/* Modal de Drill-down técnico */}
         <Dialog open={!!selectedDiscipline} onOpenChange={(open) => !open && setSelectedDiscipline(null)}>
           <DialogContent className="max-w-3xl rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl bg-white">
-            <div className="bg-slate-900 p-10 text-white relative">
+            <div className="bg-slate-900 p-10 text-white">
               <div className="flex justify-between items-start mb-6">
-                <Badge className="bg-accent text-white border-none px-4 py-1 text-[10px] font-black uppercase tracking-widest shadow-xl shadow-accent/20">Auditoría por Disciplina</Badge>
+                <Badge className="bg-accent text-white border-none px-4 py-1 text-[10px] font-black uppercase tracking-widest shadow-xl shadow-accent/20">Detalle de Disciplina</Badge>
                 <div className="text-right">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Impacto Total ({formatFilter})</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Impacto ({formatFilter})</p>
                   <h3 className="text-4xl font-black text-white tracking-tighter">{formatCurrency(selectedDiscipline?.impact || 0)}</h3>
                 </div>
               </div>
               <DialogTitle className="text-3xl font-black uppercase tracking-tighter">{selectedDiscipline?.name}</DialogTitle>
-              <p className="text-slate-400 text-sm mt-2 font-medium">Representa el <span className="text-accent font-bold">{selectedDiscipline?.percentage}%</span> de las desviaciones en este segmento.</p>
             </div>
             <ScrollArea className="max-h-[60vh] p-10">
-              <div className="space-y-10">
-                <section className="space-y-6">
-                  <div className="flex items-center gap-3 border-b pb-4">
-                    <TrendingUp className="h-5 w-5 text-primary" />
-                    <h4 className="text-xs font-black uppercase text-primary tracking-[0.2em]">Desglose de Causas Raíz</h4>
+              <div className="grid grid-cols-1 gap-4">
+                {selectedDiscipline?.subs && Object.entries(selectedDiscipline.subs).map(([name, data]: any, i) => (
+                  <div key={i} className="flex items-center justify-between p-5 bg-slate-50 rounded-2xl border border-slate-100">
+                    <p className="text-xs font-black text-slate-800 uppercase">{name}</p>
+                    <div className="text-right">
+                      <p className="text-sm font-black text-slate-900">{formatCurrency(data.impact)}</p>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">{data.count} Órdenes</p>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-1 gap-4">
-                    {selectedDiscipline?.subs && Object.entries(selectedDiscipline.subs).length > 0 ? (
-                      Object.entries(selectedDiscipline.subs).sort((a: any, b: any) => b[1].impact - a[1].impact).map(([name, data]: any, i) => (
-                        <div key={i} className="flex items-center justify-between p-5 bg-slate-50 rounded-2xl border border-slate-100 hover:border-primary transition-all group">
-                          <div className="space-y-1">
-                            <p className="text-xs font-black text-slate-800 uppercase tracking-tight group-hover:text-primary transition-colors">{name}</p>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">{data.count} Órdenes Detectadas</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-black text-slate-900">{formatCurrency(data.impact)}</p>
-                            <p className="text-[9px] font-bold text-emerald-600 uppercase tracking-tighter">Participación Crítica</p>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="p-10 text-center border-2 border-dashed rounded-3xl text-slate-400 uppercase text-[10px] font-bold">Sin desglose de sub-causas disponible</div>
-                    )}
-                  </div>
-                </section>
-
-                <section className="bg-primary/5 p-8 rounded-3xl border border-primary/10">
-                  <div className="flex items-center gap-3 mb-4">
-                    <Zap className="h-5 w-5 text-primary" />
-                    <h4 className="text-xs font-black uppercase text-primary tracking-[0.2em]">Recomendación de Mitigación</h4>
-                  </div>
-                  <div className="text-xs text-slate-600 leading-relaxed italic flex gap-4">
-                    <div className="h-10 w-10 rounded-full bg-white flex items-center justify-center shrink-0 shadow-sm"><Info className="h-5 w-5 text-primary" /></div>
-                    <p>
-                      Para el formato <span className="font-bold text-slate-800">{formatFilter === 'all' ? 'Global' : formatFilter}</span>, la disciplina <span className="font-bold text-slate-800">{selectedDiscipline?.name}</span> requiere una revisión inmediata de los criterios de diseño y presupuesto inicial para reducir la variabilidad recurrente detectada.
-                    </p>
-                  </div>
-                </section>
+                ))}
               </div>
             </ScrollArea>
           </DialogContent>

@@ -216,6 +216,7 @@ export default function AnalysisPage() {
 
       const discMap: Record<string, any> = {};
       const causeMap: Record<string, any> = {};
+      const formatMap: Record<string, any> = {};
       let totalCalculatedImpact = 0;
       let totalProcessedInSync = 0;
       
@@ -244,6 +245,7 @@ export default function AnalysisPage() {
           let disc = String(data.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
           let sub = String(data.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
           let cause = String(data.causa_raiz_normalizada || 'SIN DEFINIR').trim().toUpperCase();
+          let format = String(data.format || 'SIN FORMATO').trim().toUpperCase();
           const impact = data.impactoNeto || 0;
           
           totalCalculatedImpact += impact;
@@ -260,6 +262,10 @@ export default function AnalysisPage() {
           if (!causeMap[cause]) causeMap[cause] = { impact: 0, count: 0 };
           causeMap[cause].impact += impact;
           causeMap[cause].count += 1;
+
+          if (!formatMap[format]) formatMap[format] = { impact: 0, count: 0 };
+          formatMap[format].impact += impact;
+          formatMap[format].count += 1;
         });
 
         lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
@@ -281,6 +287,7 @@ export default function AnalysisPage() {
 
       await saveTaxonomy(discMap, 'taxonomy_disciplines');
       await saveTaxonomy(causeMap, 'taxonomy_causes');
+      await saveTaxonomy(formatMap, 'taxonomy_formats');
 
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         totalOrders: totalInDbCount,

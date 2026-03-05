@@ -37,6 +37,7 @@ export default function UploadPage() {
     let totalImpactAcc = 0;
     const discMap: Record<string, any> = {};
     const causeMap: Record<string, any> = {};
+    const formatMap: Record<string, any> = {};
 
     try {
       for (const file of selectedFiles) {
@@ -81,6 +82,10 @@ export default function UploadPage() {
             causeMap[cause].impact += impact;
             causeMap[cause].count += 1;
 
+            if (!formatMap[format]) formatMap[format] = { impact: 0, count: 0 };
+            formatMap[format].impact += impact;
+            formatMap[format].count += 1;
+
             const orderId = `${batchId}_${row.rowNumber}`;
             batch.set(doc(db, 'orders', orderId), { 
               ...row, 
@@ -105,17 +110,22 @@ export default function UploadPage() {
         lastUpdate: new Date().toISOString() 
       }, { merge: true });
 
-      Object.entries(discMap).forEach(([name, data]) => {
-        const safeId = name.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        globalBatch.set(doc(db, 'taxonomy_disciplines', safeId), { ...data, id: safeId, name: name });
-      });
-      
-      Object.entries(causeMap).forEach(([name, data]) => {
-        const safeId = name.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        globalBatch.set(doc(db, 'taxonomy_causes', safeId), { ...data, id: safeId, name: name });
-      });
-      
-      await globalBatch.commit();
+      const saveTaxonomyChunked = async (map: Record<string, any>, coll: string) => {
+        const entries = Object.entries(map);
+        for (let i = 0; i < entries.length; i += 400) {
+          const chunk = entries.slice(i, i + 400);
+          const b = writeBatch(db);
+          chunk.forEach(([name, data]) => {
+            const safeId = name.replace(/[\/\s\.]+/g, '_').substring(0, 100);
+            b.set(doc(db, coll, safeId), { ...data, id: safeId, name: name });
+          });
+          await b.commit();
+        }
+      };
+
+      await saveTaxonomyChunked(discMap, 'taxonomy_disciplines');
+      await saveTaxonomyChunked(causeMap, 'taxonomy_causes');
+      await saveTaxonomyChunked(formatMap, 'taxonomy_formats');
 
       toast({ title: "Universo Normalizado", description: "Taxonomía guardada con éxito para análisis VP." });
       setSelectedFiles([]);
