@@ -74,7 +74,7 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Descubrimiento dinámico de formatos disponibles (Normalizado)
+  // Descubrimiento dinámico de formatos disponibles (Sincronizado con la base de datos real)
   useEffect(() => {
     if (!db || !isAuthReady) return;
     const fetchFormats = async () => {
@@ -100,7 +100,7 @@ export default function VpDashboard() {
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: globalTaxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
-  // Consulta por formato usando el campo normalizado
+  // Consulta optimizada usando Índice Compuesto para filtros por Formato
   const formatOrdersQuery = useMemoFirebase(() => {
     if (!db || formatFilter === 'all') return null;
     return query(
@@ -144,7 +144,7 @@ export default function VpDashboard() {
       return { pareto, totalImpact, totalCount: globalAgg?.totalOrders || 0 };
     }
 
-    // Procesamiento para formato específico
+    // Motor de Agregación Dinámica para Formato Específico
     if (!formatOrders || formatOrders.length === 0) {
       return { pareto: [], totalImpact: 0, totalCount: 0 };
     }
@@ -243,7 +243,7 @@ export default function VpDashboard() {
       <div className="flex h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
           <RefreshCcw className="h-10 w-10 animate-spin text-primary opacity-20" />
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sincronizando Desviaciones...</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sincronizando Desviaciones por Formato...</p>
         </div>
       </div>
     );
@@ -268,9 +268,9 @@ export default function VpDashboard() {
           <div className="flex items-center gap-4">
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-9 gap-2 border-slate-200 text-[10px] font-black uppercase rounded-xl">
-                  <Settings2 className="h-3.5 w-3.5" /> Estilos
-                </Button>
+                <button className="flex items-center gap-2 border border-slate-200 bg-white px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm hover:bg-slate-50 transition-colors">
+                  <Settings2 className="h-3.5 w-3.5" /> Estilos Visuales
+                </button>
               </PopoverTrigger>
               <PopoverContent className="w-80 p-6 rounded-2xl shadow-2xl border-none">
                 <div className="space-y-6">
@@ -282,7 +282,7 @@ export default function VpDashboard() {
                     <div className="grid grid-cols-2 gap-2">
                       {Object.keys(THEMES).map((t) => (
                         <Button key={t} variant={colorTheme === t ? 'default' : 'outline'} size="sm" onClick={() => setColorTheme(t as any)} className="h-8 text-[9px] font-bold uppercase rounded-lg">
-                          {t.charAt(0).toUpperCase() + t.slice(1)}
+                          {t === 'corporate' ? 'Corporativo' : t === 'vibrant' ? 'Vibrante' : t === 'ocean' ? 'Océano' : 'Seguridad'}
                         </Button>
                       ))}
                     </div>
@@ -292,7 +292,7 @@ export default function VpDashboard() {
                     <div className="grid grid-cols-3 gap-2">
                       {(['sm', 'md', 'lg'] as const).map((s) => (
                         <Button key={s} variant={textSize === s ? 'default' : 'outline'} size="sm" onClick={() => setTextSize(s)} className="h-8 text-[9px] font-bold uppercase rounded-lg">
-                          {s === 'sm' ? 'Peque' : s === 'md' ? 'Medio' : 'Gran'}
+                          {s === 'sm' ? 'Pequeño' : s === 'md' ? 'Mediano' : 'Grande'}
                         </Button>
                       ))}
                     </div>
@@ -304,7 +304,7 @@ export default function VpDashboard() {
             <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border">
               <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={formatFilter} onValueChange={setFormatFilter}>
-                <SelectTrigger className="h-9 w-52 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm focus:ring-0">
+                <SelectTrigger className="h-9 w-56 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm focus:ring-0">
                   <SelectValue placeholder="Filtrar por Formato" />
                 </SelectTrigger>
                 <SelectContent>
@@ -367,17 +367,22 @@ export default function VpDashboard() {
                     <Maximize2 className="h-5 w-5" /> 
                     Mapa de Calor: Concentración de Impacto
                   </CardTitle>
-                  <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Impacto detallado para {formatFilter === 'all' ? 'todos los formatos' : formatFilter}</CardDescription>
+                  <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Impacto detallado para {formatFilter === 'all' ? 'Walmart International' : formatFilter}</CardDescription>
                 </div>
                 <div className="flex gap-2">
-                   <Badge variant="outline" className="text-[8px] font-black uppercase">{textSize === 'sm' ? 'T. Pequeño' : textSize === 'md' ? 'T. Mediano' : 'T. Grande'}</Badge>
-                   <Badge className="bg-primary text-white border-none text-[9px] font-black px-4 py-1.5 rounded-full uppercase">Jerarquía Pareto</Badge>
+                   <Badge variant="outline" className="text-[8px] font-black uppercase">Formato: {formatFilter === 'all' ? 'GLOBAL' : formatFilter}</Badge>
+                   <Badge className="bg-primary text-white border-none text-[9px] font-black px-4 py-1.5 rounded-full uppercase shadow-lg shadow-primary/20">Jerarquía Pareto</Badge>
                 </div>
               </CardHeader>
               <CardContent className="h-[550px] p-8">
                 {processedData.pareto.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <Treemap data={processedData.pareto.slice(0, 40)} dataKey="value" stroke="#fff" content={<CustomizedContent />}>
+                    <Treemap 
+                      data={processedData.pareto.slice(0, 40)} 
+                      dataKey="value" 
+                      stroke="#fff" 
+                      content={<CustomizedContent />}
+                    >
                       <Tooltip 
                         contentStyle={{ borderRadius: '20px', border: 'none', backgroundColor: '#0F172A', color: '#fff', padding: '15px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}
                         formatter={(val: number) => [formatCurrency(val), 'Impacto Económico']}

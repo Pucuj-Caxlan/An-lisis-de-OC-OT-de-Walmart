@@ -64,8 +64,8 @@ export default function UploadPage() {
             const impact = row.impactoNeto || 0;
             totalImpactAcc += impact;
             
-            // Normalización estricta a MAYÚSCULAS
-            let disc = String(row.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
+            // NORMALIZACIÓN ESTRICTA: Crucial para el Dashboard VP
+            let disc = String(row.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
             let sub = String(row.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
             let cause = String(row.causaRaiz || 'ERRORES / OMISIONES').trim().toUpperCase();
             let format = String(row.format || 'SIN FORMATO').trim().toUpperCase();
@@ -91,7 +91,7 @@ export default function UploadPage() {
               disciplina_normalizada: disc,
               subcausa_normalizada: sub,
               causa_raiz_normalizada: cause,
-              format: format // Formato normalizado
+              format: format
             });
           });
           await batch.commit();
@@ -117,7 +117,7 @@ export default function UploadPage() {
       
       await globalBatch.commit();
 
-      toast({ title: "Universo Normalizado", description: "Taxonomía guardada con éxito." });
+      toast({ title: "Universo Normalizado", description: "Taxonomía guardada con éxito para análisis VP." });
       setSelectedFiles([]);
     } catch (e: any) { 
       toast({ variant: "destructive", title: "Error Ingesta", description: e.message }); 
@@ -142,7 +142,7 @@ export default function UploadPage() {
                   <Upload className="h-10 w-10 text-primary" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 uppercase">Subir Archivo de Gran Volumen</h3>
-                <div className="text-sm text-slate-500 mt-2">Sincroniza el universo real (&gt;10,000 filas) con estructura de árbol.</div>
+                <div className="text-sm text-slate-500 mt-2">Sincroniza el universo real (&gt;10,000 filas) con estructura de árbol para Dashboard VP.</div>
                 <Input id="file-upload" type="file" className="hidden" multiple accept=".xlsx,.xls" onChange={handleFileChange} />
               </div>
               {selectedFiles.length > 0 && <div className="grid gap-3">{selectedFiles.map((file, i) => <div key={i} className="flex justify-between p-4 bg-slate-50 border rounded-2xl"><span className="text-sm font-bold">{file.name}</span><Button variant="ghost" onClick={() => setSelectedFiles(prev => prev.filter((_, idx) => idx !== i))}><X className="h-5 w-5" /></Button></div>)}</div>}
