@@ -13,7 +13,8 @@ import {
   PieChart as PieIcon,
   Maximize2,
   Filter,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -31,7 +32,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ScrollArea } from '@/components/ui/scroll-area';
 
 const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#54585A'];
 
@@ -44,13 +44,13 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Cargar Taxonomía de Formatos
+  // 1. Cargar Taxonomía de Formatos (Catálogo oficial)
   const formatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('name', 'asc')) : null, [db]);
   const { data: availableFormats } = useCollection(formatsQuery);
 
-  // 2. Cargar Datos Materializados (Agregados)
-  // Si es 'all', cargamos de taxonomy_disciplines (global)
-  // Si es un formato, cargamos de la subcolección materializada
+  // 2. Cargar Datos Materializados (Agregados optimizados)
+  // Si es 'all', cargamos de taxonomy_disciplines (impacto global)
+  // Si es un formato, cargamos de la subcolección materializada generada por el Backfill
   const analyticsPath = formatFilter === 'all' 
     ? 'taxonomy_disciplines' 
     : `aggregates/format_analytics/formats/${formatFilter}/disciplines_stats`;
@@ -152,22 +152,22 @@ export default function VpDashboard() {
             <Card className="border-none shadow-md bg-white border-l-4 border-l-primary p-6 rounded-3xl">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Materializado</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(processedData.totalImpact)}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Segun Filtro: {formatFilter.toUpperCase()}</p>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Filtro: {formatFilter === 'all' ? 'GLOBAL' : formatFilter.toUpperCase()}</p>
             </Card>
             <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Pocos Críticos</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Pareto</p>
               <h2 className="text-3xl font-black text-white tracking-tighter">85%</h2>
               <Progress value={85} className="h-1 bg-white/10 mt-2" />
             </Card>
             <Card className="border-none shadow-md bg-white border-l-4 border-l-blue-600 p-6 rounded-3xl">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Muestra Auditada</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{processedData.totalCount.toLocaleString()}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Total Segmento</p>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Segmento Seleccionado</p>
             </Card>
             <Card className="border-none shadow-md bg-white border-l-4 border-l-emerald-500 p-6 rounded-3xl">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Hitos Vitales</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{vitalFew.length}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Drivers del 85%</p>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Categorías Críticas</p>
             </Card>
           </div>
 
@@ -177,11 +177,13 @@ export default function VpDashboard() {
                 <CardTitle className="text-sm font-black uppercase text-primary tracking-[0.2em] flex items-center gap-3">
                   <Maximize2 className="h-5 w-5" /> Mapa de Calor: Concentración de Impacto
                 </CardTitle>
-                <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Desglose por Formato Auditado</CardDescription>
+                <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Análisis detallado por Formato Auditado</CardDescription>
               </CardHeader>
               <CardContent className="h-[550px] p-8">
                 {isLoading ? (
-                  <div className="h-full flex items-center justify-center"><Loader2 className="h-12 w-12 animate-spin text-slate-200" /></div>
+                  <div className="h-full flex items-center justify-center">
+                    <Loader2 className="h-12 w-12 animate-spin text-slate-200" />
+                  </div>
                 ) : processedData.pareto.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <Treemap data={processedData.pareto} dataKey="value" stroke="#fff" content={<CustomizedContent />}>
@@ -194,7 +196,10 @@ export default function VpDashboard() {
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center text-slate-300 space-y-4">
                     <AlertCircle className="h-16 w-16 opacity-10" />
-                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Sin datos sincronizados para este formato. Ejecute el Backfill.</p>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400 text-center">
+                      No hay datos materializados para este formato.<br/>
+                      Por favor, ejecute la "Sincronización de Hitos" en la Consola de Control.
+                    </p>
                   </div>
                 )}
               </CardContent>
