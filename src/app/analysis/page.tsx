@@ -209,7 +209,11 @@ export default function AnalysisPage() {
   };
 
   const handleRefreshUniverseStats = async () => {
-    if (!db) return;
+    if (!db || !user) {
+      toast({ variant: "destructive", title: "Autenticación Requerida", description: "Espera a que la sesión se estabilice." });
+      return;
+    }
+    
     setIsRefreshingStats(true);
     try {
       const colRef = collection(db, 'orders');
@@ -226,6 +230,7 @@ export default function AnalysisPage() {
       let hasMore = true;
       const CHUNK_SIZE = 3000;
 
+      // Escaneo profundo por bloques para manejar +10,000 registros
       while (hasMore) {
         let q = query(colRef, orderBy(documentId(), 'asc'), limit(CHUNK_SIZE));
         if (lastVisible) q = query(q, startAfter(lastVisible));
@@ -267,7 +272,6 @@ export default function AnalysisPage() {
             causeMap[cause].impact += impact;
             causeMap[cause].count += 1;
           } else {
-            // Asegurar que el impacto de pendientes aparezca en la taxonomía global para que el Treemap cuadre
             let disc = 'PENDIENTE DE CLASIFICACIÓN';
             if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
             discMap[disc].impact += impact;
@@ -281,6 +285,7 @@ export default function AnalysisPage() {
 
       const saveTaxonomy = async (map: Record<string, any>, coll: string) => {
         const entries = Object.entries(map);
+        // Usamos lotes de 400 para estar seguros bajo el límite de 500 de Firestore
         for (let i = 0; i < entries.length; i += 400) {
           const chunk = entries.slice(i, i + 400);
           const batch = writeBatch(db);
@@ -290,11 +295,18 @@ export default function AnalysisPage() {
             const safeId = cleanName.replace(/[\/\s\.]+/g, '_').substring(0, 100);
             if (!safeId) return;
             
-            batch.set(doc(db, coll, safeId), { ...data, id: safeId, name: cleanName, lastUpdate: new Date().toISOString() });
+            batch.set(doc(db, coll, safeId), { 
+              ...data, 
+              id: safeId, 
+              name: cleanName, 
+              lastUpdate: new Date().toISOString() 
+            });
           });
+          
           await batch.commit().catch(async (e) => {
+             console.error(`Error escribiendo en ${coll}:`, e);
              errorEmitter.emit('permission-error', new FirestorePermissionError({
-               path: `${coll}/batch_commit`,
+               path: coll,
                operation: 'write'
              }));
              throw e;
@@ -315,9 +327,10 @@ export default function AnalysisPage() {
 
       toast({ 
         title: "Sincronización Exitosa", 
-        description: `Universo de ${totalInDbCount} registros consolidado.` 
+        description: `Universo de ${totalInDbCount} registros consolidado correctamente.` 
       });
     } catch (e: any) {
+      console.error("Fallo general de sincronización:", e);
       if (e.code !== 'permission-denied') {
         toast({ variant: "destructive", title: "Fallo de Sincronización", description: e.message });
       }
@@ -363,7 +376,7 @@ export default function AnalysisPage() {
             });
             processed++;
           } catch (aiErr) {
-            console.warn("Skip record:", d.id);
+            console.warn("Skip record due to AI limit/error:", d.id);
           }
         }
         
