@@ -49,8 +49,6 @@ export default function VpDashboard() {
   const { data: availableFormats } = useCollection(formatsQuery);
 
   // 2. Cargar Datos Materializados (Agregados optimizados)
-  // Si es 'all', cargamos de taxonomy_disciplines (impacto global)
-  // Si es un formato, cargamos de la subcolección materializada generada por el Backfill
   const analyticsPath = formatFilter === 'all' 
     ? 'taxonomy_disciplines' 
     : `aggregates/format_analytics/formats/${formatFilter}/disciplines_stats`;
@@ -65,21 +63,39 @@ export default function VpDashboard() {
   const processedData = useMemo(() => {
     if (!analyticsData || analyticsData.length === 0) return { pareto: [], totalImpact: 0, totalCount: 0 };
 
-    const totalImpact = analyticsData.reduce((acc, curr) => acc + (curr.impact || 0), 0);
-    const totalCount = analyticsData.reduce((acc, curr) => acc + (curr.count || 0), 0);
+    // Group by name to avoid duplicate keys in Treemap and consolidate impacts
+    const consolidatedMap = new Map<string, any>();
+    analyticsData.forEach(d => {
+      const name = String(d.name || d.id || 'INDEFINIDA').trim();
+      const impact = Number(d.impact || 0);
+      const count = Number(d.count || 0);
+      
+      if (consolidatedMap.has(name)) {
+        const existing = consolidatedMap.get(name);
+        existing.impact += impact;
+        existing.count += count;
+      } else {
+        consolidatedMap.set(name, { id: d.id, name, impact, count });
+      }
+    });
+
+    const consolidatedArray = Array.from(consolidatedMap.values()).sort((a, b) => b.impact - a.impact);
+    
+    const totalImpact = consolidatedArray.reduce((acc, curr) => acc + curr.impact, 0);
+    const totalCount = consolidatedArray.reduce((acc, curr) => acc + curr.count, 0);
     
     let cumulative = 0;
-    const pareto = analyticsData.map((d, index) => {
-      const impact = Number(d.impact || 0);
+    const pareto = consolidatedArray.map((item, index) => {
+      const impact = item.impact;
       cumulative += impact;
       return {
-        id: d.id,
-        name: d.name || d.id,
+        id: item.id,
+        name: item.name,
         value: impact || 0.01,
         impact: impact,
         percentage: Number(((impact / (totalImpact || 1)) * 100).toFixed(1)),
         cumulativePercentage: (cumulative / (totalImpact || 1)) * 100,
-        count: d.count || 0,
+        count: item.count,
         color: COLORS[index % COLORS.length]
       };
     });
@@ -219,7 +235,7 @@ export default function VpDashboard() {
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-8 overflow-y-auto custom-scrollbar">
                 {(activeTab === '80' ? vitalFew : usefulMany).map((item, i) => (
-                  <div key={item.id} className="group">
+                  <div key={`${item.id}-${i}`} className="group">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex gap-3">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center text-[10px] font-black shrink-0 ${activeTab === '80' ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-400'}`}>{i + 1}</div>
