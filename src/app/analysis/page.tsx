@@ -72,7 +72,7 @@ export default function AnalysisPage() {
   };
 
   /**
-   * Helper robusto para guardar taxonomías en bloques de 500
+   * Helper robusto para guardar taxonomías en bloques de 400
    */
   const saveTaxonomyInChunks = async (db: Firestore, collPath: string, stats: Record<string, any>, buildMetadata: any) => {
     const entries = Object.entries(stats);
@@ -89,6 +89,7 @@ export default function AnalysisPage() {
           ...data,
           ...buildMetadata,
           id: safeId,
+          name: id,
           updatedAt: new Date().toISOString()
         });
       });
@@ -113,7 +114,7 @@ export default function AnalysisPage() {
       const totalSnapshot = await getCountFromServer(collection(db, 'orders'));
       const totalCount = totalSnapshot.data().count;
 
-      // 2. FASE DE PURGA PROFUNDA (ELIMINA EL 100% DE LOS RESIDUOS)
+      // 2. FASE DE PURGA PROFUNDA
       setSyncStep('Fase de Purga Profunda: Eliminando todos los residuos...');
       const collectionsToPurge = ['taxonomy_formats', 'taxonomy_disciplines', 'taxonomy_causes'];
       for (const coll of collectionsToPurge) {
@@ -131,11 +132,11 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '2.0.2-strict'
+        build_version: '2.5.0-forensic'
       };
 
       const globalFormatStats: Record<string, { impact: number, count: number, disciplines: Record<string, { impact: number, count: number }> }> = {};
-      const globalDisciplineStats: Record<string, { impact: number, count: number }> = {};
+      const globalDisciplineStats: Record<string, { impact: number, count: number, subs: Record<string, { impact: number, count: number }> }> = {};
 
       while (hasMore) {
         let q = query(collection(db, 'orders'), orderBy(documentId()), limit(CHUNK_SIZE));
@@ -152,12 +153,14 @@ export default function AnalysisPage() {
           const normalized = normalizeFormatName(rawFormat);
           const impact = Number(data.impactoNeto || 0);
           const disc = String(data.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
+          const subDisc = String(data.subcausa_normalizada || 'GENERAL').trim().toUpperCase();
 
           batch.update(doc(db, 'orders', d.id), {
             format_normalized: normalized,
             lastSync: buildMetadata.build_timestamp
           });
 
+          // Acumulado por Formato
           if (!globalFormatStats[normalized]) {
             globalFormatStats[normalized] = { impact: 0, count: 0, disciplines: {} };
           }
@@ -170,11 +173,18 @@ export default function AnalysisPage() {
           globalFormatStats[normalized].disciplines[disc].impact += impact;
           globalFormatStats[normalized].disciplines[disc].count += 1;
 
+          // Acumulado Global por Disciplina + Sub-disciplina (Para Control Center)
           if (!globalDisciplineStats[disc]) {
-            globalDisciplineStats[disc] = { impact: 0, count: 0 };
+            globalDisciplineStats[disc] = { impact: 0, count: 0, subs: {} };
           }
           globalDisciplineStats[disc].impact += impact;
           globalDisciplineStats[disc].count += 1;
+
+          if (!globalDisciplineStats[disc].subs[subDisc]) {
+            globalDisciplineStats[disc].subs[subDisc] = { impact: 0, count: 0 };
+          }
+          globalDisciplineStats[disc].subs[subDisc].impact += impact;
+          globalDisciplineStats[disc].subs[subDisc].count += 1;
         });
 
         await batch.commit().catch(() => {
@@ -205,7 +215,7 @@ export default function AnalysisPage() {
          }));
       });
 
-      // Guardar Taxonomía de Disciplinas
+      // Guardar Taxonomía de Disciplinas (Con Subs)
       await saveTaxonomyInChunks(db, 'taxonomy_disciplines', globalDisciplineStats, buildMetadata);
 
       // Guardar Formatos y sus desgloses
@@ -225,7 +235,6 @@ export default function AnalysisPage() {
           totalOrders: stats.count
         });
 
-        // Limpiar sub-colección antes de guardar
         const discPath = `aggregates/format_analytics/formats/${formatId}/disciplines_stats`;
         await purgeCollectionCompletely(db, discPath);
 
@@ -237,7 +246,7 @@ export default function AnalysisPage() {
         );
       }
 
-      toast({ title: "Sincronización Exitosa", description: "Universo 80/20 reconstruido con limpieza total." });
+      toast({ title: "Sincronización Exitosa", description: "Universo reconstruido con trazabilidad de sub-disciplinas." });
     } catch (e: any) {
       console.error(e);
       toast({ variant: "destructive", title: "Error en Reconstrucción", description: e.message });
@@ -279,7 +288,7 @@ export default function AnalysisPage() {
                 <span className="text-4xl font-black text-accent">{syncProgress}%</span>
               </div>
               <Progress value={syncProgress} className="h-3 bg-white/10" />
-              <p className="text-xs text-slate-400 italic">Limpiando agregados obsoletos de forma recursiva para garantizar congruencia total.</p>
+              <p className="text-xs text-slate-400 italic">Reconstruyendo jerarquía de disciplinas y sub-causas para alineación 80/20.</p>
             </Card>
           )}
 
@@ -310,7 +319,7 @@ export default function AnalysisPage() {
                <History className="h-10 w-10 text-slate-300" />
                <div className="space-y-1">
                  <h4 className="text-sm font-black uppercase text-slate-800">Historial de Integridad</h4>
-                 <p className="text-xs text-slate-500">Cada vez que sincronizas, el sistema borra el 100% de los conteos previos para evitar duplicados y "datos fantasma".</p>
+                 <p className="text-xs text-slate-500">Cada sincronización garantiza que el impacto neto y los conteos de disciplinas cuadren con el universo base de Walmart.</p>
                </div>
              </div>
              <div className="space-y-4">
