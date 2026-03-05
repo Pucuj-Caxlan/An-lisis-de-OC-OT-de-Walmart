@@ -63,9 +63,12 @@ export default function UploadPage() {
           chunk.forEach((row) => {
             const impact = row.impactoNeto || 0;
             totalImpactAcc += impact;
+            
+            // Normalización estricta a MAYÚSCULAS
             let disc = String(row.disciplina_normalizada || 'INDEFINIDA').trim().toUpperCase();
             let sub = String(row.subcausa_normalizada || 'SIN SUB-DISCIPLINA').trim().toUpperCase();
             let cause = String(row.causaRaiz || 'ERRORES / OMISIONES').trim().toUpperCase();
+            let format = String(row.format || 'SIN FORMATO').trim().toUpperCase();
 
             if (!discMap[disc]) discMap[disc] = { impact: 0, count: 0, subs: {} };
             discMap[disc].impact += impact;
@@ -87,7 +90,8 @@ export default function UploadPage() {
               processedAt: new Date().toISOString(),
               disciplina_normalizada: disc,
               subcausa_normalizada: sub,
-              causa_raiz_normalizada: cause
+              causa_raiz_normalizada: cause,
+              format: format // Formato normalizado
             });
           });
           await batch.commit();

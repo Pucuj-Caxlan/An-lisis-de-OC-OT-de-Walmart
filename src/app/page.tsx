@@ -74,7 +74,7 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Descubrimiento dinámico de formatos disponibles
+  // Descubrimiento dinámico de formatos disponibles (Normalizado)
   useEffect(() => {
     if (!db || !isAuthReady) return;
     const fetchFormats = async () => {
@@ -100,11 +100,13 @@ export default function VpDashboard() {
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: globalTaxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
+  // Consulta por formato usando el campo normalizado
   const formatOrdersQuery = useMemoFirebase(() => {
     if (!db || formatFilter === 'all') return null;
     return query(
       collection(db, 'orders'), 
-      where('format', 'in', [formatFilter, formatFilter.toLowerCase(), formatFilter.charAt(0) + formatFilter.slice(1).toLowerCase()]),
+      where('format', '==', formatFilter.toUpperCase()),
+      orderBy('impactoNeto', 'desc'),
       limit(3000)
     );
   }, [db, formatFilter]);
@@ -129,7 +131,7 @@ export default function VpDashboard() {
         return {
           id: d.id || `${d.name}-${index}`,
           name: d.name || d.id || 'SIN CLASIFICAR',
-          value: impact > 0 ? impact : 0.01, // Valor mínimo para render treemap
+          value: impact > 0 ? impact : 0.01,
           impact: impact,
           percentage: Number(pct.toFixed(1)),
           cumulativePercentage: (cumulative / totalImpact) * 100,
@@ -142,6 +144,7 @@ export default function VpDashboard() {
       return { pareto, totalImpact, totalCount: globalAgg?.totalOrders || 0 };
     }
 
+    // Procesamiento para formato específico
     if (!formatOrders || formatOrders.length === 0) {
       return { pareto: [], totalImpact: 0, totalCount: 0 };
     }
@@ -180,6 +183,7 @@ export default function VpDashboard() {
         ...d,
         id: `${d.name}-${index}`,
         value: d.impact > 0 ? d.impact : 0.01,
+        impact: d.impact,
         percentage: Number(pct.toFixed(1)),
         cumulativePercentage: (cumulativeFormat / finalTotalImpact) * 100,
         color: colors[index % colors.length]
@@ -328,7 +332,7 @@ export default function VpDashboard() {
 
             <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl relative overflow-hidden">
               <div className="absolute top-0 right-0 p-4 opacity-10"><Target className="h-12 w-12" /></div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Vital Few</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Pocos Críticos</p>
               <h2 className="text-3xl font-black text-white tracking-tighter">85%</h2>
               <div className="flex items-center gap-2 mt-2">
                 <Progress value={85} className="h-1 bg-white/10" />
@@ -397,8 +401,8 @@ export default function VpDashboard() {
                     Análisis 80/20
                   </CardTitle>
                   <div className="flex gap-1 bg-slate-100 p-1 rounded-xl border">
-                    <Button variant={activeTab === '80' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('80')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Vital Few</Button>
-                    <Button variant={activeTab === '20' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('20')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Useful Many</Button>
+                    <Button variant={activeTab === '80' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('80')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Pocos Críticos</Button>
+                    <Button variant={activeTab === '20' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('20')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Muchos Útiles</Button>
                   </div>
                 </div>
                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{formatFilter === 'all' ? 'Universo Global' : `Formato: ${formatFilter}`}</p>
