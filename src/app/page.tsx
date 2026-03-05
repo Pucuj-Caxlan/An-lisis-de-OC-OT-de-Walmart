@@ -74,7 +74,7 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Descubrimiento dinámico de formatos disponibles
+  // Descubrimiento dinámico de formatos disponibles (SSOT)
   useEffect(() => {
     if (!db || !isAuthReady) return;
     const fetchFormats = async () => {
@@ -100,7 +100,7 @@ export default function VpDashboard() {
   const taxonomyQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc')) : null, [db]);
   const { data: globalTaxonomyDocs, isLoading: isTaxLoading } = useCollection(taxonomyQuery);
 
-  // Consulta optimizada usando Índice Compuesto: format + impactoNeto
+  // Consulta OPTIMIZADA: Utiliza el índice compuesto (format ASC, impactoNeto DESC)
   const formatOrdersQuery = useMemoFirebase(() => {
     if (!db || formatFilter === 'all') return null;
     return query(
@@ -116,6 +116,7 @@ export default function VpDashboard() {
   const processedData = useMemo(() => {
     const colors = THEMES[colorTheme];
     
+    // CASO 1: Visión Global (Agregados pre-calculados)
     if (formatFilter === 'all') {
       if (!globalTaxonomyDocs || globalTaxonomyDocs.length === 0) {
         return { pareto: [], totalImpact: globalAgg?.totalImpact || 0, totalCount: globalAgg?.totalOrders || 0 };
@@ -127,7 +128,7 @@ export default function VpDashboard() {
       const pareto = globalTaxonomyDocs.map((d, index) => {
         const impact = Number(d.impact || 0);
         cumulative += impact;
-        const pct = totalImpact > 0 ? (impact / totalImpact) * 100 : 0;
+        const pct = (impact / totalImpact) * 100;
         return {
           id: d.id || `${d.name}-${index}`,
           name: d.name || d.id || 'SIN CLASIFICAR',
@@ -144,7 +145,7 @@ export default function VpDashboard() {
       return { pareto, totalImpact, totalCount: globalAgg?.totalOrders || 0 };
     }
 
-    // Motor de Agregación Dinámica para Formato Específico
+    // CASO 2: Visión por Formato (Agregación dinámica en tiempo real)
     if (!formatOrders || formatOrders.length === 0) {
       return { pareto: [], totalImpact: 0, totalCount: 0 };
     }
@@ -200,6 +201,7 @@ export default function VpDashboard() {
   const formatCurrency = (val: number) => {
     if (!mounted || isNaN(val)) return "$0";
     if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
+    if (val >= 1000) return `$${(val / 1000).toFixed(1)}k`;
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
   };
 
@@ -269,7 +271,7 @@ export default function VpDashboard() {
             <Popover>
               <PopoverTrigger asChild>
                 <button className="flex items-center gap-2 border border-slate-200 bg-white px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm hover:bg-slate-50 transition-colors">
-                  <Settings2 className="h-3.5 w-3.5" /> Estilos Visuales
+                  <Settings2 className="h-3.5 w-3.5" /> Estilos
                 </button>
               </PopoverTrigger>
               <PopoverContent className="w-80 p-6 rounded-2xl shadow-2xl border-none">
@@ -320,6 +322,7 @@ export default function VpDashboard() {
         </header>
 
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
+          {/* Tarjetas de KPI Dinámicas */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <Card className="border-none shadow-md bg-white border-l-4 border-l-primary p-6 rounded-3xl group hover:shadow-lg transition-all">
               <div className="flex justify-between items-start mb-4">
@@ -360,6 +363,7 @@ export default function VpDashboard() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Mapa de Calor dinámico por Formato */}
             <Card className="lg:col-span-2 border-none shadow-xl bg-white overflow-hidden rounded-[2.5rem]">
               <CardHeader className="bg-slate-50/50 border-b flex flex-row items-center justify-between py-8 px-10">
                 <div className="space-y-1">
@@ -398,6 +402,7 @@ export default function VpDashboard() {
               </CardContent>
             </Card>
 
+            {/* Análisis 80/20 segregado */}
             <Card className="border-none shadow-xl bg-white rounded-[2.5rem] flex flex-col">
               <CardHeader className="py-8 px-10 border-b bg-slate-50/30">
                 <div className="flex items-center justify-between mb-4">
@@ -414,7 +419,7 @@ export default function VpDashboard() {
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-8 overflow-y-auto custom-scrollbar">
                 {(activeTab === '80' ? vitalFew : usefulMany).map((item, i) => (
-                  <div key={`${item.id}-${i}`} className="group cursor-pointer" onClick={() => setSelectedDiscipline(item)}>
+                  <div key={item.id} className="group cursor-pointer" onClick={() => setSelectedDiscipline(item)}>
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex gap-3">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center text-[10px] font-black shrink-0 ${activeTab === '80' ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-400'}`}>{i + 1}</div>
@@ -447,6 +452,7 @@ export default function VpDashboard() {
           </div>
         </main>
 
+        {/* Modal de Drill-down técnico */}
         <Dialog open={!!selectedDiscipline} onOpenChange={(open) => !open && setSelectedDiscipline(null)}>
           <DialogContent className="max-w-3xl rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl bg-white">
             <div className="bg-slate-900 p-10 text-white relative">
