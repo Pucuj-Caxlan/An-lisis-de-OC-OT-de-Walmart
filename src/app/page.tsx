@@ -21,7 +21,8 @@ import {
   Settings2,
   Type,
   Palette,
-  TrendingUp
+  TrendingUp,
+  Info
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -83,7 +84,6 @@ export default function VpDashboard() {
   // 2. Datos específicos por Formato (Agregación dinámica)
   const formatOrdersQuery = useMemoFirebase(() => {
     if (!db || formatFilter === 'all') return null;
-    // Utilizamos el índice compuesto [format + impactoNeto]
     return query(
       collection(db, 'orders'), 
       where('format', '==', formatFilter),
@@ -110,7 +110,7 @@ export default function VpDashboard() {
         cumulative += d.impact || 0;
         const pct = totalImpact > 0 ? ((d.impact || 0) / totalImpact) * 100 : 0;
         return {
-          id: d.id,
+          id: d.id || `${d.name}-${index}`,
           name: d.name || d.id || 'SIN NOMBRE',
           value: d.impact || 0,
           impact: d.impact || 0,
@@ -158,7 +158,7 @@ export default function VpDashboard() {
       const pct = totalFormatImpact > 0 ? (d.impact / totalFormatImpact) * 100 : 0;
       return {
         ...d,
-        id: d.name,
+        id: `${d.name}-${index}`,
         value: d.impact,
         percentage: Number(pct.toFixed(1)),
         cumulativePercentage: (cumulativeFormat / totalFormatImpact) * 100,
@@ -441,7 +441,7 @@ export default function VpDashboard() {
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-8 overflow-y-auto custom-scrollbar">
                 {(activeTab === '80' ? vitalFew : usefulMany).map((item, i) => (
-                  <div key={`${item.id}-${i}`} className="group cursor-pointer" onClick={() => setSelectedDiscipline(item)}>
+                  <div key={item.id} className="group cursor-pointer" onClick={() => setSelectedDiscipline(item)}>
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex gap-3">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center text-[10px] font-black shrink-0 ${activeTab === '80' ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-400'}`}>
