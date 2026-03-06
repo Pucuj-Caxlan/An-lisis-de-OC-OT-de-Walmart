@@ -101,6 +101,8 @@ export default function UploadPdfPage() {
         fechaSolicitud: extracted.extractedData.header?.requestDate || new Date().toISOString(),
         isSigned: extracted.extractedData.governance?.isSigned || false,
         semanticAnalysis: semantic,
+        // NORMALIZACIÓN CRÍTICA: Disciplina en MAYÚSCULAS al guardar registro individual
+        disciplina_normalizada: String(semantic.disciplina_normalizada).trim().toUpperCase(),
         processedAt: new Date().toISOString(),
         classification_status: 'auto'
       };
@@ -187,7 +189,7 @@ export default function UploadPdfPage() {
                     </CardHeader>
                     <CardContent className="p-6">
                        <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                          <p className="text-xs font-bold text-slate-800 mb-2 uppercase">{results.extractedData.semanticAnalysis?.disciplina_normalizada}</p>
+                          <p className="text-xs font-bold text-slate-800 mb-2 uppercase">{results.extractedData.disciplina_normalizada}</p>
                           <p className="text-[11px] text-slate-600 italic">"{results.extractedData.descripcion}"</p>
                        </div>
                     </CardContent>

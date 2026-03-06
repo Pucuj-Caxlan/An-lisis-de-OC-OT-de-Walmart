@@ -153,7 +153,7 @@ export default function AnalysisPage() {
 
       await updateDoc(doc(db!, 'orders', order.id), {
         semanticAnalysis: result,
-        disciplina_normalizada: result.disciplina_normalizada,
+        disciplina_normalizada: result.disciplina_normalizada.toUpperCase().trim(),
         causa_raiz_normalizada: result.causa_raiz_normalizada,
         classification_status: 'auto'
       });
@@ -186,6 +186,10 @@ export default function AnalysisPage() {
     if (!db || !editingOrder) return;
     try {
       const { id, ...data } = editingOrder;
+      // Normalizamos disciplina en edición manual también
+      if (data.disciplina_normalizada) {
+        data.disciplina_normalizada = data.disciplina_normalizada.toUpperCase().trim();
+      }
       await updateDoc(doc(db, 'orders', id), data);
       toast({ title: "Cambios guardados", description: `Registro ${data.projectId} actualizado.` });
       setEditingOrder(null);
@@ -249,7 +253,7 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '4.1.0-management-restored'
+        build_version: '4.6.0-case-normalized'
       };
 
       const globalFormatStats: Record<string, any> = {};
@@ -274,7 +278,8 @@ export default function AnalysisPage() {
           const impact = Number(data.impactoNeto || 0);
           
           const format = normalizeFormatName(data.format || data.format_origin || 'OTRO');
-          const disc = String(data.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
+          // NORMALIZACIÓN CRÍTICA: Aseguramos que el campo en 'orders' sea idéntico al de los agregados
+          const disc = String(data.disciplina_normalizada || data.semanticAnalysis?.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
           const coord = normalizeCoordinator(data.coordinador || data.coordinador_normalizado);
           const stage = normalizeStage(data.etapa || data.etapa_proyecto_normalizada);
           const plan = normalizePlan(data.plan || data.plan_nombre_normalizado);
@@ -283,11 +288,13 @@ export default function AnalysisPage() {
           const year = isNaN(date.getFullYear()) ? 2024 : date.getFullYear();
           const month = isNaN(date.getMonth()) ? 1 : date.getMonth() + 1;
 
+          // Actualizamos el registro base con la disciplina normalizada para que la consulta de detalle funcione
           batch.update(doc(db, 'orders', d.id), {
             format_normalized: format,
             coordinador_normalizado: coord,
             etapa_proyecto_normalizada: stage,
             plan_nombre_normalizado: plan,
+            disciplina_normalizada: disc,
             year,
             month,
             lastSync: buildMetadata.build_timestamp
@@ -370,7 +377,7 @@ export default function AnalysisPage() {
         await batch.commit();
       }
 
-      toast({ title: "Sincronización Exitosa", description: "Universo reconstruido con metadatos de gestión." });
+      toast({ title: "Sincronización Exitosa", description: "Universo normalizado y expedientes vinculados." });
       fetchOrders();
     } catch (e: any) {
       console.error(e);
@@ -428,7 +435,7 @@ export default function AnalysisPage() {
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-accent">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estatus de Analítica</p>
               <div className="flex items-center gap-2 text-emerald-600 font-bold uppercase text-xs">
-                <ShieldCheck className="h-4 w-4" /> SSOT 4.1 Management Active
+                <ShieldCheck className="h-4 w-4" /> SSOT 4.6 Case-Normalized Active
               </div>
             </Card>
           </div>
