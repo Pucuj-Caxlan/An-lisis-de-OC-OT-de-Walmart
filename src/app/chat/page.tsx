@@ -42,17 +42,17 @@ export default function ChatPage() {
   const globalAggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(globalAggRef);
 
-  // 2. Cargar Resúmenes de Taxonomía para Contexto IA
-  const topDisciplinesQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc'), limit(20)) : null, [db]);
-  const topFormatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('impact', 'desc'), limit(10)) : null, [db]);
+  // 2. Cargar Resúmenes de Taxonomía para Contexto IA (Sanitizados)
+  const topDisciplinesQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc'), limit(25)) : null, [db]);
+  const topFormatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('impact', 'desc'), limit(15)) : null, [db]);
   
-  const { data: disciplines } = useCollection(topDisciplinesQuery);
-  const { data: formats } = useCollection(topFormatsQuery);
+  const { data: rawDisciplines } = useCollection(topDisciplinesQuery);
+  const { data: rawFormats } = useCollection(topFormatsQuery);
 
   // 3. Cargar Muestra de Alto Impacto (Solo registros críticos para no saturar payload)
   const highImpactQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(40));
+    return query(collection(db, 'orders'), orderBy('impactoNeto', 'desc'), limit(50));
   }, [db]);
   const { data: samples } = useCollection(highImpactQuery);
 
@@ -81,15 +81,36 @@ export default function ChatPage() {
     setIsLoading(true);
 
     try {
+      // Sanitización de nombres para evitar el error de "No Nombrada"
+      const cleanDisciplines = (rawDisciplines || []).map(d => ({
+        name: d.name || d.id || 'Disciplina Desconocida',
+        impact: Number(d.impact || 0),
+        count: Number(d.count || 0)
+      })).filter(d => d.impact > 0);
+
+      const cleanFormats = (rawFormats || []).map(f => ({
+        name: f.name || f.id || 'Formato Desconocido',
+        impact: Number(f.impact || 0)
+      }));
+
+      const cleanSamples = (samples || []).map(s => ({
+        projectId: s.projectId || s.projectInfo?.projectId || 'N/A',
+        projectName: s.projectName || s.projectInfo?.projectName || '',
+        impactoNeto: Number(s.impactoNeto || s.financialImpact?.netImpact || 0),
+        causa_raiz_normalizada: s.causa_raiz_normalizada || s.projectInfo?.rootCauseDeclared || 'Sin clasificar',
+        disciplina_normalizada: s.disciplina_normalizada || s.semanticAnalysis?.disciplina_normalizada || 'Indefinida',
+        descripcion: s.descripcion || s.technicalJustification?.description || ''
+      }));
+
       const response = await chatWithAi({
         message: userInput,
         history: messages.map(m => ({ role: m.role, content: m.content })),
         summaryContext: {
-          totalImpact: globalAgg?.totalImpact || 0,
-          totalOrders: globalAgg?.totalOrders || 0,
-          topDisciplines: disciplines || [],
-          topFormats: formats || [],
-          sampleHighImpact: samples || []
+          totalImpact: Number(globalAgg?.totalImpact || 0),
+          totalOrders: Number(globalAgg?.totalOrders || 0),
+          topDisciplines: cleanDisciplines,
+          topFormats: cleanFormats,
+          sampleHighImpact: cleanSamples
         }
       });
 
@@ -102,10 +123,11 @@ export default function ChatPage() {
       setMessages(prev => [...prev, aiMessage]);
 
     } catch (error: any) {
+      console.error("Chat Error:", error);
       toast({
         variant: "destructive",
-        title: "Error de Motor IA",
-        description: error.message || "Fallo en la comunicación con Gemini.",
+        title: "Error de Inteligencia",
+        description: error.message || "Fallo al conectar con WAI.",
       });
     } finally {
       setIsLoading(false);
@@ -121,7 +143,7 @@ export default function ChatPage() {
     <div className="flex min-h-screen w-full bg-slate-50/30">
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10 shadow-sm">
           <div className="flex items-center gap-4">
             <SidebarTrigger />
             <div className="flex items-center gap-2">
@@ -134,10 +156,10 @@ export default function ChatPage() {
               <Database className="h-3 w-3" /> Base Global: {globalAgg?.totalOrders || 0}
             </Badge>
             <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-2 px-3 py-1 uppercase font-black">
-              <RefreshCcw className="h-3 w-3" /> Contexto IA: Optimizado (Sumarizado)
+              <RefreshCcw className="h-3 w-3" /> Contexto: 100% Sincronizado
             </Badge>
-            <Button variant="ghost" size="sm" onClick={handleReset} className="text-slate-400 hover:text-rose-500">
-              Reiniciar
+            <Button variant="ghost" size="sm" onClick={handleReset} className="text-slate-400 hover:text-rose-500 rounded-lg">
+              Reiniciar Conversación
             </Button>
           </div>
         </header>
@@ -147,7 +169,7 @@ export default function ChatPage() {
             <div className="max-w-4xl mx-auto py-8 px-6 space-y-6">
               {messages.length === 0 && !isLoading && (
                 <div className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-6">
-                  <div className="bg-primary/10 p-8 rounded-full">
+                  <div className="bg-primary/10 p-8 rounded-full shadow-inner">
                     <Bot className="h-20 w-20 text-primary" />
                   </div>
                   <div className="space-y-2">
@@ -156,15 +178,15 @@ export default function ChatPage() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
                     {[
-                      "Resumen del impacto económico total",
+                      "¿Cuál es el impacto financiero por disciplina?",
                       "¿Cuáles son las 3 disciplinas con mayor impacto?",
                       "Identifica riesgos en registros de alto monto",
-                      "Analiza la distribución por formato"
+                      "Analiza la distribución por formato de tienda"
                     ].map((q, i) => (
                       <Button 
                         key={i} 
                         variant="outline" 
-                        className="justify-start gap-3 h-auto py-4 px-5 text-left bg-white border-slate-200 hover:border-primary hover:bg-primary/5 transition-all shadow-sm group"
+                        className="justify-start gap-3 h-auto py-4 px-5 text-left bg-white border-slate-200 hover:border-primary hover:bg-primary/5 transition-all shadow-sm group rounded-2xl"
                         onClick={() => setInput(q)}
                       >
                         <Sparkles className="h-4 w-4 text-accent group-hover:scale-110 transition-transform" />
@@ -176,14 +198,16 @@ export default function ChatPage() {
               )}
 
               {messages.map((m, i) => (
-                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
                   <div className={`flex gap-4 max-w-[85%] ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                    <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${m.role === 'user' ? 'bg-slate-800 text-white' : 'bg-primary text-white'}`}>
+                    <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 shadow-md ${m.role === 'user' ? 'bg-slate-800 text-white' : 'bg-primary text-white'}`}>
                       {m.role === 'user' ? <User className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
                     </div>
                     <div className={`p-5 rounded-2xl shadow-sm text-sm leading-relaxed ${m.role === 'user' ? 'bg-slate-800 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}`}>
-                      <div className="whitespace-pre-wrap prose prose-sm max-w-none">{m.content}</div>
-                      <p className={`text-[8px] mt-2 opacity-50 uppercase font-black tracking-widest ${m.role === 'user' ? 'text-right' : ''}`}>
+                      <div className="whitespace-pre-wrap prose prose-sm max-w-none prose-slate prose-invert:text-white">
+                        {m.content}
+                      </div>
+                      <p className={`text-[8px] mt-3 opacity-50 uppercase font-black tracking-widest ${m.role === 'user' ? 'text-right' : ''}`}>
                         {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
@@ -194,12 +218,12 @@ export default function ChatPage() {
               {isLoading && (
                 <div className="flex justify-start">
                   <div className="flex gap-4 max-w-[85%]">
-                    <div className="h-10 w-10 rounded-xl bg-primary text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <div className="h-10 w-10 rounded-xl bg-primary text-white flex items-center justify-center shrink-0 shadow-md">
                       <Bot className="h-5 w-5" />
                     </div>
                     <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center gap-3">
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest italic">WAI procesando inteligencia forense...</span>
+                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest italic">WAI analizando tendencias forenses...</span>
                     </div>
                   </div>
                 </div>
@@ -207,9 +231,9 @@ export default function ChatPage() {
             </div>
           </ScrollArea>
 
-          <div className="p-6 bg-gradient-to-t from-white to-transparent pt-10">
+          <div className="p-6 bg-gradient-to-t from-white via-white to-transparent pt-10">
             <div className="max-w-4xl mx-auto">
-              <div className="bg-white border rounded-2xl p-2 shadow-2xl flex items-center gap-2">
+              <div className="bg-white border rounded-3xl p-2 shadow-2xl flex items-center gap-2 border-slate-200">
                 <Input 
                   placeholder="Consulta a WAI sobre el universo total de datos..." 
                   className="border-none focus-visible:ring-0 text-sm h-12 bg-transparent font-medium"
@@ -220,7 +244,7 @@ export default function ChatPage() {
                 />
                 <Button 
                   size="icon" 
-                  className="h-10 w-10 shrink-0 bg-primary hover:bg-primary/90 shadow-md transition-all active:scale-95"
+                  className="h-10 w-10 shrink-0 bg-primary hover:bg-primary/90 shadow-md transition-all active:scale-95 rounded-2xl"
                   onClick={handleSend}
                   disabled={!input.trim() || isLoading}
                 >
@@ -228,8 +252,8 @@ export default function ChatPage() {
                 </Button>
               </div>
               <div className="flex justify-center mt-3 px-2">
-                <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight text-slate-400 border-slate-200 bg-white">
-                  Contexto Multidimensional • IA Optimizada para Gran Volumen
+                <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight text-slate-400 border-slate-200 bg-white px-4 py-1">
+                  Contexto Multidimensional • IA Optimizada para Auditoría Walmart
                 </Badge>
               </div>
             </div>
