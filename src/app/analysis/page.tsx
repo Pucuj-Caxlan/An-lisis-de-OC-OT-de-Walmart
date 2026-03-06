@@ -253,7 +253,7 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '4.6.0-case-normalized'
+        build_version: '4.6.1-sanitized-ids'
       };
 
       const globalFormatStats: Record<string, any> = {};
@@ -312,7 +312,7 @@ export default function AnalysisPage() {
           globalDisciplineStats[disc].impact += impact;
           globalDisciplineStats[disc].count += 1;
 
-          const aggKey = `${year}_${month}_${format}_${coord.replace(/\s+/g, '_')}_${stage.replace(/\s+/g, '_')}_${plan.replace(/\s+/g, '_')}_${disc.replace(/\s+/g, '_')}`.substring(0, 500);
+          const aggKey = `${year}_${month}_${format}_${coord.replace(/[\/\s\.]+/g, '_')}_${stage.replace(/[\/\s\.]+/g, '_')}_${plan.replace(/[\/\s\.]+/g, '_')}_${disc.replace(/[\/\s\.]+/g, '_')}`.substring(0, 500);
           if (!hitosAgg[aggKey]) {
             hitosAgg[aggKey] = { 
               impact: 0, count: 0, year, month, format, coordinator: coord, stage, plan, discipline: disc 
@@ -345,7 +345,8 @@ export default function AnalysisPage() {
       }
 
       for (const [id, data] of Object.entries(globalDisciplineStats)) {
-        const safeId = id.replace(/\s+/g, '_').substring(0, 100);
+        // CORRECCIÓN CRÍTICA: Se añade "/" a la regex de reemplazo para evitar segmentos impares en la ruta del documento
+        const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
         await setDoc(doc(db, 'taxonomy_disciplines', safeId), {
           ...data, id: safeId, name: id, updatedAt: buildMetadata.build_timestamp
         });
@@ -378,7 +379,7 @@ export default function AnalysisPage() {
       }
 
       toast({ title: "Sincronización Exitosa", description: "Universo normalizado y expedientes vinculados." });
-      fetchOrders();
+      fetchOrders('initial');
     } catch (e: any) {
       console.error(e);
       toast({ variant: "destructive", title: "Error en Sincronización", description: e.message });
