@@ -15,7 +15,8 @@ import {
   CloudLightning,
   Activity,
   Shield,
-  Database
+  Database,
+  Presentation
 } from "lucide-react"
 
 import {
@@ -42,8 +43,8 @@ const navigation = [
     url: "/",
   },
   {
-    title: "Control Center",
-    icon: Activity,
+    title: "Presentación Ejecutiva",
+    icon: Presentation,
     url: "/control-center",
   },
   {
