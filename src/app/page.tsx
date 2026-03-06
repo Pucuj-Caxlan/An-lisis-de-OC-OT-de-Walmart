@@ -1,7 +1,7 @@
 
 "use client"
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, memo } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -54,6 +54,77 @@ import {
 
 const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#54585A'];
 
+// Componente de contenido personalizado memoizado para máximo rendimiento
+const TreemapNode = memo((props: any) => {
+  const { x, y, width, height, name, impact, percentage, color, onClick, formatCurrency } = props;
+  
+  if (width < 30 || height < 30) return null;
+  
+  // Lógica de legibilidad dinámica
+  const showFullInfo = width > 120 && height > 80;
+  const showCompactInfo = width > 60 && height > 40;
+  const showNameOnly = width > 40 && height > 25;
+
+  return (
+    <g 
+      onClick={() => onClick(props)} 
+      className="cursor-pointer group transition-all duration-300"
+    >
+      <rect 
+        x={x} 
+        y={y} 
+        width={width} 
+        height={height} 
+        style={{ 
+          fill: color, 
+          stroke: '#fff', 
+          strokeWidth: 1.5,
+          transition: 'opacity 0.2s ease'
+        }} 
+        className="group-hover:opacity-85"
+      />
+      {showNameOnly && (
+        <text 
+          x={x + 6} 
+          y={y + 16} 
+          fill="#fff" 
+          fontSize={showFullInfo ? 11 : 9} 
+          fontWeight="900" 
+          className="uppercase pointer-events-none drop-shadow-sm"
+        >
+          {String(name).length > (width / 7) ? `${String(name).substring(0, Math.floor(width / 7))}...` : name}
+        </text>
+      )}
+      {showCompactInfo && (
+        <text 
+          x={x + 6} 
+          y={y + (showFullInfo ? 32 : 28)} 
+          fill="rgba(255,255,255,0.9)" 
+          fontSize={8} 
+          fontWeight="700" 
+          className="pointer-events-none"
+        >
+          {formatCurrency(impact)}
+        </text>
+      )}
+      {showFullInfo && (
+        <text 
+          x={x + 6} 
+          y={y + height - 8} 
+          fill="#fff" 
+          fontSize={16} 
+          fontWeight="900" 
+          className="pointer-events-none tabular-nums"
+        >
+          {percentage}%
+        </text>
+      )}
+    </g>
+  );
+});
+
+TreemapNode.displayName = 'TreemapNode';
+
 export default function VpDashboard() {
   const db = useFirestore();
   const { isAuthReady } = useUser();
@@ -61,22 +132,18 @@ export default function VpDashboard() {
   const [formatFilter, setFormatFilter] = useState('all');
   const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
   
-  // Estado para el detalle de la disciplina
   const [selectedDiscipline, setSelectedDiscipline] = useState<any>(null);
   const [disciplineOrders, setDisciplineOrders] = useState<any[]>([]);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
-  // 1. Cargar Global Stats (SSOT Real)
   const globalAggRef = doc(db!, 'aggregates', 'global_stats');
   const { data: globalAgg } = useDoc(globalAggRef);
 
-  // 2. Cargar Taxonomía de Formatos
   const formatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('name', 'asc')) : null, [db]);
   const { data: availableFormats } = useCollection(formatsQuery);
 
-  // 3. Cargar Datos Materializados
   const analyticsPath = formatFilter === 'all' 
     ? 'taxonomy_disciplines' 
     : `aggregates/format_analytics/formats/${formatFilter}/disciplines_stats`;
@@ -133,12 +200,10 @@ export default function VpDashboard() {
   const usefulMany = useMemo(() => processedData.pareto.filter(p => p.cumulativePercentage > 85), [processedData]);
 
   const formatCurrency = (val: number) => {
-    if (!mounted) return "$0";
     if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
   };
 
-  // Función para cargar órdenes de una disciplina específica
   const handleNodeClick = async (node: any) => {
     if (!node || !db) return;
     setSelectedDiscipline(node);
@@ -153,7 +218,6 @@ export default function VpDashboard() {
         limit(10)
       );
       
-      // Si hay filtro de formato, lo aplicamos también
       if (formatFilter !== 'all') {
         const formatDoc = availableFormats?.find(f => f.id === formatFilter);
         if (formatDoc) {
@@ -170,67 +234,36 @@ export default function VpDashboard() {
     }
   };
 
-  const CustomizedContent = (props: any) => {
-    const { x, y, width, height, name, impact, percentage, color, root } = props;
-    if (width < 40 || height < 40) return null;
-    
-    return (
-      <g 
-        onClick={() => handleNodeClick(props)} 
-        className="cursor-pointer group transition-all duration-300"
-      >
-        <rect 
-          x={x} 
-          y={y} 
-          width={width} 
-          height={height} 
-          style={{ 
-            fill: color, 
-            stroke: '#fff', 
-            strokeWidth: 2,
-            transition: 'all 0.3s ease'
-          }} 
-          className="group-hover:opacity-80"
-        />
-        {width > 60 && height > 40 && (
-          <>
-            <text x={x + 8} y={y + 18} fill="#fff" fontSize={10} fontWeight="900" className="uppercase pointer-events-none">{String(name).substring(0, 15)}</text>
-            <text x={x + 8} y={y + 32} fill="rgba(255,255,255,0.8)" fontSize={8} fontWeight="bold" className="pointer-events-none">{formatCurrency(impact)}</text>
-            <text x={x + 8} y={y + height - 10} fill="#fff" fontSize={14} fontWeight="900" className="pointer-events-none">{percentage}%</text>
-          </>
-        )}
-      </g>
-    );
-  };
-
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (
-        <div className="bg-slate-950 text-white p-4 rounded-2xl shadow-2xl border border-white/10 backdrop-blur-xl">
-          <p className="text-[10px] font-black text-accent uppercase tracking-widest mb-2">{data.name}</p>
-          <div className="space-y-1.5">
-            <div className="flex justify-between gap-8 items-center">
-              <span className="text-[9px] font-bold text-slate-400 uppercase">Impacto Económico</span>
+        <div className="bg-slate-950 text-white p-5 rounded-2xl shadow-2xl border border-white/10 backdrop-blur-xl animate-in fade-in zoom-in duration-200">
+          <p className="text-xs font-black text-accent uppercase tracking-widest mb-3 pb-2 border-b border-white/10">{data.name}</p>
+          <div className="space-y-2">
+            <div className="flex justify-between gap-10 items-center">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Impacto Capex</span>
               <span className="text-sm font-black text-white">{formatCurrency(data.impact)}</span>
             </div>
-            <div className="flex justify-between gap-8 items-center">
-              <span className="text-[9px] font-bold text-slate-400 uppercase">Volumen de Registros</span>
+            <div className="flex justify-between gap-10 items-center">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Incidencias</span>
               <span className="text-sm font-black text-emerald-400">{data.count} OC/OT</span>
             </div>
-            <div className="flex justify-between gap-8 items-center pt-1 border-t border-white/5 mt-1">
-              <span className="text-[9px] font-bold text-slate-400 uppercase">Participación Pareto</span>
+            <div className="flex justify-between gap-10 items-center pt-2 border-t border-white/5 mt-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Participación</span>
               <span className="text-xs font-black text-primary">{data.percentage}%</span>
             </div>
           </div>
-          <div className="mt-3 flex items-center gap-2 text-[8px] font-black text-slate-500 uppercase italic">
-            <Info className="h-2.5 w-2.5" /> Haz clic para ver el desglose
+          <div className="mt-4 flex items-center gap-2 text-[9px] font-black text-slate-500 uppercase italic">
+            <Info className="h-3 w-3" /> Haz clic para inspección forense
           </div>
         </div>
       );
     }
     return null;
   };
+
+  if (!mounted) return null;
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50/30">
@@ -273,24 +306,24 @@ export default function VpDashboard() {
 
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <Card className="border-none shadow-md bg-white border-l-4 border-l-primary p-6 rounded-3xl">
+            <Card className="border-none shadow-md bg-white border-l-4 border-l-primary p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Materializado</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(formatFilter === 'all' ? (globalAgg?.totalImpact || 0) : processedData.totalImpact)}</h2>
               <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Segmento: {formatFilter === 'all' ? 'GLOBAL' : formatFilter.toUpperCase()}</p>
             </Card>
-            <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl">
+            <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Pareto</p>
               <h2 className="text-3xl font-black text-white tracking-tighter">85%</h2>
               <Progress value={85} className="h-1 bg-white/10 mt-2" />
             </Card>
-            <Card className="border-none shadow-md bg-white border-l-4 border-l-blue-600 p-6 rounded-3xl">
+            <Card className="border-none shadow-md bg-white border-l-4 border-l-blue-600 p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Muestra de Segmento</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">
                 {(formatFilter === 'all' ? (globalAgg?.totalOrders || 0) : processedData.totalCount).toLocaleString()}
               </h2>
               <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Registros en Vista</p>
             </Card>
-            <Card className="border-none shadow-md bg-white border-l-4 border-l-emerald-500 p-6 rounded-3xl">
+            <Card className="border-none shadow-md bg-white border-l-4 border-l-emerald-500 p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Hitos Vitales</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{vitalFew.length}</h2>
               <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Categorías Críticas</p>
@@ -300,10 +333,17 @@ export default function VpDashboard() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <Card className="lg:col-span-2 border-none shadow-xl bg-white overflow-hidden rounded-[2.5rem]">
               <CardHeader className="bg-slate-50/50 border-b py-8 px-10">
-                <CardTitle className="text-sm font-black uppercase text-primary tracking-[0.2em] flex items-center gap-3">
-                  <Maximize2 className="h-5 w-5" /> Mapa de Calor: Concentración de Impacto
-                </CardTitle>
-                <CardDescription className="text-[10px] font-bold uppercase text-slate-400">Trazabilidad Total • SSOT orders</CardDescription>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle className="text-sm font-black uppercase text-primary tracking-[0.2em] flex items-center gap-3">
+                      <Maximize2 className="h-5 w-5" /> Mapa de Calor: Concentración de Impacto
+                    </CardTitle>
+                    <CardDescription className="text-[10px] font-bold uppercase text-slate-400 mt-1">Exploración Táctica de Desviaciones • SSOT Active</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 bg-white px-3 py-1 rounded-full border">
+                    <Loader2 className="h-2.5 w-2.5 animate-pulse" /> OPTIMIZADO
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="h-[550px] p-8">
                 {isLoading ? (
@@ -312,7 +352,13 @@ export default function VpDashboard() {
                   </div>
                 ) : processedData.pareto.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <Treemap data={processedData.pareto} dataKey="value" stroke="#fff" content={<CustomizedContent />}>
+                    <Treemap 
+                      data={processedData.pareto} 
+                      dataKey="value" 
+                      stroke="#fff" 
+                      content={<TreemapNode onClick={handleNodeClick} formatCurrency={formatCurrency} />}
+                      animationDuration={400}
+                    >
                       <Tooltip content={<CustomTooltip />} />
                     </Treemap>
                   </ResponsiveContainer>
@@ -374,7 +420,7 @@ export default function VpDashboard() {
 
         {/* Dialogo de Detalles de Disciplina */}
         <Dialog open={!!selectedDiscipline} onOpenChange={(open) => !open && setSelectedDiscipline(null)}>
-          <DialogContent className="sm:max-w-[900px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
+          <DialogContent className="sm:max-w-[900px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl animate-in slide-in-from-bottom-4 duration-300">
             <DialogHeader className="bg-slate-900 text-white p-10">
               <div className="flex justify-between items-start">
                 <div className="space-y-2">
