@@ -32,6 +32,23 @@
       ]
     },
     {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
+        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
+        { "fieldPath": "format_normalized", "order": "ASCENDING" },
+        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "hitos_analytics",
       "queryScope": "COLLECTION",
       "fields": [
