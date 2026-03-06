@@ -1,16 +1,26 @@
 
 "use client"
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { Card } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { 
   RefreshCcw, 
   ShieldCheck,
   Loader2,
-  Layers
+  Layers,
+  Search,
+  Trash2,
+  Edit3,
+  BrainCircuit,
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  AlertTriangle,
+  Save,
+  X
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useUser, useDoc } from '@/firebase';
@@ -23,10 +33,15 @@ import {
   writeBatch, 
   documentId,
   startAfter,
+  endBefore,
   setDoc,
   orderBy,
   getCountFromServer,
-  Firestore
+  Firestore,
+  deleteDoc,
+  updateDoc,
+  where,
+  limitToLast
 } from 'firebase/firestore';
 import { 
   normalizeFormatName, 
@@ -39,6 +54,38 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from '@/components/ui/table';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
+import { Badge } from '@/components/ui/badge';
+
+const PAGE_SIZE = 10;
 
 export default function AnalysisPage() {
   const { toast } = useToast();
@@ -49,11 +96,106 @@ export default function AnalysisPage() {
   const [syncStep, setSyncStep] = useState<string>('');
   const [mounted, setMounted] = useState(false);
 
+  // Estados para la Tabla de Gestión
+  const [orders, setOrders] = useState<any[]>([]);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [lastDoc, setLastDoc] = useState<any>(null);
+  const [firstDoc, setFirstDoc] = useState<any>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  
+  // Estados para Edición y Borrado
+  const [editingOrder, setEditingOrder] = useState<any>(null);
+  const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
+  const [isProcessingAI, setIsProcessingAI] = useState<string | null>(null);
+
   useEffect(() => { setMounted(true); }, []);
 
   const aggRef = doc(db!, 'aggregates', 'global_stats');
   const { data: globalAgg } = useDoc(aggRef);
 
+  // --- Lógica de Carga de Registros ---
+  const fetchOrders = useCallback(async (direction: 'next' | 'prev' | 'initial' = 'initial') => {
+    if (!db) return;
+    setIsLoadingOrders(true);
+    try {
+      let q = query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(PAGE_SIZE));
+      
+      if (direction === 'next' && lastDoc) {
+        q = query(q, startAfter(lastDoc));
+      } else if (direction === 'prev' && firstDoc) {
+        q = query(collection(db, 'orders'), orderBy('processedAt', 'desc'), endBefore(firstDoc), limitToLast(PAGE_SIZE));
+      }
+
+      const snap = await getDocs(q);
+      const results = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+      
+      setOrders(results);
+      setFirstDoc(snap.docs[0]);
+      setLastDoc(snap.docs[snap.docs.length - 1]);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingOrders(false);
+    }
+  }, [db, lastDoc, firstDoc]);
+
+  useEffect(() => {
+    if (db && mounted) fetchOrders();
+  }, [db, mounted]);
+
+  // --- Acciones Individuales ---
+  const handleProcessAI = async (order: any) => {
+    setIsProcessingAI(order.id);
+    try {
+      const result = await analyzeOrderSemantically({
+        descripcion: order.descripcion || order.descriptionSection?.description || ""
+      });
+
+      await updateDoc(doc(db!, 'orders', order.id), {
+        semanticAnalysis: result,
+        disciplina_normalizada: result.disciplina_normalizada,
+        causa_raiz_normalizada: result.causa_raiz_normalizada,
+        classification_status: 'auto'
+      });
+
+      toast({ title: "Auditoría IA Exitosa", description: `Registro ${order.projectId} reclasificado.` });
+      fetchOrders();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Fallo en IA", description: e.message });
+    } finally {
+      setIsProcessingAI(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!db || !orderToDelete) return;
+    try {
+      await deleteDoc(doc(db, 'orders', orderToDelete));
+      toast({ title: "Registro eliminado", description: "El universo se ha actualizado localmente." });
+      setOrderToDelete(null);
+      fetchOrders();
+    } catch (e: any) {
+      errorEmitter.emit('permission-error', new FirestorePermissionError({
+        path: `orders/${orderToDelete}`,
+        operation: 'delete'
+      }));
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!db || !editingOrder) return;
+    try {
+      const { id, ...data } = editingOrder;
+      await updateDoc(doc(db, 'orders', id), data);
+      toast({ title: "Cambios guardados", description: `Registro ${data.projectId} actualizado.` });
+      setEditingOrder(null);
+      fetchOrders();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error al editar", description: e.message });
+    }
+  };
+
+  // --- Lógica de Sincronización Masiva (Existente) ---
   const purgeCollectionCompletely = async (db: Firestore, collPath: string) => {
     let hasMore = true;
     while (hasMore) {
@@ -107,7 +249,7 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '4.0.0-multidimensional-plan'
+        build_version: '4.1.0-management-restored'
       };
 
       const globalFormatStats: Record<string, any> = {};
@@ -116,17 +258,7 @@ export default function AnalysisPage() {
       const stages = new Set<string>();
       const plans = new Set<string>();
 
-      const hitosAgg: Record<string, { 
-        impact: number, 
-        count: number, 
-        year: number, 
-        month: number, 
-        format: string, 
-        coordinator: string, 
-        stage: string, 
-        plan: string,
-        discipline: string 
-      }> = {};
+      const hitosAgg: Record<string, any> = {};
 
       while (hasMore) {
         let q = query(collection(db, 'orders'), orderBy(documentId()), limit(CHUNK_SIZE));
@@ -227,7 +359,7 @@ export default function AnalysisPage() {
         await setDoc(doc(db, 'taxonomy_plans', safeId), { id: safeId, name: plan });
       }
 
-      setSyncStep('Finalizando Agregados Multidimensionales...');
+      setSyncStep('Finalizando Agregados...');
       const hitosEntries = Object.entries(hitosAgg);
       for (let i = 0; i < hitosEntries.length; i += 400) {
         const chunk = hitosEntries.slice(i, i + 400);
@@ -238,7 +370,8 @@ export default function AnalysisPage() {
         await batch.commit();
       }
 
-      toast({ title: "Sincronización Exitosa", description: "Universo reconstruido con agregados multidimensionales de Plan." });
+      toast({ title: "Sincronización Exitosa", description: "Universo reconstruido con metadatos de gestión." });
+      fetchOrders();
     } catch (e: any) {
       console.error(e);
       toast({ variant: "destructive", title: "Error en Sincronización", description: e.message });
@@ -274,13 +407,12 @@ export default function AnalysisPage() {
             <Card className="p-8 border-none shadow-xl bg-slate-900 text-white space-y-6">
               <div className="flex justify-between items-end">
                 <div className="space-y-1">
-                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Protocolo Forense 4.0 Activo</p>
+                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Protocolo Forense Activo</p>
                   <h3 className="text-2xl font-bold uppercase">{syncStep}</h3>
                 </div>
                 <span className="text-4xl font-black text-accent">{syncProgress}%</span>
               </div>
               <Progress value={syncProgress} className="h-3 bg-white/10" />
-              <p className="text-xs text-slate-400 italic">Construyendo agregados por Coordinador, Etapa, Plan y Formato para análisis de Hitos Principales.</p>
             </Card>
           )}
 
@@ -295,43 +427,205 @@ export default function AnalysisPage() {
             </Card>
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-accent">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estatus de Analítica</p>
-              <div className="flex items-center gap-2 text-emerald-600 font-bold">
-                <ShieldCheck className="h-5 w-5" /> SSOT 4.0 Multidimensional
+              <div className="flex items-center gap-2 text-emerald-600 font-bold uppercase text-xs">
+                <ShieldCheck className="h-4 w-4" /> SSOT 4.1 Management Active
               </div>
             </Card>
           </div>
 
-          <Card className="p-10 border-none shadow-sm bg-white/50 border-2 border-dashed">
-             <div className="flex items-center gap-4 mb-6">
-               <Layers className="h-10 w-10 text-slate-300" />
-               <div className="space-y-1">
-                 <h4 className="text-sm font-black uppercase text-slate-800">Trazabilidad Multidimensional (Plan included)</h4>
-                 <p className="text-xs text-slate-500">La nueva arquitectura permite segmentar por Plan, Coordinador y Etapa del Proyecto con alto rendimiento.</p>
-               </div>
-             </div>
-             <div className="space-y-4">
-                <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase border-b pb-2">
-                  <span>Métrica</span>
-                  <span>Valor en Base</span>
+          {/* TABLA DE GESTIÓN DE REGISTROS */}
+          <Card className="border-none shadow-xl bg-white rounded-[2rem] overflow-hidden">
+            <CardHeader className="bg-slate-50/50 border-b p-8">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-sm font-black uppercase text-slate-800 tracking-widest flex items-center gap-3">
+                    <Database className="h-5 w-5 text-primary" /> Gestión del Dataset
+                  </CardTitle>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Explora, edita o audita registros individuales del universo</p>
                 </div>
-                <div className="flex justify-between text-xs py-2 border-b border-slate-100">
-                  <span className="text-slate-500">Versión del Agregado</span>
-                  <span className="font-bold">{globalAgg?.build_version || 'N/A'}</span>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => fetchOrders('initial')} className="rounded-xl h-9 px-4 gap-2">
+                    <RefreshCcw className="h-3.5 w-3.5" /> Refrescar
+                  </Button>
                 </div>
-                <div className="flex justify-between text-xs py-2 border-b border-slate-100">
-                  <span className="text-slate-500">Última Sincronización</span>
-                  <span className="font-bold">{globalAgg?.build_timestamp ? new Date(globalAgg.build_timestamp).toLocaleString() : 'Pendiente'}</span>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="bg-slate-50/30">
+                  <TableRow>
+                    <TableHead className="text-[10px] font-black uppercase pl-8">PID / Proyecto</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase">Formato</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase">Disciplina (IA)</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase">Monto</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase text-right pr-8">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoadingOrders ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-40 text-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-slate-200 mx-auto" />
+                      </TableCell>
+                    </TableRow>
+                  ) : orders.map((order) => (
+                    <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors">
+                      <TableCell className="pl-8 py-4">
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-black text-slate-800">{order.projectId}</p>
+                          <p className="text-[10px] text-slate-400 uppercase truncate max-w-[200px]">{order.projectName || 'Sin Nombre'}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[9px] font-black uppercase bg-white">{order.format_normalized || order.format || 'OTRO'}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <p className="text-[10px] font-bold text-slate-700 uppercase">{order.disciplina_normalizada || 'PENDIENTE'}</p>
+                          <p className="text-[9px] text-slate-400 italic truncate max-w-[200px] leading-tight">"{order.descripcion}"</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs font-bold text-slate-900">
+                        ${Number(order.impactoNeto || 0).toLocaleString('es-MX')}
+                      </TableCell>
+                      <TableCell className="text-right pr-8">
+                        <div className="flex justify-end gap-2">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-primary hover:bg-primary/5"
+                            onClick={() => handleProcessAI(order)}
+                            disabled={isProcessingAI === order.id}
+                          >
+                            {isProcessingAI === order.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BrainCircuit className="h-3.5 w-3.5" />}
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-slate-400 hover:bg-slate-100"
+                            onClick={() => setEditingOrder(order)}
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-rose-400 hover:bg-rose-50"
+                            onClick={() => setOrderToDelete(order.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              
+              <div className="p-6 border-t bg-slate-50/30 flex items-center justify-between">
+                <p className="text-[10px] font-black text-slate-400 uppercase">Página {currentPage} • Mostrando {orders.length} registros</p>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => { fetchOrders('prev'); setCurrentPage(p => Math.max(1, p - 1)); }}
+                    disabled={currentPage === 1 || isLoadingOrders}
+                    className="rounded-xl h-9 gap-2"
+                  >
+                    <ChevronLeft className="h-4 w-4" /> Anterior
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => { fetchOrders('next'); setCurrentPage(p => p + 1); }}
+                    disabled={orders.length < PAGE_SIZE || isLoadingOrders}
+                    className="rounded-xl h-9 gap-2"
+                  >
+                    Siguiente <ChevronRight className="h-4 w-4" />
+                  </Button>
                 </div>
-                <div className="flex justify-between text-xs py-2">
-                  <span className="text-slate-500">Integridad de Registros</span>
-                  <span className={`font-black ${globalAgg?.totalOrders === globalAgg?.totalProcessed ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    {globalAgg?.totalOrders === globalAgg?.totalProcessed ? 'Sincronizado' : 'Desajustado'}
-                  </span>
-                </div>
-             </div>
+              </div>
+            </CardContent>
           </Card>
         </main>
       </SidebarInset>
+
+      {/* DIÁLOGO DE EDICIÓN */}
+      <Dialog open={!!editingOrder} onOpenChange={(open) => !open && setEditingOrder(null)}>
+        <DialogContent className="sm:max-w-[500px] rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-headline font-bold uppercase tracking-tight">Editar Registro Forense</DialogTitle>
+            <DialogDescription className="text-xs uppercase font-bold text-slate-400">Ajusta los parámetros del PID {editingOrder?.projectId}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-6 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="projectName" className="text-[10px] font-black uppercase text-slate-400">Nombre del Proyecto</Label>
+              <Input 
+                id="projectName" 
+                value={editingOrder?.projectName || ''} 
+                onChange={(e) => setEditingOrder({...editingOrder, projectName: e.target.value})}
+                className="rounded-xl font-bold"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="impactoNeto" className="text-[10px] font-black uppercase text-slate-400">Monto Impacto</Label>
+                <Input 
+                  id="impactoNeto" 
+                  type="number"
+                  value={editingOrder?.impactoNeto || 0} 
+                  onChange={(e) => setEditingOrder({...editingOrder, impactoNeto: Number(e.target.value)})}
+                  className="rounded-xl font-bold font-mono"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="disciplina" className="text-[10px] font-black uppercase text-slate-400">Disciplina</Label>
+                <Input 
+                  id="disciplina" 
+                  value={editingOrder?.disciplina_normalizada || ''} 
+                  onChange={(e) => setEditingOrder({...editingOrder, disciplina_normalizada: e.target.value})}
+                  className="rounded-xl font-bold"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="desc" className="text-[10px] font-black uppercase text-slate-400">Descripción Original</Label>
+              <Input 
+                id="desc" 
+                value={editingOrder?.descripcion || ''} 
+                onChange={(e) => setEditingOrder({...editingOrder, descripcion: e.target.value})}
+                className="rounded-xl text-xs italic text-slate-600 bg-slate-50"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditingOrder(null)} className="rounded-xl uppercase text-[10px] font-black">Cancelar</Button>
+            <Button onClick={handleUpdate} className="bg-primary rounded-xl uppercase text-[10px] font-black gap-2 h-11 px-8">
+              <Save className="h-4 w-4" /> Guardar Cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIÁLOGO DE BORRADO */}
+      <AlertDialog open={!!orderToDelete} onOpenChange={(open) => !open && setOrderToDelete(null)}>
+        <AlertDialogContent className="rounded-3xl border-rose-100">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-headline font-bold text-rose-600 uppercase flex items-center gap-3">
+              <AlertTriangle className="h-6 w-6" /> Confirmar Eliminación
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-relaxed">
+              ¿Estás seguro de que deseas eliminar este registro del universo? Esta acción no se puede deshacer y afectará los agregados globales en la próxima sincronización.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl border-none uppercase text-[10px] font-black">No, mantener</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-rose-600 hover:bg-rose-700 rounded-xl uppercase text-[10px] font-black h-11 px-8">
+              Sí, eliminar registro
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
