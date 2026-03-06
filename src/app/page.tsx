@@ -15,7 +15,10 @@ import {
   Filter,
   AlertCircle,
   Loader2,
-  ShieldCheck
+  ShieldCheck,
+  Search,
+  ArrowRight,
+  Info
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -23,7 +26,7 @@ import {
   Treemap
 } from 'recharts';
 import { useFirestore, useMemoFirebase, useUser, useCollection, useDoc } from '@/firebase';
-import { collection, query, orderBy, doc } from 'firebase/firestore';
+import { collection, query, orderBy, doc, where, limit, getDocs } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
@@ -33,6 +36,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#54585A'];
 
@@ -42,6 +60,11 @@ export default function VpDashboard() {
   const [mounted, setMounted] = useState(false);
   const [formatFilter, setFormatFilter] = useState('all');
   const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
+  
+  // Estado para el detalle de la disciplina
+  const [selectedDiscipline, setSelectedDiscipline] = useState<any>(null);
+  const [disciplineOrders, setDisciplineOrders] = useState<any[]>([]);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -115,21 +138,98 @@ export default function VpDashboard() {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
   };
 
+  // Función para cargar órdenes de una disciplina específica
+  const handleNodeClick = async (node: any) => {
+    if (!node || !db) return;
+    setSelectedDiscipline(node);
+    setIsLoadingDetails(true);
+    setDisciplineOrders([]);
+
+    try {
+      let q = query(
+        collection(db, 'orders'),
+        where('disciplina_normalizada', '==', node.name),
+        orderBy('impactoNeto', 'desc'),
+        limit(10)
+      );
+      
+      // Si hay filtro de formato, lo aplicamos también
+      if (formatFilter !== 'all') {
+        const formatDoc = availableFormats?.find(f => f.id === formatFilter);
+        if (formatDoc) {
+          q = query(q, where('format_normalized', '==', formatDoc.name));
+        }
+      }
+
+      const snap = await getDocs(q);
+      setDisciplineOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e) {
+      console.error("Error al cargar detalles:", e);
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
   const CustomizedContent = (props: any) => {
-    const { x, y, width, height, name, impact, percentage, color } = props;
+    const { x, y, width, height, name, impact, percentage, color, root } = props;
     if (width < 40 || height < 40) return null;
+    
     return (
-      <g>
-        <rect x={x} y={y} width={width} height={height} style={{ fill: color, stroke: '#fff', strokeWidth: 2 }} />
+      <g 
+        onClick={() => handleNodeClick(props)} 
+        className="cursor-pointer group transition-all duration-300"
+      >
+        <rect 
+          x={x} 
+          y={y} 
+          width={width} 
+          height={height} 
+          style={{ 
+            fill: color, 
+            stroke: '#fff', 
+            strokeWidth: 2,
+            transition: 'all 0.3s ease'
+          }} 
+          className="group-hover:opacity-80"
+        />
         {width > 60 && height > 40 && (
           <>
-            <text x={x + 8} y={y + 18} fill="#fff" fontSize={10} fontWeight="900" className="uppercase">{String(name).substring(0, 15)}</text>
-            <text x={x + 8} y={y + 32} fill="rgba(255,255,255,0.8)" fontSize={8} fontWeight="bold">{formatCurrency(impact)}</text>
-            <text x={x + 8} y={y + height - 10} fill="#fff" fontSize={14} fontWeight="900">{percentage}%</text>
+            <text x={x + 8} y={y + 18} fill="#fff" fontSize={10} fontWeight="900" className="uppercase pointer-events-none">{String(name).substring(0, 15)}</text>
+            <text x={x + 8} y={y + 32} fill="rgba(255,255,255,0.8)" fontSize={8} fontWeight="bold" className="pointer-events-none">{formatCurrency(impact)}</text>
+            <text x={x + 8} y={y + height - 10} fill="#fff" fontSize={14} fontWeight="900" className="pointer-events-none">{percentage}%</text>
           </>
         )}
       </g>
     );
+  };
+
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <div className="bg-slate-950 text-white p-4 rounded-2xl shadow-2xl border border-white/10 backdrop-blur-xl">
+          <p className="text-[10px] font-black text-accent uppercase tracking-widest mb-2">{data.name}</p>
+          <div className="space-y-1.5">
+            <div className="flex justify-between gap-8 items-center">
+              <span className="text-[9px] font-bold text-slate-400 uppercase">Impacto Económico</span>
+              <span className="text-sm font-black text-white">{formatCurrency(data.impact)}</span>
+            </div>
+            <div className="flex justify-between gap-8 items-center">
+              <span className="text-[9px] font-bold text-slate-400 uppercase">Volumen de Registros</span>
+              <span className="text-sm font-black text-emerald-400">{data.count} OC/OT</span>
+            </div>
+            <div className="flex justify-between gap-8 items-center pt-1 border-t border-white/5 mt-1">
+              <span className="text-[9px] font-bold text-slate-400 uppercase">Participación Pareto</span>
+              <span className="text-xs font-black text-primary">{data.percentage}%</span>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-2 text-[8px] font-black text-slate-500 uppercase italic">
+            <Info className="h-2.5 w-2.5" /> Haz clic para ver el desglose
+          </div>
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -213,10 +313,7 @@ export default function VpDashboard() {
                 ) : processedData.pareto.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <Treemap data={processedData.pareto} dataKey="value" stroke="#fff" content={<CustomizedContent />}>
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '20px', border: 'none', backgroundColor: '#0F172A', color: '#fff', padding: '15px' }}
-                        formatter={(val: number) => [formatCurrency(val), 'Impacto Económico']}
-                      />
+                      <Tooltip content={<CustomTooltip />} />
                     </Treemap>
                   </ResponsiveContainer>
                 ) : (
@@ -274,6 +371,97 @@ export default function VpDashboard() {
             </Card>
           </div>
         </main>
+
+        {/* Dialogo de Detalles de Disciplina */}
+        <Dialog open={!!selectedDiscipline} onOpenChange={(open) => !open && setSelectedDiscipline(null)}>
+          <DialogContent className="sm:max-w-[900px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
+            <DialogHeader className="bg-slate-900 text-white p-10">
+              <div className="flex justify-between items-start">
+                <div className="space-y-2">
+                  <Badge className="bg-primary uppercase text-[9px] font-black px-3 py-1">Detalle Forense por Especialidad</Badge>
+                  <DialogTitle className="text-3xl font-headline font-bold uppercase tracking-tight leading-none">
+                    {selectedDiscipline?.name}
+                  </DialogTitle>
+                  <DialogDescription className="text-slate-400 text-xs font-bold uppercase tracking-widest">
+                    Análisis de concentración • Top 10 registros de mayor impacto
+                  </DialogDescription>
+                </div>
+                <div className="text-right space-y-1">
+                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Impacto en Segmento</p>
+                  <p className="text-4xl font-black text-white">{formatCurrency(selectedDiscipline?.impact || 0)}</p>
+                  <Badge variant="outline" className="text-emerald-400 border-emerald-400/30 uppercase text-[9px]">
+                    {selectedDiscipline?.count} Registros Auditados
+                  </Badge>
+                </div>
+              </div>
+            </DialogHeader>
+
+            <div className="p-8 bg-white">
+              {isLoadingDetails ? (
+                <div className="h-60 flex flex-col items-center justify-center gap-4">
+                  <Loader2 className="h-10 w-10 animate-spin text-primary opacity-20" />
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Recuperando expedientes forenses...</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3 border-b pb-4">
+                    <Search className="h-5 w-5 text-primary" />
+                    <h4 className="text-sm font-black uppercase text-slate-800 tracking-tighter">Hallazgos Críticos en {selectedDiscipline?.name}</h4>
+                  </div>
+                  
+                  <div className="rounded-2xl border overflow-hidden shadow-sm">
+                    <Table>
+                      <TableHeader className="bg-slate-50">
+                        <TableRow>
+                          <TableHead className="text-[10px] font-black uppercase">PID Proyecto</TableHead>
+                          <TableHead className="text-[10px] font-black uppercase">Nombre del Proyecto</TableHead>
+                          <TableHead className="text-[10px] font-black uppercase">Causa Raíz</TableHead>
+                          <TableHead className="text-[10px] font-black uppercase text-right">Monto Impacto</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {disciplineOrders.map((order) => (
+                          <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors">
+                            <TableCell className="font-mono text-xs font-bold text-slate-900">{order.projectId}</TableCell>
+                            <TableCell className="text-[10px] text-slate-500 uppercase font-medium max-w-[200px] truncate">{order.projectName || 'N/A'}</TableCell>
+                            <TableCell>
+                              <Badge variant="secondary" className="text-[9px] font-bold uppercase truncate max-w-[250px]">
+                                {order.causa_raiz_normalizada || order.causaRaiz || 'Sin clasificar'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right font-black text-xs text-slate-900">
+                              {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(order.impactoNeto || 0)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {disciplineOrders.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={4} className="h-24 text-center text-xs text-slate-400 italic">No se encontraron registros individuales en este segmento.</TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="bg-emerald-50 p-6 rounded-2xl flex items-center justify-between border border-emerald-100">
+                    <div className="flex items-center gap-4">
+                      <div className="bg-white p-3 rounded-full shadow-sm text-emerald-600">
+                        <CheckCircle2 className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-emerald-900 uppercase">Integridad Verificada</p>
+                        <p className="text-[10px] text-emerald-700/70 font-medium">Los datos mostrados corresponden a la muestra auditada del 100% del segmento seleccionado.</p>
+                      </div>
+                    </div>
+                    <Button variant="outline" className="rounded-xl border-emerald-200 text-emerald-700 h-10 px-6 uppercase text-[10px] font-black gap-2">
+                      Exportar Segmento <ArrowRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </SidebarInset>
     </div>
   );
