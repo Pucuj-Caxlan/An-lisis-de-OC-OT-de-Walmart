@@ -18,7 +18,11 @@ import {
   ShieldCheck,
   Search,
   ArrowRight,
-  Info
+  Info,
+  User,
+  Layers,
+  FileText,
+  Activity
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -51,6 +55,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#54585A'];
 
@@ -418,18 +428,18 @@ export default function VpDashboard() {
           </div>
         </main>
 
-        {/* Dialogo de Detalles de Disciplina */}
+        {/* Dialogo de Detalles de Disciplina Enriquecido */}
         <Dialog open={!!selectedDiscipline} onOpenChange={(open) => !open && setSelectedDiscipline(null)}>
-          <DialogContent className="sm:max-w-[900px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl animate-in slide-in-from-bottom-4 duration-300">
+          <DialogContent className="sm:max-w-[1100px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl animate-in slide-in-from-bottom-4 duration-300">
             <DialogHeader className="bg-slate-900 text-white p-10">
               <div className="flex justify-between items-start">
                 <div className="space-y-2">
-                  <Badge className="bg-primary uppercase text-[9px] font-black px-3 py-1">Detalle Forense por Especialidad</Badge>
+                  <Badge className="bg-primary uppercase text-[9px] font-black px-3 py-1">Expediente Forense de Especialidad</Badge>
                   <DialogTitle className="text-3xl font-headline font-bold uppercase tracking-tight leading-none">
                     {selectedDiscipline?.name}
                   </DialogTitle>
                   <DialogDescription className="text-slate-400 text-xs font-bold uppercase tracking-widest">
-                    Análisis de concentración • Top 10 registros de mayor impacto
+                    Análisis profundo de los 10 registros de mayor impacto Capex
                   </DialogDescription>
                 </div>
                 <div className="text-right space-y-1">
@@ -442,47 +452,94 @@ export default function VpDashboard() {
               </div>
             </DialogHeader>
 
-            <div className="p-8 bg-white">
+            <div className="bg-white">
               {isLoadingDetails ? (
-                <div className="h-60 flex flex-col items-center justify-center gap-4">
+                <div className="h-80 flex flex-col items-center justify-center gap-4">
                   <Loader2 className="h-10 w-10 animate-spin text-primary opacity-20" />
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Recuperando expedientes forenses...</p>
                 </div>
               ) : (
-                <div className="space-y-6">
-                  <div className="flex items-center gap-3 border-b pb-4">
-                    <Search className="h-5 w-5 text-primary" />
-                    <h4 className="text-sm font-black uppercase text-slate-800 tracking-tighter">Hallazgos Críticos en {selectedDiscipline?.name}</h4>
+                <div className="p-8 space-y-6">
+                  <div className="flex items-center justify-between border-b pb-4">
+                    <div className="flex items-center gap-3">
+                      <Search className="h-5 w-5 text-primary" />
+                      <h4 className="text-sm font-black uppercase text-slate-800 tracking-tighter">Matriz de Desviaciones Críticas</h4>
+                    </div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase italic">Pasa el cursor sobre la narrativa para el detalle completo</p>
                   </div>
                   
                   <div className="rounded-2xl border overflow-hidden shadow-sm">
                     <Table>
                       <TableHeader className="bg-slate-50">
                         <TableRow>
-                          <TableHead className="text-[10px] font-black uppercase">PID Proyecto</TableHead>
-                          <TableHead className="text-[10px] font-black uppercase">Nombre del Proyecto</TableHead>
-                          <TableHead className="text-[10px] font-black uppercase">Causa Raíz</TableHead>
-                          <TableHead className="text-[10px] font-black uppercase text-right">Monto Impacto</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase pl-6">PID / Proyecto</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase">Formato</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase">Etapa / Coord.</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase">Causa & Narrativa</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase text-right pr-6">Impacto Neto</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {disciplineOrders.map((order) => (
-                          <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors">
-                            <TableCell className="font-mono text-xs font-bold text-slate-900">{order.projectId}</TableCell>
-                            <TableCell className="text-[10px] text-slate-500 uppercase font-medium max-w-[200px] truncate">{order.projectName || 'N/A'}</TableCell>
-                            <TableCell>
-                              <Badge variant="secondary" className="text-[9px] font-bold uppercase truncate max-w-[250px]">
-                                {order.causa_raiz_normalizada || order.causaRaiz || 'Sin clasificar'}
-                              </Badge>
+                          <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors group">
+                            <TableCell className="pl-6 py-4">
+                              <div className="space-y-0.5">
+                                <p className="font-mono text-xs font-bold text-slate-900">{order.projectId}</p>
+                                <p className="text-[9px] text-slate-400 uppercase font-medium truncate max-w-[150px]">{order.projectName || 'N/A'}</p>
+                              </div>
                             </TableCell>
-                            <TableCell className="text-right font-black text-xs text-slate-900">
+                            <TableCell>
+                              <Badge variant="outline" className="text-[8px] font-black uppercase bg-slate-50">{order.format_normalized || order.format || 'OTRO'}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-700 uppercase">
+                                  <Layers className="h-3 w-3 text-primary opacity-50" /> {order.etapa_proyecto_normalizada || 'CONSTRUCCIÓN'}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[8px] font-medium text-slate-400 uppercase">
+                                  <User className="h-3 w-3 opacity-50" /> {order.coordinador_normalizado || 'SIN ASIGNAR'}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <div className="cursor-help space-y-1 group-hover:opacity-80 transition-opacity">
+                                    <div className="text-[9px] font-black text-slate-800 uppercase line-clamp-1 max-w-[250px]">
+                                      {order.causa_raiz_normalizada || order.causaRaiz || 'Sin clasificar'}
+                                    </div>
+                                    <div className="text-[8px] text-slate-400 italic line-clamp-1 max-w-[250px]">
+                                      "{order.descripcion || 'Sin narrativa disponible'}"
+                                    </div>
+                                  </div>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-96 p-6 rounded-2xl shadow-2xl bg-slate-900 text-white border-white/10">
+                                  <div className="space-y-4">
+                                    <div className="flex items-center gap-2 border-b border-white/10 pb-3">
+                                      <FileText className="h-4 w-4 text-accent" />
+                                      <h5 className="text-[10px] font-black uppercase tracking-widest text-accent">Justificación Forense</h5>
+                                    </div>
+                                    <ScrollArea className="h-40">
+                                      <p className="text-xs leading-relaxed text-slate-300 italic">
+                                        {order.descripcion || "No se registró narrativa detallada para esta orden de cambio."}
+                                      </p>
+                                    </ScrollArea>
+                                    <div className="pt-3 border-t border-white/10 flex justify-between items-center">
+                                      <Badge className="bg-white/10 text-white border-none text-[8px]">{order.classification_status === 'auto' ? 'IA AUDITED' : 'MANUAL'}</Badge>
+                                      <span className="text-[8px] font-mono text-slate-500 uppercase">{order.id}</span>
+                                    </div>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </TableCell>
+                            <TableCell className="text-right pr-6 font-black text-xs text-slate-900 font-mono">
                               {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(order.impactoNeto || 0)}
                             </TableCell>
                           </TableRow>
                         ))}
                         {disciplineOrders.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={4} className="h-24 text-center text-xs text-slate-400 italic">No se encontraron registros individuales en este segmento.</TableCell>
+                            <TableCell colSpan={5} className="h-24 text-center text-xs text-slate-400 italic">No se encontraron registros individuales en este segmento.</TableCell>
                           </TableRow>
                         )}
                       </TableBody>
@@ -495,13 +552,16 @@ export default function VpDashboard() {
                         <CheckCircle2 className="h-6 w-6" />
                       </div>
                       <div>
-                        <p className="text-xs font-black text-emerald-900 uppercase">Integridad Verificada</p>
-                        <p className="text-[10px] text-emerald-700/70 font-medium">Los datos mostrados corresponden a la muestra auditada del 100% del segmento seleccionado.</p>
+                        <p className="text-xs font-black text-emerald-900 uppercase">Integridad Forense Verificada</p>
+                        <p className="text-[10px] text-emerald-700/70 font-medium">Este desglose corresponde a la muestra de mayor impacto del segmento {selectedDiscipline?.name}.</p>
                       </div>
                     </div>
-                    <Button variant="outline" className="rounded-xl border-emerald-200 text-emerald-700 h-10 px-6 uppercase text-[10px] font-black gap-2">
-                      Exportar Segmento <ArrowRight className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" className="text-[9px] font-black uppercase text-slate-400 h-10 px-4 rounded-xl">Reportar Discrepancia</Button>
+                      <Button variant="outline" className="rounded-xl border-emerald-200 text-emerald-700 h-10 px-6 uppercase text-[10px] font-black gap-2 hover:bg-emerald-100 transition-colors">
+                        Exportar Expediente <ArrowRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}
