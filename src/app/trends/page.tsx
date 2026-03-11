@@ -155,7 +155,6 @@ export default function TrendsPage() {
       const imgWidth = 210; // A4 width in mm
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
       
-      // Creamos un PDF con el tamaño exacto del contenido para evitar cortes
       const pdf = new jsPDF('p', 'mm', [imgWidth, imgHeight]);
       pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
       pdf.save(`Walmart_Strategic_Analysis_${new Date().getTime()}.pdf`);
@@ -173,6 +172,10 @@ export default function TrendsPage() {
     if (!mounted) return "$0";
     if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(val);
+  };
+
+  const formatTooltipCurrency = (val: number) => {
+    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 2 }).format(val);
   };
 
   if (isDataLoading || !globalAgg) return (
@@ -243,7 +246,13 @@ export default function TrendsPage() {
                       <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: '900', fill: '#64748B' }} height={50} />
                       <YAxis yAxisId="left" tickFormatter={(v) => `$${Math.round(v/1000000)}M`} tick={{ fontSize: 10, fontWeight: 'bold' }} axisLine={false} />
                       <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => `${Math.round(v)}%`} tick={{ fontSize: 10, fill: ACCENT_COLOR, fontWeight: 'bold' }} axisLine={false} />
-                      <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '10px', textTransform: 'uppercase' }} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '10px', textTransform: 'uppercase' }} 
+                        formatter={(value: any, name: string) => {
+                          if (name === "% Acumulado") return [`${Number(value).toFixed(2)}%`, name];
+                          return [formatTooltipCurrency(Number(value)), "Impacto por Ramo"];
+                        }}
+                      />
                       <Bar yAxisId="left" dataKey="impact" radius={[8, 8, 0, 0]} barSize={60} name="Impacto por Ramo">
                         {paretoData.map((entry, index) => (
                           <Cell 
@@ -259,7 +268,7 @@ export default function TrendsPage() {
                 <div className="bg-slate-900 p-6 rounded-3xl text-white flex items-center justify-between">
                   <div className="space-y-1">
                     <p className="text-[10px] font-black text-cyan-400 uppercase tracking-widest">Diagnóstico de Concentración por Ramo</p>
-                    <p className="text-sm font-bold text-slate-300">Los <span className="text-white underline decoration-cyan-400 decoration-2">{vitalFew.length} Ramos Principales</span> concentran el impacto estratégico de la operación.</p>
+                    <p className="text-sm font-bold text-slate-300">Los <span className="text-white underline decoration-cyan-400 decoration-2">{vitalFew.length} Ramos Principales</span> concentran el impacto estratégico de la operation.</p>
                   </div>
                   <div className="text-right">
                     <span className="text-4xl font-black text-cyan-400">{Math.round((vitalFew.length / (paretoData.length || 1)) * 100)}%</span>
