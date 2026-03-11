@@ -126,12 +126,13 @@ export default function AnalysisPage() {
         setTotalCount(countSnap.data().count);
       }
 
-      let q = query(collection(db, 'orders'), orderBy('projectId', 'asc'), limit(PAGE_SIZE));
+      // Consulta simplificada para evitar problemas de índices inexistentes inicialmente
+      let q = query(collection(db, 'orders'), limit(PAGE_SIZE));
       
       if (direction === 'next' && lastDoc) {
-        q = query(collection(db, 'orders'), orderBy('projectId', 'asc'), startAfter(lastDoc), limit(PAGE_SIZE));
+        q = query(collection(db, 'orders'), startAfter(lastDoc), limit(PAGE_SIZE));
       } else if (direction === 'prev' && firstDoc) {
-        q = query(collection(db, 'orders'), orderBy('projectId', 'asc'), endBefore(firstDoc), limitToLast(PAGE_SIZE));
+        q = query(collection(db, 'orders'), endBefore(firstDoc), limitToLast(PAGE_SIZE));
       }
 
       const snap = await getDocs(q);
@@ -149,7 +150,7 @@ export default function AnalysisPage() {
       toast({
         variant: "destructive",
         title: "Error al cargar datos",
-        description: "No se pudieron obtener los registros de la base de datos."
+        description: e.message || "No se pudieron obtener los registros."
       });
     } finally {
       setIsLoadingOrders(false);
