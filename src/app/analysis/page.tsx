@@ -16,7 +16,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  FileText
+  Search,
+  Eye
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useUser, useDoc } from '@/firebase';
@@ -77,6 +78,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 const PAGE_SIZE = 15;
 
@@ -100,6 +102,7 @@ export default function AnalysisPage() {
   
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [editingOrder, setEditingOrder] = useState<any>(null);
+  const [viewingOrder, setViewingOrder] = useState<any>(null);
   const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
   const [isProcessingAI, setIsProcessingAI] = useState<string | null>(null);
 
@@ -126,7 +129,8 @@ export default function AnalysisPage() {
         setTotalCount(countSnap.data().count);
       }
 
-      // Consulta simplificada para evitar problemas de índices inexistentes inicialmente
+      // Usamos una consulta simple sin ordenamiento complejo para asegurar que los datos aparezcan
+      // incluso si no hay índices compuestos creados.
       let q = query(collection(db, 'orders'), limit(PAGE_SIZE));
       
       if (direction === 'next' && lastDoc) {
@@ -142,8 +146,8 @@ export default function AnalysisPage() {
         setOrders(results);
         setFirstDoc(snap.docs[0]);
         setLastDoc(snap.docs[snap.docs.length - 1]);
-      } else if (direction === 'initial') {
-        setOrders([]);
+      } else {
+        if (direction === 'initial') setOrders([]);
       }
     } catch (e: any) {
       console.error("Error fetching orders:", e);
@@ -306,13 +310,13 @@ export default function AnalysisPage() {
       let processed = 0;
       let lastVisible = null;
       let hasMore = true;
-      const CHUNK_SIZE = 100; 
+      const CHUNK_SIZE = 50; // Reducido para evitar timeouts
 
       const buildMetadata = {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '7.0.0-stable'
+        build_version: '7.1.0-stable'
       };
 
       const globalFormatStats: Record<string, any> = {};
@@ -384,7 +388,7 @@ export default function AnalysisPage() {
         setSyncProgress(Math.round((processed / Math.max(1, totalCount)) * 100));
         lastVisible = snap.docs[snap.docs.length - 1];
         
-        await sleep(400); 
+        await sleep(500); // Pausa más larga para estabilidad
         if (snap.size < CHUNK_SIZE) hasMore = false;
       }
 
@@ -419,14 +423,14 @@ export default function AnalysisPage() {
 
       setSyncStep('Finalizando Agregados...');
       const hitosEntries = Object.entries(hitosAgg);
-      for (let i = 0; i < hitosEntries.length; i += 200) {
-        const chunk = hitosEntries.slice(i, i + 200);
+      for (let i = 0; i < hitosEntries.length; i += 100) {
+        const chunk = hitosEntries.slice(i, i + 100);
         const batch = writeBatch(db);
         chunk.forEach(([key, val]) => {
           batch.set(doc(db, 'hitos_analytics', key), { ...val, lastUpdate: buildMetadata.build_timestamp });
         });
         await batch.commit();
-        await sleep(300);
+        await sleep(400);
       }
 
       toast({ title: "Sincronización Exitosa", description: "El universo ha sido normalizado y los filtros ya son funcionales." });
@@ -563,6 +567,15 @@ export default function AnalysisPage() {
                             variant="ghost" 
                             size="icon" 
                             className="h-8 w-8 text-primary hover:bg-primary/5"
+                            title="Ver Detalle"
+                            onClick={() => setViewingOrder(order)}
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-primary hover:bg-primary/5"
                             title="Auditoría IA"
                             onClick={() => handleProcessAI(order)}
                             disabled={isProcessingAI === order.id}
@@ -672,6 +685,73 @@ export default function AnalysisPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingOrder(null)}>Cancelar</Button>
             <Button onClick={handleUpdate}>Guardar Cambios</Button>
+          </DialogFooter>
+        </Dialog>
+      </Dialog>
+
+      <Dialog open={!!viewingOrder} onOpenChange={() => setViewingOrder(null)}>
+        <DialogContent className="sm:max-w-[600px] rounded-3xl p-0 overflow-hidden border-none">
+          <DialogHeader className="bg-slate-900 text-white p-8">
+            <DialogTitle className="text-2xl font-bold uppercase tracking-tighter">Detalles del Registro</DialogTitle>
+            <DialogDescription className="text-slate-400">Ficha técnica completa almacenada en la base de datos.</DialogDescription>
+          </DialogHeader>
+          {viewingOrder && (
+            <ScrollArea className="max-h-[60vh]">
+              <div className="p-8 space-y-6 bg-white text-slate-900">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">PID del Proyecto</p>
+                    <p className="text-sm font-bold">{viewingOrder.projectId}</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Nombre Proyecto</p>
+                    <p className="text-sm font-bold truncate">{viewingOrder.projectName || 'N/A'}</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Monto Neto</p>
+                    <p className="text-sm font-bold text-primary">${Number(viewingOrder.impactoNeto || 0).toLocaleString('es-MX')}</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Formato</p>
+                    <p className="text-sm font-bold uppercase">{viewingOrder.format_normalized || viewingOrder.format || 'OTRO'}</p>
+                  </div>
+                </div>
+                
+                <Separator />
+
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Disciplina</p>
+                    <p className="text-sm font-bold uppercase">{viewingOrder.disciplina_normalizada || 'PENDIENTE'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Plan de Inversión</p>
+                    <p className="text-sm font-bold uppercase">{viewingOrder.plan_nombre_normalizado || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Descripción</p>
+                    <p className="text-xs text-slate-600 leading-relaxed italic border-l-4 border-primary pl-4 py-2 bg-slate-50">
+                      {viewingOrder.descripcion}
+                    </p>
+                  </div>
+                </div>
+
+                {viewingOrder.semanticAnalysis && (
+                  <div className="mt-6 p-6 bg-primary/5 rounded-2xl border border-primary/10">
+                    <div className="flex items-center gap-2 mb-3">
+                      <BrainCircuit className="h-5 w-5 text-primary" />
+                      <p className="text-[10px] font-black text-primary uppercase">Razonamiento IA (Confidence: {Math.round(viewingOrder.semanticAnalysis.confidence_score * 100)}%)</p>
+                    </div>
+                    <p className="text-xs text-slate-700 font-medium italic">
+                      {viewingOrder.semanticAnalysis.rationale_tecnico}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          )}
+          <DialogFooter className="p-6 bg-slate-50 border-t">
+            <Button onClick={() => setViewingOrder(null)} className="w-full rounded-xl">Cerrar</Button>
           </DialogFooter>
         </Dialog>
       </Dialog>
