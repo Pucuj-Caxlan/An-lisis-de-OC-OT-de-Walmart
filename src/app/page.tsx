@@ -17,7 +17,9 @@ import {
   CalendarDays,
   Target,
   ChevronRight,
-  Layers
+  Layers,
+  Info,
+  TrendingUp
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -53,9 +55,6 @@ import { toast } from '@/hooks/use-toast';
 
 const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#54585A'];
 
-/**
- * Lógica de agrupación de disciplinas por Ramos (Macro-categorías)
- */
 const GET_RAMO = (discipline: string): string => {
   const d = String(discipline || '').toUpperCase().trim();
   
@@ -77,25 +76,22 @@ const GET_RAMO = (discipline: string): string => {
   return 'OTROS';
 };
 
-/**
- * Componente para el Tooltip del Treemap
- */
 const CustomTooltip = ({ active, payload }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div className="bg-slate-900 border border-slate-700 p-3 rounded-lg shadow-xl text-white">
+      <div className="bg-slate-900 border border-slate-700 p-3 rounded-lg shadow-xl text-white z-50">
         <p className="text-[10px] font-black uppercase text-yellow-500 mb-1 tracking-widest">{data.name}</p>
         <div className="space-y-1">
           <div className="flex justify-between gap-4">
             <span className="text-[10px] text-slate-400 font-bold uppercase">Impacto:</span>
             <span className="text-xs font-black">
-              {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(data.impact)}
+              {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(data.impact || data.value || 0)}
             </span>
           </div>
           <div className="flex justify-between gap-4">
             <span className="text-[10px] text-slate-400 font-bold uppercase">Participación:</span>
-            <span className="text-xs font-black">{data.percentage}%</span>
+            <span className="text-xs font-black">{data.percentage || 0}%</span>
           </div>
         </div>
       </div>
@@ -104,12 +100,10 @@ const CustomTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-/**
- * Nodo personalizado para el Treemap
- */
 const TreemapNode = memo((props: any) => {
-  const { x, y, width, height, name, impact, percentage, color, onClick, formatCurrency } = props;
+  const { x, y, width, height, name, impact, value, percentage, color, onClick, formatCurrency } = props;
   if (width < 30 || height < 30) return null;
+  const realImpact = impact || value;
   const showFullInfo = width > 120 && height > 80;
   const showCompactInfo = width > 60 && height > 40;
   const showNameOnly = width > 40 && height > 25;
@@ -124,7 +118,7 @@ const TreemapNode = memo((props: any) => {
       )}
       {showCompactInfo && (
         <text x={x + 6} y={y + (showFullInfo ? 32 : 28)} fill="rgba(255,255,255,0.9)" fontSize={8} fontWeight="700" className="pointer-events-none">
-          {formatCurrency(impact)}
+          {formatCurrency(realImpact)}
         </text>
       )}
       {showFullInfo && (
@@ -147,7 +141,7 @@ export default function VpDashboard() {
   const [yearFilter, setYearFilter] = useState('all');
   const [planFilter, setPlanFilter] = useState('all');
   
-  const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
+  const [activePieTab, setActivePieTab] = useState<'80' | '20'>('80');
   const [selectedRamo, setSelectedRamo] = useState<any>(null);
   const [ramoDetails, setRamoDetails] = useState<{subDisciplines: any[], orders: any[]}>({ subDisciplines: [], orders: [] });
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
@@ -174,7 +168,6 @@ export default function VpDashboard() {
 
   const { data: rawAnalytics, isLoading } = useCollection(analyticsQuery);
 
-  // AGREGACIÓN POR RAMO (MACRO-CATEGORÍA)
   const processedData = useMemo(() => {
     if (!rawAnalytics || rawAnalytics.length === 0) return { ramos: [], totalImpact: 0, totalCount: 0 };
 
@@ -241,16 +234,26 @@ export default function VpDashboard() {
 
   const handleRamoClick = async (ramo: any) => {
     if (!ramo || !db) return;
-    setSelectedRamo(ramo);
+    
+    // El objeto ramo puede venir directamente o envuelto por Recharts
+    const targetData = ramo.payload || ramo;
+    const targetSubs = targetData.subs;
+    
+    if (!targetSubs) {
+      console.warn("No se encontraron sub-disciplinas para:", targetData.name);
+      return;
+    }
+
+    setSelectedRamo(targetData);
     setIsLoadingDetails(true);
     
-    const subs = Object.entries(ramo.subs).map(([name, data]: any) => ({
-      name,
-      ...data,
-      percentage: ((data.impact / ramo.impact) * 100).toFixed(1)
-    })).sort((a, b) => b.impact - a.impact);
-
     try {
+      const subs = Object.entries(targetSubs).map(([name, data]: any) => ({
+        name,
+        ...data,
+        percentage: targetData.impact > 0 ? ((data.impact / targetData.impact) * 100).toFixed(1) : "0"
+      })).sort((a, b) => b.impact - a.impact);
+      
       const subNames = subs.slice(0, 10).map(s => s.name); 
       
       let q = query(
@@ -271,7 +274,7 @@ export default function VpDashboard() {
       });
     } catch (e) {
       console.error(e);
-      toast({ variant: "destructive", title: "Error", description: "Error al recuperar detalles del ramo." });
+      toast({ variant: "destructive", title: "Error", description: "No se pudieron cargar los detalles." });
     } finally {
       setIsLoadingDetails(false);
     }
@@ -377,7 +380,7 @@ export default function VpDashboard() {
                   <div className="h-full flex items-center justify-center"><Loader2 className="h-12 w-12 animate-spin text-slate-200" /></div>
                 ) : processedData.ramos.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                    <p className="text-sm font-bold uppercase">Sin datos para los filtros seleccionados</p>
+                    <p className="text-sm font-bold uppercase text-center">Sin datos para los filtros seleccionados.<br/>Realiza una sincronización en "Análisis Detallado" si es necesario.</p>
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
@@ -397,16 +400,16 @@ export default function VpDashboard() {
               <CardHeader className="py-8 px-10 border-b bg-slate-50/30">
                 <div className="flex items-center justify-between mb-4">
                   <CardTitle className="text-sm font-black uppercase text-slate-800 tracking-widest flex items-center gap-3">
-                    <PieIcon className="h-5 w-5 text-accent" /> Análisis por Ramo
+                    <PieIcon className="h-5 w-5 text-accent" /> Análisis 80/20
                   </CardTitle>
                   <div className="flex gap-1 bg-slate-100 p-1 rounded-xl border">
-                    <Button variant={activeTab === '80' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('80')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Mayor</Button>
-                    <Button variant={activeTab === '20' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('20')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Menor</Button>
+                    <Button variant={activePieTab === '80' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('80')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Mayor</Button>
+                    <Button variant={activePieTab === '20' ? 'default' : 'ghost'} size="sm" onClick={() => setActivePieTab('20')} className="h-7 text-[8px] font-black uppercase px-3 rounded-lg">Menor</Button>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-6 overflow-y-auto">
-                {(activeTab === '80' ? vitalFew : usefulMany).map((item, i) => (
+                {(activePieTab === '80' ? vitalFew : usefulMany).map((item, i) => (
                   <div key={item.name} className="space-y-2">
                     <div className="flex justify-between items-end">
                       <span className="text-[11px] font-black text-slate-800 uppercase">{item.name}</span>
@@ -422,7 +425,7 @@ export default function VpDashboard() {
         </main>
 
         <Dialog open={!!selectedRamo} onOpenChange={(open) => !open && setSelectedRamo(null)}>
-          <DialogContent className="sm:max-w-[1000px] rounded-[2rem] p-0 overflow-hidden">
+          <DialogContent className="sm:max-w-[1000px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
             <DialogHeader className="bg-slate-900 text-white p-10">
               <div className="flex justify-between items-start">
                 <div className="space-y-2">
@@ -439,7 +442,7 @@ export default function VpDashboard() {
             <div className="p-8 space-y-8 bg-white max-h-[70vh] overflow-y-auto">
               <section>
                 <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest mb-4 flex items-center gap-2">
-                  <Layers className="h-4 w-4" /> Composición del Grupo (Sub-disciplinas)
+                  <Layers className="h-4 w-4 text-primary" /> Composición del Grupo (Sub-disciplinas)
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {ramoDetails.subDisciplines.map((sub, i) => (
@@ -457,16 +460,16 @@ export default function VpDashboard() {
 
               <section>
                 <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest mb-4 flex items-center gap-2">
-                  <Search className="h-4 w-4" /> Muestra de Órdenes Críticas
+                  <Search className="h-4 w-4 text-primary" /> Muestra de Órdenes Críticas
                 </h4>
-                <div className="border rounded-2xl overflow-hidden text-slate-900">
+                <div className="border rounded-2xl overflow-hidden text-slate-900 border-slate-100 shadow-sm">
                   <Table>
                     <TableHeader className="bg-slate-50">
                       <TableRow>
-                        <TableHead className="text-[9px] font-black uppercase">PID</TableHead>
-                        <TableHead className="text-[9px] font-black uppercase">Sub-Disciplina</TableHead>
-                        <TableHead className="text-[9px] font-black uppercase">Descripción</TableHead>
-                        <TableHead className="text-[9px] font-black uppercase text-right">Monto</TableHead>
+                        <TableHead className="text-[9px] font-black uppercase h-10">PID</TableHead>
+                        <TableHead className="text-[9px] font-black uppercase h-10">Sub-Disciplina</TableHead>
+                        <TableHead className="text-[9px] font-black uppercase h-10">Descripción</TableHead>
+                        <TableHead className="text-[9px] font-black uppercase text-right h-10">Monto</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -479,11 +482,11 @@ export default function VpDashboard() {
                           <TableCell colSpan={4} className="h-32 text-center text-[10px] font-bold uppercase text-slate-400">Sin órdenes detalladas para este ramo en los filtros actuales.</TableCell>
                         </TableRow>
                       ) : ramoDetails.orders.map((o) => (
-                        <TableRow key={o.id}>
-                          <TableCell className="text-[10px] font-black">{o.projectId}</TableCell>
+                        <TableRow key={o.id} className="hover:bg-slate-50/50">
+                          <TableCell className="text-[10px] font-black text-slate-900">{o.projectId}</TableCell>
                           <TableCell className="text-[9px] font-bold uppercase text-slate-500">{o.disciplina_normalizada}</TableCell>
                           <TableCell className="text-[10px] text-slate-600 italic max-w-[300px] truncate">"{o.descripcion}"</TableCell>
-                          <TableCell className="text-right text-[10px] font-black">{formatCurrency(o.impactoNeto)}</TableCell>
+                          <TableCell className="text-right text-[10px] font-black text-slate-900">{formatCurrency(o.impactoNeto)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
