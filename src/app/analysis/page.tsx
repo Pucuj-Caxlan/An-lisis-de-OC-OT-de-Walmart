@@ -16,7 +16,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  Eye
+  Eye,
+  FileText
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useUser, useDoc } from '@/firebase';
@@ -251,7 +252,7 @@ export default function AnalysisPage() {
       if (data.format) {
         data.format_normalized = normalizeFormatName(data.format);
       }
-      await updateDoc(doc(db, id), data);
+      await updateDoc(doc(db, 'orders', id), data);
       toast({ title: "Cambios guardados", description: `Registro ${data.projectId} actualizado.` });
       setEditingOrder(null);
       fetchOrders('initial');
@@ -655,7 +656,7 @@ export default function AnalysisPage() {
             <Button variant="outline" onClick={() => setIsAddingNew(false)}>Cancelar</Button>
             <Button onClick={handleAddOrder}>Crear Registro</Button>
           </DialogFooter>
-        </Dialog>
+        </DialogContent>
       </Dialog>
 
       <Dialog open={!!editingOrder} onOpenChange={() => setEditingOrder(null)}>
@@ -775,4 +776,3 @@ export default function AnalysisPage() {
     </div>
   );
 }
-
