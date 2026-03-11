@@ -10,9 +10,6 @@ import {
   RefreshCcw, 
   ShieldCheck,
   Loader2,
-  Plus,
-  Trash2,
-  Edit3,
   BrainCircuit,
   ChevronLeft,
   ChevronRight,
@@ -37,10 +34,8 @@ import {
   orderBy,
   getCountFromServer,
   Firestore,
-  deleteDoc,
   updateDoc,
-  limitToLast,
-  serverTimestamp
+  limitToLast
 } from 'firebase/firestore';
 import { 
   normalizeFormatName, 
@@ -49,8 +44,6 @@ import {
   normalizePlan
 } from '@/lib/excel-processor';
 import { Progress } from '@/components/ui/progress';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
 import { 
   Table, 
   TableBody, 
@@ -60,22 +53,12 @@ import {
   TableRow 
 } from '@/components/ui/table';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@/Dialog";
 import {
   Select,
   SelectContent,
@@ -83,8 +66,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -109,20 +90,8 @@ export default function AnalysisPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [pageSize, setPageSize] = useState(100);
   
-  const [isAddingNew, setIsAddingNew] = useState(false);
-  const [editingOrder, setEditingOrder] = useState<any>(null);
   const [viewingOrder, setViewingOrder] = useState<any>(null);
-  const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
   const [isProcessingAI, setIsProcessingAI] = useState<string | null>(null);
-
-  const [newOrder, setNewOrder] = useState({
-    projectId: '',
-    projectName: '',
-    impactoNeto: 0,
-    disciplina_normalizada: '',
-    descripcion: '',
-    format: 'WSC'
-  });
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -133,17 +102,14 @@ export default function AnalysisPage() {
     if (!db) return;
     setIsLoadingOrders(true);
     try {
-      // 1. Intentar obtener el total de forma independiente
+      // 1. Obtener conteo de forma asíncrona si es la carga inicial
       if (direction === 'initial') {
-        try {
-          const countSnap = await getCountFromServer(collection(db, 'orders'));
-          setTotalCount(countSnap.data().count);
-        } catch (err) {
-          console.warn("Fallo al obtener conteo de registros, continuando carga...", err);
-        }
+        getCountFromServer(collection(db, 'orders'))
+          .then(snap => setTotalCount(snap.data().count))
+          .catch(() => console.warn("Error en conteo, continuando..."));
       }
 
-      // 2. Construir query de paginación
+      // 2. Query de paginación estable
       let q = query(collection(db, 'orders'), orderBy(documentId()), limit(pageSize));
       
       if (direction === 'next' && lastDoc) {
@@ -159,15 +125,15 @@ export default function AnalysisPage() {
         setOrders(results);
         setFirstDoc(snap.docs[0]);
         setLastDoc(snap.docs[snap.docs.length - 1]);
-      } else {
-        if (direction === 'initial') setOrders([]);
+      } else if (direction === 'initial') {
+        setOrders([]);
       }
     } catch (e: any) {
-      console.error("Error fetching orders:", e);
+      console.error("Fetch error:", e);
       toast({
         variant: "destructive",
-        title: "Fallo de Conexión",
-        description: "No se pudieron obtener los registros. Verifique su red o intente de nuevo."
+        title: "Error de Conexión",
+        description: "No se pudieron obtener los registros. Reintente en unos momentos."
       });
     } finally {
       setIsLoadingOrders(false);
@@ -178,42 +144,13 @@ export default function AnalysisPage() {
     if (db && mounted) {
       fetchOrders('initial');
     }
-  }, [db, mounted, fetchOrders]);
+  }, [db, mounted, pageSize]); // Solo re-ejecutar si cambia el DB, montado o tamaño de página
 
   const handlePageSizeChange = (value: string) => {
     setPageSize(parseInt(value));
     setCurrentPage(1);
-    // fetchOrders se disparará por el cambio de dependencia
-  };
-
-  const handleAddOrder = async () => {
-    if (!db) return;
-    try {
-      const id = `man_${Date.now()}`;
-      const docRef = doc(db, 'orders', id);
-      const data = {
-        ...newOrder,
-        processedAt: new Date().toISOString(),
-        classification_status: 'manual',
-        format_normalized: normalizeFormatName(newOrder.format),
-        disciplina_normalizada: newOrder.disciplina_normalizada.toUpperCase().trim(),
-        createdAt: serverTimestamp()
-      };
-      await setDoc(docRef, data);
-      toast({ title: "Registro creado", description: "La orden ha sido añadida exitosamente." });
-      setIsAddingNew(false);
-      setNewOrder({
-        projectId: '',
-        projectName: '',
-        impactoNeto: 0,
-        disciplina_normalizada: '',
-        descripcion: '',
-        format: 'WSC'
-      });
-      fetchOrders('initial');
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Error", description: "No se pudo crear el registro." });
-    }
+    setFirstDoc(null);
+    setLastDoc(null);
   };
 
   const handleProcessAI = async (order: any) => {
@@ -244,40 +181,6 @@ export default function AnalysisPage() {
       toast({ variant: "destructive", title: "Fallo en IA", description: e.message });
     } finally {
       setIsProcessingAI(null);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!db || !orderToDelete) return;
-    try {
-      await deleteDoc(doc(db, 'orders', orderToDelete));
-      toast({ title: "Registro eliminado", description: "El registro ha sido borrado del sistema." });
-      setOrderToDelete(null);
-      fetchOrders('initial');
-    } catch (e: any) {
-      errorEmitter.emit('permission-error', new FirestorePermissionError({
-        path: `orders/${orderToDelete}`,
-        operation: 'delete'
-      }));
-    }
-  };
-
-  const handleUpdate = async () => {
-    if (!db || !editingOrder) return;
-    try {
-      const { id, ...data } = editingOrder;
-      if (data.disciplina_normalizada) {
-        data.disciplina_normalizada = data.disciplina_normalizada.toUpperCase().trim();
-      }
-      if (data.format) {
-        data.format_normalized = normalizeFormatName(data.format);
-      }
-      await updateDoc(doc(db, 'orders', id), data);
-      toast({ title: "Cambios guardados", description: `Registro ${data.projectId} actualizado.` });
-      setEditingOrder(null);
-      fetchOrders('initial');
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Error al editar", description: e.message });
     }
   };
 
@@ -330,7 +233,7 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalRecords,
         build_timestamp: new Date().toISOString(),
-        build_version: '9.0.0-stable'
+        build_version: '10.0.0-stable'
       };
 
       const globalFormatStats: Record<string, any> = {};
@@ -454,7 +357,7 @@ export default function AnalysisPage() {
   };
 
   return (
-    <div className="flex min-h-screen w-full bg-slate-50/30">
+    <div className="flex min-h-screen w-full bg-slate-50/30 text-slate-900">
       <AppSidebar />
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 sticky top-0 z-10 shadow-sm">
@@ -464,16 +367,9 @@ export default function AnalysisPage() {
           </div>
           <div className="flex items-center gap-3">
             <Button 
-              onClick={() => setIsAddingNew(true)} 
-              variant="outline"
-              className="rounded-xl gap-2 h-10 border-primary/20 text-primary hover:bg-primary/5"
-            >
-              <Plus className="h-4 w-4" /> Nuevo Registro
-            </Button>
-            <Button 
               onClick={handleDeepSyncAndBackfill} 
               disabled={isSyncing}
-              className="bg-primary hover:bg-primary/90 rounded-xl gap-2 h-10 px-6 shadow-lg"
+              className="bg-primary hover:bg-primary/90 rounded-xl gap-2 h-10 px-6 shadow-lg text-[10px] font-black uppercase tracking-widest"
             >
               {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
               Sincronizar Universo
@@ -521,9 +417,6 @@ export default function AnalysisPage() {
                   </CardTitle>
                   <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Gestión de base de datos maestra</p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => fetchOrders('initial')} className="rounded-xl h-9 px-4 gap-2">
-                  <RefreshCcw className="h-3.5 w-3.5" /> Recargar
-                </Button>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -547,7 +440,7 @@ export default function AnalysisPage() {
                   ) : orders.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="h-40 text-center text-slate-400 uppercase font-bold text-xs">
-                        No se encontraron registros. Intenta "Sincronizar Universo".
+                        No se encontraron registros activos.
                       </TableCell>
                     </TableRow>
                   ) : orders.map((order) => (
@@ -590,22 +483,6 @@ export default function AnalysisPage() {
                             disabled={isProcessingAI === order.id}
                           >
                             {isProcessingAI === order.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BrainCircuit className="h-3.5 w-3.5" />}
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8 text-slate-400 hover:bg-slate-100"
-                            onClick={() => setEditingOrder(order)}
-                          >
-                            <Edit3 className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8 text-rose-400 hover:bg-rose-50"
-                            onClick={() => setOrderToDelete(order.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
                       </TableCell>
@@ -658,62 +535,6 @@ export default function AnalysisPage() {
           </Card>
         </main>
       </SidebarInset>
-
-      <Dialog open={isAddingNew} onOpenChange={setIsAddingNew}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Añadir Nuevo Registro</DialogTitle>
-            <DialogDescription>Completa la información para crear una nueva orden de cambio manual.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="pid" className="text-right">PID</Label>
-              <Input id="pid" className="col-span-3" value={newOrder.projectId} onChange={(e) => setNewOrder({...newOrder, projectId: e.target.value})} />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="monto" className="text-right">Monto</Label>
-              <Input id="monto" type="number" className="col-span-3" value={newOrder.impactoNeto} onChange={(e) => setNewOrder({...newOrder, impactoNeto: parseFloat(e.target.value)})} />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="desc" className="text-right">Descripción</Label>
-              <Input id="desc" className="col-span-3" value={newOrder.descripcion} onChange={(e) => setNewOrder({...newOrder, descripcion: e.target.value})} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddingNew(false)}>Cancelar</Button>
-            <Button onClick={handleAddOrder}>Crear Registro</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!editingOrder} onOpenChange={() => setEditingOrder(null)}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Editar Registro</DialogTitle>
-            <DialogDescription>Modifica los datos del registro seleccionado.</DialogDescription>
-          </DialogHeader>
-          {editingOrder && (
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="edit-pid" className="text-right">PID</Label>
-                <Input id="edit-pid" className="col-span-3" value={editingOrder.projectId} onChange={(e) => setEditingOrder({...editingOrder, projectId: e.target.value})} />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="edit-monto" className="text-right">Monto</Label>
-                <Input id="edit-monto" type="number" className="col-span-3" value={editingOrder.impactoNeto} onChange={(e) => setEditingOrder({...editingOrder, impactoNeto: parseFloat(e.target.value)})} />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="edit-disc" className="text-right">Disciplina</Label>
-                <Input id="edit-disc" className="col-span-3" value={editingOrder.disciplina_normalizada} onChange={(e) => setEditingOrder({...editingOrder, disciplina_normalizada: e.target.value})} />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingOrder(null)}>Cancelar</Button>
-            <Button onClick={handleUpdate}>Guardar Cambios</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={!!viewingOrder} onOpenChange={() => setViewingOrder(null)}>
         <DialogContent className="sm:max-w-[600px] rounded-3xl p-0 overflow-hidden border-none shadow-2xl text-slate-900">
@@ -787,19 +608,6 @@ export default function AnalysisPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={!!orderToDelete} onOpenChange={() => setOrderToDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Confirmas la eliminación?</AlertDialogTitle>
-            <div className="text-sm text-slate-500">Esta acción no se puede deshacer y el registro se borrará permanentemente de la base de datos.</div>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={handleDelete}>Eliminar Registro</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
