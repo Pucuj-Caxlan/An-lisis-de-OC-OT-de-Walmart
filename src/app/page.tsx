@@ -62,6 +62,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { toast } from '@/hooks/use-toast';
 
 const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#54585A'];
 
@@ -143,7 +144,7 @@ export default function VpDashboard() {
   
   // Estados de Filtros
   const [formatFilter, setFormatFilter] = useState('all');
-  const [yearFilter, setYearFilter] = useState('2024');
+  const [yearFilter, setYearFilter] = useState('all');
   const [planFilter, setPlanFilter] = useState('all');
   
   const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
@@ -166,7 +167,11 @@ export default function VpDashboard() {
   // Consulta Principal a hitos_analytics (Multidimensional)
   const analyticsQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
-    return query(collection(db, 'hitos_analytics'), where('year', '==', Number(yearFilter)));
+    const baseQuery = collection(db, 'hitos_analytics');
+    if (yearFilter !== 'all') {
+      return query(baseQuery, where('year', '==', Number(yearFilter)));
+    }
+    return baseQuery;
   }, [db, isAuthReady, yearFilter]);
 
   const { data: rawAnalytics, isLoading } = useCollection(analyticsQuery);
@@ -181,7 +186,6 @@ export default function VpDashboard() {
 
     rawAnalytics.forEach(d => {
       // Aplicar Filtros de Formato y Plan
-      // En hitos_analytics, 'format' guarda el ID (WSC, SC, etc) y 'plan' el nombre normalizado
       const matchFormat = formatFilter === 'all' || d.format === formatFilter;
       const matchPlan = planFilter === 'all' || d.plan === planFilter;
 
@@ -242,10 +246,13 @@ export default function VpDashboard() {
       let q = query(
         collection(db, 'orders'),
         where('disciplina_normalizada', '==', node.name),
-        where('year', '==', Number(yearFilter)),
         orderBy('impactoNeto', 'desc'),
         limit(15)
       );
+
+      if (yearFilter !== 'all') {
+        q = query(q, where('year', '==', Number(yearFilter)));
+      }
       
       if (formatFilter !== 'all') {
         q = query(q, where('format_normalized', '==', formatFilter));
@@ -323,10 +330,11 @@ export default function VpDashboard() {
             <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
               <CalendarDays className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={yearFilter} onValueChange={setYearFilter}>
-                <SelectTrigger className="h-8 w-24 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
+                <SelectTrigger className="h-8 w-32 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
                   <SelectValue placeholder="Año" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="all">TODOS LOS AÑOS</SelectItem>
                   <SelectItem value="2023">2023</SelectItem>
                   <SelectItem value="2024">2024</SelectItem>
                   <SelectItem value="2025">2025</SelectItem>
@@ -354,13 +362,18 @@ export default function VpDashboard() {
             <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border">
               <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={formatFilter} onValueChange={setFormatFilter}>
-                <SelectTrigger className="h-9 w-56 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm">
+                <SelectTrigger className="h-9 w-64 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm">
                   <SelectValue placeholder="Filtrar por Formato" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">TODOS LOS FORMATOS</SelectItem>
                   {availableFormats?.map(f => (
-                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    <SelectItem key={f.id} value={f.id}>
+                      <div className="flex justify-between w-full gap-4">
+                        <span>{f.name}</span>
+                        <span className="text-slate-400">({f.count || 0})</span>
+                      </div>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -373,7 +386,7 @@ export default function VpDashboard() {
             <Card className="border-none shadow-md bg-white border-l-4 border-l-primary p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Materializado</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(processedData.totalImpact)}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Segmento Filtrado: {yearFilter} • {formatFilter === 'all' ? 'GLOBAL' : formatFilter}</p>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Segmento Filtrado: {yearFilter === 'all' ? 'HISTÓRICO' : yearFilter} • {formatFilter === 'all' ? 'GLOBAL' : formatFilter}</p>
             </Card>
             <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Pareto</p>
@@ -482,7 +495,7 @@ export default function VpDashboard() {
               <div className="p-10 bg-slate-900 text-white rounded-b-[2.5rem]">
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-accent mb-2">Integridad de Auditoría</p>
                 <div className="text-xs text-slate-300 leading-relaxed italic border-l-2 border-accent pl-4">
-                  Reporte verificado dinámicamente. La suma de este segmento coincide 100% con los registros de {yearFilter} en la base institucional.
+                  Reporte verificado dinámicamente. La suma de este segmento coincide 100% con los registros de {yearFilter === 'all' ? 'todo el histórico' : yearFilter} en la base institucional.
                 </div>
               </div>
             </Card>
@@ -490,12 +503,12 @@ export default function VpDashboard() {
         </main>
 
         <Dialog open={!!selectedDiscipline} onOpenChange={(open) => !open && setSelectedDiscipline(null)}>
-          <DialogContent className="sm:max-w-[1100px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
+          <DialogContent className="sm:max-w-[1100px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl text-slate-900">
             <DialogHeader className="bg-slate-900 text-white p-10">
               <div className="flex justify-between items-start">
                 <div className="space-y-2">
                   <Badge className="bg-primary uppercase text-[9px] font-black px-3 py-1">Expediente Forense Filtrado ({yearFilter})</Badge>
-                  <DialogTitle className="text-3xl font-headline font-bold uppercase tracking-tight leading-none">
+                  <DialogTitle className="text-3xl font-headline font-bold uppercase tracking-tight leading-none text-white">
                     {selectedDiscipline?.name}
                   </DialogTitle>
                   <DialogDescription className="text-slate-400 text-xs font-bold uppercase tracking-widest">
@@ -532,16 +545,16 @@ export default function VpDashboard() {
                     <Table>
                       <TableHeader className="bg-slate-50">
                         <TableRow>
-                          <TableHead className="text-[9px] font-black uppercase pl-6">PID / Proyecto</TableHead>
-                          <TableHead className="text-[9px] font-black uppercase">Formato</TableHead>
-                          <TableHead className="text-[9px] font-black uppercase">Etapa / Coord.</TableHead>
-                          <TableHead className="text-[9px] font-black uppercase">Causa & Narrativa</TableHead>
-                          <TableHead className="text-[9px] font-black uppercase text-right pr-6">Impacto Neto</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase pl-6 text-slate-500">PID / Proyecto</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase text-slate-500">Formato</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase text-slate-500">Etapa / Coord.</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase text-slate-500">Causa & Narrativa</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase text-right pr-6 text-slate-500">Impacto Neto</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {disciplineOrders.map((order) => (
-                          <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors group">
+                          <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors group border-b last:border-0">
                             <TableCell className="pl-6 py-4">
                               <div className="space-y-0.5">
                                 <p className="font-mono text-xs font-bold text-slate-900">{order.projectId}</p>
