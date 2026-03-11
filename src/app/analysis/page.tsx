@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -58,7 +57,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/Dialog";
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -102,14 +101,12 @@ export default function AnalysisPage() {
     if (!db) return;
     setIsLoadingOrders(true);
     try {
-      // 1. Obtener conteo de forma asíncrona si es la carga inicial
       if (direction === 'initial') {
         getCountFromServer(collection(db, 'orders'))
           .then(snap => setTotalCount(snap.data().count))
           .catch(() => console.warn("Error en conteo, continuando..."));
       }
 
-      // 2. Query de paginación estable
       let q = query(collection(db, 'orders'), orderBy(documentId()), limit(pageSize));
       
       if (direction === 'next' && lastDoc) {
@@ -144,7 +141,7 @@ export default function AnalysisPage() {
     if (db && mounted) {
       fetchOrders('initial');
     }
-  }, [db, mounted, pageSize]); // Solo re-ejecutar si cambia el DB, montado o tamaño de página
+  }, [db, mounted, pageSize]);
 
   const handlePageSizeChange = (value: string) => {
     setPageSize(parseInt(value));
