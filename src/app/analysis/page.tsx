@@ -130,6 +130,7 @@ export default function AnalysisPage() {
         setTotalCount(countSnap.data().count);
       }
 
+      // Consulta estable por ID de documento para asegurar que los 10,900 registros carguen
       let q = query(collection(db, 'orders'), orderBy(documentId()), limit(PAGE_SIZE));
       
       if (direction === 'next' && lastDoc) {
@@ -310,7 +311,7 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalRecords,
         build_timestamp: new Date().toISOString(),
-        build_version: '8.0.0-stable'
+        build_version: '9.0.0-stable'
       };
 
       const globalFormatStats: Record<string, any> = {};
@@ -358,8 +359,9 @@ export default function AnalysisPage() {
           coordinators.add(coord);
           stages.add(stage);
           
-          if (!plansMap[plan]) plansMap[plan] = { count: 0, name: plan };
+          if (!plansMap[plan]) plansMap[plan] = { count: 0, name: plan, impact: 0 };
           plansMap[plan].count += 1;
+          plansMap[plan].impact += impact;
 
           if (!globalFormatStats[format]) globalFormatStats[format] = { impact: 0, count: 0, name: format };
           globalFormatStats[format].impact += impact;
@@ -397,17 +399,17 @@ export default function AnalysisPage() {
         totalProcessed: processed
       });
 
-      // Guardar taxonomia con conteos reales para los filtros
+      // Guardar taxonomia con conteos reales para que aparezcan en los selectores del Dashboard
       for (const [id, data] of Object.entries(globalFormatStats)) {
-        await setDoc(doc(db, 'taxonomy_formats', id), { ...data, id });
+        await setDoc(doc(db, 'taxonomy_formats', id), { ...data, id, name: id });
       }
       for (const [id, data] of Object.entries(globalDisciplineStats)) {
         const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        await setDoc(doc(db, 'taxonomy_disciplines', safeId), { ...data, id: safeId });
+        await setDoc(doc(db, 'taxonomy_disciplines', safeId), { ...data, id: safeId, name: id });
       }
       for (const [id, data] of Object.entries(plansMap)) {
         const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        await setDoc(doc(db, 'taxonomy_plans', safeId), { ...data, id: safeId });
+        await setDoc(doc(db, 'taxonomy_plans', safeId), { ...data, id: safeId, name: id });
       }
 
       setSyncStep('Finalizando Agregados...');

@@ -160,6 +160,7 @@ export default function VpDashboard() {
   const globalAggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(globalAggRef);
 
+  // Consultamos las colecciones de taxonomía actualizadas con conteos reales
   const formatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('name', 'asc')) : null, [db]);
   const { data: availableFormats } = useCollection(formatsQuery);
 
