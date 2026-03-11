@@ -19,7 +19,10 @@ import {
   ChevronRight,
   Layers,
   Info,
-  TrendingUp
+  X,
+  FileText,
+  TrendingUp,
+  Activity
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -30,6 +33,7 @@ import { useFirestore, useMemoFirebase, useUser, useCollection, useDoc } from '@
 import { collection, query, orderBy, doc, where, limit, getDocs } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
   SelectContent,
@@ -42,6 +46,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Table,
@@ -58,16 +63,16 @@ const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321'
 const GET_RAMO = (discipline: string): string => {
   const d = String(discipline || '').toUpperCase().trim();
   
-  if (d.includes('CIVIL') || d.includes('ARQUITECTÓNICA') || d.includes('TERRACERÍAS') || d.includes('EDIFICACIÓN') || d.includes('OBRA GRIS')) 
+  if (d.includes('CIVIL') || d.includes('ARQUITECTÓNICA') || d.includes('TERRACERÍAS') || d.includes('EDIFICACIÓN') || d.includes('OBRA GRIS') || d.includes('ESTRUCTURA')) 
     return 'OBRA CIVIL';
   
-  if (d.includes('INGENIERÍA') || d.includes('DISEÑO') || d.includes('ARQUITECTURA')) 
+  if (d.includes('INGENIERÍA') || d.includes('DISEÑO') || d.includes('ARQUITECTURA') || d.includes('PROYECTO')) 
     return 'INGENIERÍA Y DISEÑO';
   
-  if (d.includes('ELÉCTRICA') || d.includes('HIDRÁULICA') || d.includes('AIRE') || d.includes('REFRIGERACIÓN') || d.includes('SANITARIA') || d.includes('PCI') || d.includes('VOZ') || d.includes('ESPECIALES')) 
+  if (d.includes('ELÉCTRICA') || d.includes('HIDRÁULICA') || d.includes('AIRE') || d.includes('REFRIGERACIÓN') || d.includes('SANITARIA') || d.includes('PCI') || d.includes('VOZ') || d.includes('ESPECIALES') || d.includes('FUME')) 
     return 'INSTALACIONES (MEP)';
   
-  if (d.includes('GESTIÓN') || d.includes('ADMINISTRACIÓN') || d.includes('SUPERVISIÓN') || d.includes('GERENCIA') || d.includes('TRÁMITES') || d.includes('LICENCIAS')) 
+  if (d.includes('GESTIÓN') || d.includes('ADMINISTRACIÓN') || d.includes('SUPERVISIÓN') || d.includes('GERENCIA') || d.includes('TRÁMITES') || d.includes('LICENCIAS') || d.includes('LEGAL')) 
     return 'GESTIÓN Y ADMON';
   
   if (d.includes('MOBILIARIO') || d.includes('EQUIPO') || d.includes('COCINA') || d.includes('RACKS') || d.includes('SEÑALIZACIÓN')) 
@@ -145,6 +150,12 @@ export default function VpDashboard() {
   const [selectedRamo, setSelectedRamo] = useState<any>(null);
   const [ramoDetails, setRamoDetails] = useState<{subDisciplines: any[], orders: any[]}>({ subDisciplines: [], orders: [] });
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  // Estados para nuevas ventanas de detalle
+  const [selectedSubDiscipline, setSelectedSubDiscipline] = useState<any>(null);
+  const [subDisciplineOrders, setSubDisciplineOrders] = useState<any[]>([]);
+  const [isLoadingSubOrders, setIsLoadingSubOrders] = useState(false);
+  const [selectedOrderDetail, setSelectedOrderDetail] = useState<any>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -233,25 +244,17 @@ export default function VpDashboard() {
   };
 
   const handleRamoClick = async (ramo: any) => {
-    if (!ramo || !db) return;
-    
-    // El objeto ramo puede venir directamente o envuelto por Recharts
     const targetData = ramo.payload || ramo;
-    const targetSubs = targetData.subs;
-    
-    if (!targetSubs) {
-      console.warn("No se encontraron sub-disciplinas para:", targetData.name);
-      return;
-    }
+    if (!targetData.subs) return;
 
     setSelectedRamo(targetData);
     setIsLoadingDetails(true);
     
     try {
-      const subs = Object.entries(targetSubs).map(([name, data]: any) => ({
+      const subs = Object.entries(targetData.subs).map(([name, data]: any) => ({
         name,
         ...data,
-        percentage: targetData.impact > 0 ? ((data.impact / targetData.impact) * 100).toFixed(1) : "0"
+        percentage: ((data.impact / targetData.impact) * 100).toFixed(1)
       })).sort((a, b) => b.impact - a.impact);
       
       const subNames = subs.slice(0, 10).map(s => s.name); 
@@ -277,6 +280,31 @@ export default function VpDashboard() {
       toast({ variant: "destructive", title: "Error", description: "No se pudieron cargar los detalles." });
     } finally {
       setIsLoadingDetails(false);
+    }
+  };
+
+  const handleSubDisciplineClick = async (sub: any) => {
+    setSelectedSubDiscipline(sub);
+    setIsLoadingSubOrders(true);
+    try {
+      let q = query(
+        collection(db, 'orders'),
+        where('disciplina_normalizada', '==', sub.name),
+        orderBy('impactoNeto', 'desc'),
+        limit(50)
+      );
+
+      if (yearFilter !== 'all') q = query(q, where('year', '==', Number(yearFilter)));
+      if (formatFilter !== 'all') q = query(q, where('format_normalized', '==', formatFilter));
+      if (planFilter !== 'all') q = query(q, where('plan_nombre_normalizado', '==', planFilter));
+
+      const snap = await getDocs(q);
+      setSubDisciplineOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e) {
+      console.error(e);
+      toast({ variant: "destructive", title: "Error", description: "Error al cargar órdenes de la sub-disciplina." });
+    } finally {
+      setIsLoadingSubOrders(false);
     }
   };
 
@@ -380,7 +408,7 @@ export default function VpDashboard() {
                   <div className="h-full flex items-center justify-center"><Loader2 className="h-12 w-12 animate-spin text-slate-200" /></div>
                 ) : processedData.ramos.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                    <p className="text-sm font-bold uppercase text-center">Sin datos para los filtros seleccionados.<br/>Realiza una sincronización en "Análisis Detallado" si es necesario.</p>
+                    <p className="text-sm font-bold uppercase text-center">Sin datos para los filtros seleccionados.</p>
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
@@ -410,9 +438,9 @@ export default function VpDashboard() {
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-6 overflow-y-auto">
                 {(activePieTab === '80' ? vitalFew : usefulMany).map((item, i) => (
-                  <div key={item.name} className="space-y-2">
+                  <div key={item.name} className="space-y-2 cursor-pointer group" onClick={() => handleRamoClick(item)}>
                     <div className="flex justify-between items-end">
-                      <span className="text-[11px] font-black text-slate-800 uppercase">{item.name}</span>
+                      <span className="text-[11px] font-black text-slate-800 uppercase group-hover:text-primary transition-colors">{item.name}</span>
                       <span className="text-[11px] font-black text-slate-900">{formatCurrency(item.impact)}</span>
                     </div>
                     <Progress value={item.percentage} className="h-1.5" />
@@ -424,6 +452,7 @@ export default function VpDashboard() {
           </div>
         </main>
 
+        {/* DIÁLOGO: DESGLOSE DE RAMO */}
         <Dialog open={!!selectedRamo} onOpenChange={(open) => !open && setSelectedRamo(null)}>
           <DialogContent className="sm:max-w-[1000px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
             <DialogHeader className="bg-slate-900 text-white p-10">
@@ -439,32 +468,44 @@ export default function VpDashboard() {
               </div>
             </DialogHeader>
 
-            <div className="p-8 space-y-8 bg-white max-h-[70vh] overflow-y-auto">
+            <div className="p-8 space-y-8 bg-white">
               <section>
                 <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest mb-4 flex items-center gap-2">
                   <Layers className="h-4 w-4 text-primary" /> Composición del Grupo (Sub-disciplinas)
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {ramoDetails.subDisciplines.map((sub, i) => (
-                    <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-[10px] font-black text-slate-800 uppercase">{sub.name}</span>
-                        <span className="text-[10px] font-black text-primary">{formatCurrency(sub.impact)}</span>
+                <ScrollArea className="h-[200px] rounded-2xl border border-slate-100 p-4 bg-slate-50/30">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {ramoDetails.subDisciplines.map((sub, i) => (
+                      <div 
+                        key={i} 
+                        className="p-4 bg-white rounded-xl border border-slate-100 shadow-sm cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all"
+                        onClick={() => handleSubDisciplineClick(sub)}
+                      >
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-[10px] font-black text-slate-800 uppercase">{sub.name}</span>
+                          <span className="text-[10px] font-black text-primary">{formatCurrency(sub.impact)}</span>
+                        </div>
+                        <Progress value={parseFloat(sub.percentage)} className="h-1" />
+                        <div className="flex justify-between mt-1">
+                          <p className="text-[9px] text-slate-400 font-bold uppercase">{sub.percentage}% de este ramo</p>
+                          <p className="text-[9px] text-slate-400 font-bold uppercase">{sub.count} registros</p>
+                        </div>
                       </div>
-                      <Progress value={parseFloat(sub.percentage)} className="h-1" />
-                      <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">{sub.percentage}% de este ramo • {sub.count} registros</p>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </ScrollArea>
               </section>
 
               <section>
-                <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest mb-4 flex items-center gap-2">
-                  <Search className="h-4 w-4 text-primary" /> Muestra de Órdenes Críticas
-                </h4>
-                <div className="border rounded-2xl overflow-hidden text-slate-900 border-slate-100 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                    <Search className="h-4 w-4 text-primary" /> Top Órdenes de Cambio
+                  </h4>
+                  <Badge variant="outline" className="text-[9px] font-black uppercase">Muestra de Impacto</Badge>
+                </div>
+                <div className="border rounded-2xl overflow-hidden text-slate-900 border-slate-100 shadow-sm max-h-[300px] overflow-y-auto">
                   <Table>
-                    <TableHeader className="bg-slate-50">
+                    <TableHeader className="bg-slate-50 sticky top-0 z-10">
                       <TableRow>
                         <TableHead className="text-[9px] font-black uppercase h-10">PID</TableHead>
                         <TableHead className="text-[9px] font-black uppercase h-10">Sub-Disciplina</TableHead>
@@ -479,10 +520,14 @@ export default function VpDashboard() {
                         </TableRow>
                       ) : ramoDetails.orders.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={4} className="h-32 text-center text-[10px] font-bold uppercase text-slate-400">Sin órdenes detalladas para este ramo en los filtros actuales.</TableCell>
+                          <TableCell colSpan={4} className="h-32 text-center text-[10px] font-bold uppercase text-slate-400">Sin registros.</TableCell>
                         </TableRow>
                       ) : ramoDetails.orders.map((o) => (
-                        <TableRow key={o.id} className="hover:bg-slate-50/50">
+                        <TableRow 
+                          key={o.id} 
+                          className="hover:bg-slate-50/50 cursor-pointer"
+                          onClick={() => setSelectedOrderDetail(o)}
+                        >
                           <TableCell className="text-[10px] font-black text-slate-900">{o.projectId}</TableCell>
                           <TableCell className="text-[9px] font-bold uppercase text-slate-500">{o.disciplina_normalizada}</TableCell>
                           <TableCell className="text-[10px] text-slate-600 italic max-w-[300px] truncate">"{o.descripcion}"</TableCell>
@@ -494,8 +539,127 @@ export default function VpDashboard() {
                 </div>
               </section>
             </div>
+            <DialogFooter className="p-6 bg-slate-50 border-t">
+              <Button variant="outline" onClick={() => setSelectedRamo(null)} className="rounded-xl px-8 uppercase font-black text-[10px] tracking-widest h-10">
+                <X className="h-4 w-4 mr-2" /> Cerrar Vista
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* DIÁLOGO: DETALLE DE SUB-DISCIPLINA */}
+        <Dialog open={!!selectedSubDiscipline} onOpenChange={(open) => !open && setSelectedSubDiscipline(null)}>
+          <DialogContent className="sm:max-w-[900px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
+            <DialogHeader className="bg-primary text-white p-8">
+              <div className="flex justify-between items-end">
+                <div>
+                  <Badge className="bg-white/20 text-white mb-2 uppercase text-[9px]">Análisis de Especialidad</Badge>
+                  <DialogTitle className="text-2xl font-headline font-bold uppercase">{selectedSubDiscipline?.name}</DialogTitle>
+                </div>
+                <div className="text-right">
+                  <p className="text-[9px] font-black uppercase opacity-70">Impacto Acumulado</p>
+                  <p className="text-3xl font-black">{formatCurrency(selectedSubDiscipline?.impact || 0)}</p>
+                </div>
+              </div>
+            </DialogHeader>
+            <div className="p-0">
+              <Table>
+                <TableHeader className="bg-slate-50">
+                  <TableRow>
+                    <TableHead className="text-[9px] font-black uppercase">PID</TableHead>
+                    <TableHead className="text-[9px] font-black uppercase">Causa Raíz</TableHead>
+                    <TableHead className="text-[9px] font-black uppercase">Descripción</TableHead>
+                    <TableHead className="text-[9px] font-black uppercase text-right">Monto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoadingSubOrders ? (
+                    <TableRow><TableCell colSpan={4} className="h-40 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-slate-200" /></TableCell></TableRow>
+                  ) : subDisciplineOrders.map((o) => (
+                    <TableRow 
+                      key={o.id} 
+                      className="hover:bg-slate-50/50 cursor-pointer"
+                      onClick={() => setSelectedOrderDetail(o)}
+                    >
+                      <TableCell className="text-[10px] font-black">{o.projectId}</TableCell>
+                      <TableCell className="text-[9px] font-bold text-slate-500 uppercase">{o.causa_raiz_normalizada || 'N/A'}</TableCell>
+                      <TableCell className="text-[10px] text-slate-600 truncate max-w-[300px]">"{o.descripcion}"</TableCell>
+                      <TableCell className="text-right text-[10px] font-black">{formatCurrency(o.impactoNeto)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <DialogFooter className="p-4 bg-slate-50 border-t">
+              <Button variant="ghost" onClick={() => setSelectedSubDiscipline(null)} className="uppercase font-black text-[9px]">Regresar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* DIÁLOGO: FICHA TÉCNICA DE REGISTRO */}
+        <Dialog open={!!selectedOrderDetail} onOpenChange={(open) => !open && setSelectedOrderDetail(null)}>
+          <DialogContent className="sm:max-w-[600px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
+            <DialogHeader className="bg-slate-900 text-white p-8">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <Badge className="bg-accent text-white uppercase text-[9px]">Ficha Técnica de Registro</Badge>
+                  <DialogTitle className="text-2xl font-headline font-bold">{selectedOrderDetail?.projectId}</DialogTitle>
+                  <p className="text-xs text-slate-400 font-medium uppercase">{selectedOrderDetail?.projectName}</p>
+                </div>
+                <FileText className="h-10 w-10 text-white/20" />
+              </div>
+            </DialogHeader>
+            <div className="p-8 space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Monto de Operación</p>
+                  <p className="text-lg font-black text-slate-900">{formatCurrency(selectedOrderDetail?.impactoNeto || 0)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estatus Clasificación</p>
+                  <Badge variant="outline" className="uppercase text-[9px] font-black">{selectedOrderDetail?.classification_status}</Badge>
+                </div>
+              </div>
+              
+              <Separator />
+
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Disciplina / Ramo</p>
+                  <p className="text-sm font-bold text-slate-800 uppercase">{selectedOrderDetail?.disciplina_normalizada}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Causa Raíz</p>
+                  <p className="text-sm font-bold text-slate-800 uppercase">{selectedOrderDetail?.causa_raiz_normalizada || 'Pendiente'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Descripción Original</p>
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 italic text-xs text-slate-600">
+                    "{selectedOrderDetail?.descripcion}"
+                  </div>
+                </div>
+              </div>
+
+              {selectedOrderDetail?.semanticAnalysis && (
+                <div className="mt-6 p-4 bg-primary/5 rounded-2xl border border-primary/10">
+                  <div className="flex items-center gap-2 mb-2">
+                    <BrainCircuit className="h-4 w-4 text-primary" />
+                    <p className="text-[10px] font-black text-primary uppercase">Análisis de IA (Gemini)</p>
+                  </div>
+                  <p className="text-xs font-medium text-slate-700 leading-relaxed">
+                    {selectedOrderDetail.semanticAnalysis.rationale_tecnico}
+                  </p>
+                </div>
+              )}
+            </div>
+            <DialogFooter className="p-6 bg-slate-50 border-t">
+              <Button onClick={() => setSelectedOrderDetail(null)} className="w-full rounded-xl uppercase font-black text-[10px] tracking-widest h-10">
+                Entendido
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </SidebarInset>
     </div>
   );
