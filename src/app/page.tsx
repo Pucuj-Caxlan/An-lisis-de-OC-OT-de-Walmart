@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useMemo, useEffect, memo } from 'react';
@@ -154,7 +153,7 @@ export default function VpDashboard() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  const globalAggRef = doc(db!, 'aggregates', 'global_stats');
+  const globalAggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(globalAggRef);
 
   // Carga de Taxonomías para Selectores
@@ -182,6 +181,7 @@ export default function VpDashboard() {
 
     rawAnalytics.forEach(d => {
       // Aplicar Filtros de Formato y Plan
+      // En hitos_analytics, 'format' guarda el ID (WSC, SC, etc) y 'plan' el nombre normalizado
       const matchFormat = formatFilter === 'all' || d.format === formatFilter;
       const matchPlan = planFilter === 'all' || d.plan === planFilter;
 
@@ -238,6 +238,7 @@ export default function VpDashboard() {
     setDisciplineOrders([]);
 
     try {
+      // Esta consulta requiere los índices compuestos creados en Firestore
       let q = query(
         collection(db, 'orders'),
         where('disciplina_normalizada', '==', node.name),
@@ -258,6 +259,11 @@ export default function VpDashboard() {
       setDisciplineOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) {
       console.error("Error al cargar detalles:", e);
+      toast({
+        variant: "destructive",
+        title: "Error de consulta",
+        description: "Asegúrese de que los índices de Firestore estén activos."
+      });
     } finally {
       setIsLoadingDetails(false);
     }
@@ -354,7 +360,7 @@ export default function VpDashboard() {
                 <SelectContent>
                   <SelectItem value="all">TODOS LOS FORMATOS</SelectItem>
                   {availableFormats?.map(f => (
-                    <SelectItem key={f.id} value={f.name}>{f.name}</SelectItem>
+                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -371,8 +377,10 @@ export default function VpDashboard() {
             </Card>
             <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Pareto</p>
-              <h2 className="text-3xl font-black text-white tracking-tighter">85%</h2>
-              <Progress value={85} className="h-1 bg-white/10 mt-2" />
+              <h2 className="text-3xl font-black text-white tracking-tighter">
+                {processedData.totalImpact > 0 ? '85%' : '0%'}
+              </h2>
+              <Progress value={processedData.totalImpact > 0 ? 85 : 0} className="h-1 bg-white/10 mt-2" />
             </Card>
             <Card className="border-none shadow-md bg-white border-l-4 border-l-blue-600 p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Volumen OC/OT</p>
@@ -425,7 +433,7 @@ export default function VpDashboard() {
                     <AlertCircle className="h-16 w-16 opacity-10" />
                     <p className="text-xs font-black uppercase tracking-widest text-slate-400 text-center">
                       No hay datos para la combinación de filtros seleccionada.<br/>
-                      Ajuste el Año o el Plan de Trabajo.
+                      Ajuste el Año o el Plan de Trabajo o sincronice los datos.
                     </p>
                   </div>
                 )}
@@ -465,6 +473,11 @@ export default function VpDashboard() {
                     </div>
                   </div>
                 ))}
+                {processedData.pareto.length === 0 && (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-300 py-20">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sin datos</p>
+                  </div>
+                )}
               </CardContent>
               <div className="p-10 bg-slate-900 text-white rounded-b-[2.5rem]">
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-accent mb-2">Integridad de Auditoría</p>
@@ -476,9 +489,8 @@ export default function VpDashboard() {
           </div>
         </main>
 
-        {/* Dialogo de Detalles de Disciplina Enriquecido */}
         <Dialog open={!!selectedDiscipline} onOpenChange={(open) => !open && setSelectedDiscipline(null)}>
-          <DialogContent className="sm:max-w-[1100px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl animate-in slide-in-from-bottom-4 duration-300">
+          <DialogContent className="sm:max-w-[1100px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
             <DialogHeader className="bg-slate-900 text-white p-10">
               <div className="flex justify-between items-start">
                 <div className="space-y-2">

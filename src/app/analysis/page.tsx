@@ -44,9 +44,7 @@ import {
   normalizeFormatName, 
   normalizeCoordinator, 
   normalizeStage,
-  normalizePlan,
-  FORMAT_LABELS, 
-  NormalizedFormat 
+  normalizePlan
 } from '@/lib/excel-processor';
 import { Progress } from '@/components/ui/progress';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -166,6 +164,7 @@ export default function AnalysisPage() {
         processedAt: new Date().toISOString(),
         classification_status: 'manual',
         format_normalized: normalizeFormatName(newOrder.format),
+        disciplina_normalizada: newOrder.disciplina_normalizada.toUpperCase().trim(),
         createdAt: serverTimestamp()
       };
       await setDoc(docRef, data);
@@ -229,6 +228,9 @@ export default function AnalysisPage() {
       const { id, ...data } = editingOrder;
       if (data.disciplina_normalizada) {
         data.disciplina_normalizada = data.disciplina_normalizada.toUpperCase().trim();
+      }
+      if (data.format) {
+        data.format_normalized = normalizeFormatName(data.format);
       }
       await updateDoc(doc(db, 'orders', id), data);
       toast({ title: "Cambios guardados", description: `Registro ${data.projectId} actualizado.` });
@@ -316,16 +318,17 @@ export default function AnalysisPage() {
           const data = d.data();
           const impact = Number(data.impactoNeto || 0);
           
-          const format = normalizeFormatName(data.format || data.format_origin || 'OTRO');
+          const format = normalizeFormatName(data.format || data.format_normalized || data.format_origin || 'OTRO');
           const disc = String(data.disciplina_normalizada || data.semanticAnalysis?.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
           const coord = normalizeCoordinator(data.coordinador || data.coordinador_normalizado);
           const stage = normalizeStage(data.etapa || data.etapa_proyecto_normalizada);
           const plan = normalizePlan(data.plan || data.plan_nombre_normalizado);
           
-          const date = new Date(data.fecha_oc_ot || data.processedAt || new Date().toISOString());
+          const date = new Date(data.fecha_oc_ot || data.fechaSolicitud || data.processedAt || new Date().toISOString());
           const year = isNaN(date.getFullYear()) ? 2024 : date.getFullYear();
           const month = isNaN(date.getMonth()) ? 1 : date.getMonth() + 1;
 
+          // Actualizar el documento original para asegurar consistencia
           batch.update(doc(db, 'orders', d.id), {
             format_normalized: format,
             coordinador_normalizado: coord,
@@ -377,7 +380,7 @@ export default function AnalysisPage() {
 
       for (const [id, data] of Object.entries(globalFormatStats)) {
         await setDoc(doc(db, 'taxonomy_formats', id), {
-          ...data, id, name: FORMAT_LABELS[id as NormalizedFormat] || id, updatedAt: buildMetadata.build_timestamp
+          ...data, id, name: id, updatedAt: buildMetadata.build_timestamp
         });
       }
 
