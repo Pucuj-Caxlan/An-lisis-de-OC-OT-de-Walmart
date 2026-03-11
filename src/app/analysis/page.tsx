@@ -16,7 +16,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  Search,
   Eye
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -79,6 +78,7 @@ import { Label } from '@/components/ui/label';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 
 const PAGE_SIZE = 15;
 
@@ -129,8 +129,6 @@ export default function AnalysisPage() {
         setTotalCount(countSnap.data().count);
       }
 
-      // Usamos una consulta simple sin ordenamiento complejo para asegurar que los datos aparezcan
-      // incluso si no hay índices compuestos creados.
       let q = query(collection(db, 'orders'), limit(PAGE_SIZE));
       
       if (direction === 'next' && lastDoc) {
@@ -253,7 +251,7 @@ export default function AnalysisPage() {
       if (data.format) {
         data.format_normalized = normalizeFormatName(data.format);
       }
-      await updateDoc(doc(db, 'orders', id), data);
+      await updateDoc(doc(db, id), data);
       toast({ title: "Cambios guardados", description: `Registro ${data.projectId} actualizado.` });
       setEditingOrder(null);
       fetchOrders('initial');
@@ -310,7 +308,7 @@ export default function AnalysisPage() {
       let processed = 0;
       let lastVisible = null;
       let hasMore = true;
-      const CHUNK_SIZE = 50; // Reducido para evitar timeouts
+      const CHUNK_SIZE = 50; 
 
       const buildMetadata = {
         source_collection: 'orders',
@@ -388,7 +386,7 @@ export default function AnalysisPage() {
         setSyncProgress(Math.round((processed / Math.max(1, totalCount)) * 100));
         lastVisible = snap.docs[snap.docs.length - 1];
         
-        await sleep(500); // Pausa más larga para estabilidad
+        await sleep(500); 
         if (snap.size < CHUNK_SIZE) hasMore = false;
       }
 
@@ -686,14 +684,20 @@ export default function AnalysisPage() {
             <Button variant="outline" onClick={() => setEditingOrder(null)}>Cancelar</Button>
             <Button onClick={handleUpdate}>Guardar Cambios</Button>
           </DialogFooter>
-        </Dialog>
+        </DialogContent>
       </Dialog>
 
       <Dialog open={!!viewingOrder} onOpenChange={() => setViewingOrder(null)}>
-        <DialogContent className="sm:max-w-[600px] rounded-3xl p-0 overflow-hidden border-none">
+        <DialogContent className="sm:max-w-[600px] rounded-3xl p-0 overflow-hidden border-none shadow-2xl text-slate-900">
           <DialogHeader className="bg-slate-900 text-white p-8">
-            <DialogTitle className="text-2xl font-bold uppercase tracking-tighter">Detalles del Registro</DialogTitle>
-            <DialogDescription className="text-slate-400">Ficha técnica completa almacenada en la base de datos.</DialogDescription>
+            <div className="flex justify-between items-start">
+              <div className="space-y-1">
+                <Badge className="bg-accent text-white uppercase text-[9px]">Ficha Técnica de Registro</Badge>
+                <DialogTitle className="text-2xl font-headline font-bold text-white">{viewingOrder?.projectId}</DialogTitle>
+                <p className="text-xs text-slate-400 font-medium uppercase">{viewingOrder?.projectName}</p>
+              </div>
+              <FileText className="h-10 w-10 text-white/20" />
+            </div>
           </DialogHeader>
           {viewingOrder && (
             <ScrollArea className="max-h-[60vh]">
@@ -751,9 +755,9 @@ export default function AnalysisPage() {
             </ScrollArea>
           )}
           <DialogFooter className="p-6 bg-slate-50 border-t">
-            <Button onClick={() => setViewingOrder(null)} className="w-full rounded-xl">Cerrar</Button>
+            <Button onClick={() => setViewingOrder(null)} className="w-full rounded-xl uppercase font-black text-[10px] tracking-widest h-10">Cerrar</Button>
           </DialogFooter>
-        </Dialog>
+        </DialogContent>
       </Dialog>
 
       <AlertDialog open={!!orderToDelete} onOpenChange={() => setOrderToDelete(null)}>
@@ -771,3 +775,4 @@ export default function AnalysisPage() {
     </div>
   );
 }
+
