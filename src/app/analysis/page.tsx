@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -10,8 +9,7 @@ import {
   RefreshCcw, 
   ShieldCheck,
   Loader2,
-  Layers,
-  Search,
+  Plus,
   Trash2,
   Edit3,
   BrainCircuit,
@@ -19,8 +17,7 @@ import {
   ChevronRight,
   Database,
   AlertTriangle,
-  Save,
-  X
+  Save
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useUser, useDoc } from '@/firebase';
@@ -40,8 +37,8 @@ import {
   Firestore,
   deleteDoc,
   updateDoc,
-  where,
-  limitToLast
+  limitToLast,
+  serverTimestamp
 } from 'firebase/firestore';
 import { 
   normalizeFormatName, 
@@ -92,7 +89,7 @@ export default function AnalysisPage() {
   const db = useFirestore();
   const { user } = useUser();
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncProgress, setSyncSyncProgress] = useState(0);
+  const [syncProgress, setSyncProgress] = useState(0);
   const [syncStep, setSyncStep] = useState<string>('');
   const [mounted, setMounted] = useState(false);
 
@@ -104,9 +101,20 @@ export default function AnalysisPage() {
   const [currentPage, setCurrentPage] = useState(1);
   
   // Estados para Edición y Borrado
+  const [isAddingNew, setIsAddingNew] = useState(false);
   const [editingOrder, setEditingOrder] = useState<any>(null);
   const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
   const [isProcessingAI, setIsProcessingAI] = useState<string | null>(null);
+
+  // Estado para el formulario de nueva orden
+  const [newOrder, setNewOrder] = useState({
+    projectId: '',
+    projectName: '',
+    impactoNeto: 0,
+    disciplina_normalizada: '',
+    descripcion: '',
+    format: 'WSC'
+  });
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -121,7 +129,7 @@ export default function AnalysisPage() {
       let q = query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(PAGE_SIZE));
       
       if (direction === 'next' && lastDoc) {
-        q = query(q, startAfter(lastDoc));
+        q = query(collection(db, 'orders'), orderBy('processedAt', 'desc'), startAfter(lastDoc), limit(PAGE_SIZE));
       } else if (direction === 'prev' && firstDoc) {
         q = query(collection(db, 'orders'), orderBy('processedAt', 'desc'), endBefore(firstDoc), limitToLast(PAGE_SIZE));
       }
@@ -129,9 +137,13 @@ export default function AnalysisPage() {
       const snap = await getDocs(q);
       const results = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       
-      setOrders(results);
-      setFirstDoc(snap.docs[0]);
-      setLastDoc(snap.docs[snap.docs.length - 1]);
+      if (results.length > 0) {
+        setOrders(results);
+        setFirstDoc(snap.docs[0]);
+        setLastDoc(snap.docs[snap.docs.length - 1]);
+      } else if (direction === 'initial') {
+        setOrders([]);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -144,6 +156,35 @@ export default function AnalysisPage() {
   }, [db, mounted]);
 
   // --- Acciones Individuales ---
+  const handleAddOrder = async () => {
+    if (!db) return;
+    try {
+      const id = `man_${Date.now()}`;
+      const docRef = doc(db, 'orders', id);
+      const data = {
+        ...newOrder,
+        processedAt: new Date().toISOString(),
+        classification_status: 'manual',
+        format_normalized: normalizeFormatName(newOrder.format),
+        createdAt: serverTimestamp()
+      };
+      await setDoc(docRef, data);
+      toast({ title: "Registro creado", description: "La orden ha sido añadida exitosamente." });
+      setIsAddingNew(false);
+      setNewOrder({
+        projectId: '',
+        projectName: '',
+        impactoNeto: 0,
+        disciplina_normalizada: '',
+        descripcion: '',
+        format: 'WSC'
+      });
+      fetchOrders('initial');
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error", description: "No se pudo crear el registro." });
+    }
+  };
+
   const handleProcessAI = async (order: any) => {
     setIsProcessingAI(order.id);
     try {
@@ -171,7 +212,7 @@ export default function AnalysisPage() {
     if (!db || !orderToDelete) return;
     try {
       await deleteDoc(doc(db, 'orders', orderToDelete));
-      toast({ title: "Registro eliminado", description: "El universo se ha actualizado localmente." });
+      toast({ title: "Registro eliminado", description: "El registro ha sido borrado del sistema." });
       setOrderToDelete(null);
       fetchOrders();
     } catch (e: any) {
@@ -186,7 +227,6 @@ export default function AnalysisPage() {
     if (!db || !editingOrder) return;
     try {
       const { id, ...data } = editingOrder;
-      // Normalizamos disciplina en edición manual también
       if (data.disciplina_normalizada) {
         data.disciplina_normalizada = data.disciplina_normalizada.toUpperCase().trim();
       }
@@ -199,7 +239,7 @@ export default function AnalysisPage() {
     }
   };
 
-  // --- Lógica de Sincronización Masiva (Existente) ---
+  // --- Lógica de Sincronización Masiva ---
   const purgeCollectionCompletely = async (db: Firestore, collPath: string) => {
     let hasMore = true;
     while (hasMore) {
@@ -223,14 +263,14 @@ export default function AnalysisPage() {
   const handleDeepSyncAndBackfill = async () => {
     if (!db || !user) return;
     setIsSyncing(true);
-    setSyncSyncProgress(0);
+    setSyncProgress(0);
 
     try {
       setSyncStep('Validando Universo Base (orders)...');
       const totalSnapshot = await getCountFromServer(collection(db, 'orders'));
       const totalCount = totalSnapshot.data().count;
 
-      setSyncStep('Fase de Purga Profunda: Limpiando agregados antiguos...');
+      setSyncStep('Fase de Purga: Limpiando agregados...');
       const collectionsToPurge = [
         'taxonomy_formats', 
         'taxonomy_disciplines', 
@@ -253,7 +293,7 @@ export default function AnalysisPage() {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '4.6.1-sanitized-ids'
+        build_version: '5.0.0-full-sync'
       };
 
       const globalFormatStats: Record<string, any> = {};
@@ -261,7 +301,6 @@ export default function AnalysisPage() {
       const coordinators = new Set<string>();
       const stages = new Set<string>();
       const plans = new Set<string>();
-
       const hitosAgg: Record<string, any> = {};
 
       while (hasMore) {
@@ -278,7 +317,6 @@ export default function AnalysisPage() {
           const impact = Number(data.impactoNeto || 0);
           
           const format = normalizeFormatName(data.format || data.format_origin || 'OTRO');
-          // NORMALIZACIÓN CRÍTICA: Aseguramos que el campo en 'orders' sea idéntico al de los agregados
           const disc = String(data.disciplina_normalizada || data.semanticAnalysis?.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
           const coord = normalizeCoordinator(data.coordinador || data.coordinador_normalizado);
           const stage = normalizeStage(data.etapa || data.etapa_proyecto_normalizada);
@@ -288,7 +326,6 @@ export default function AnalysisPage() {
           const year = isNaN(date.getFullYear()) ? 2024 : date.getFullYear();
           const month = isNaN(date.getMonth()) ? 1 : date.getMonth() + 1;
 
-          // Actualizamos el registro base con la disciplina normalizada para que la consulta de detalle funcione
           batch.update(doc(db, 'orders', d.id), {
             format_normalized: format,
             coordinador_normalizado: coord,
@@ -324,7 +361,7 @@ export default function AnalysisPage() {
 
         await batch.commit();
         processed += snap.size;
-        setSyncSyncProgress(Math.round((processed / Math.max(1, totalCount)) * 100));
+        setSyncProgress(Math.round((processed / Math.max(1, totalCount)) * 100));
         lastVisible = snap.docs[snap.docs.length - 1];
         if (snap.size < CHUNK_SIZE) hasMore = false;
       }
@@ -345,7 +382,6 @@ export default function AnalysisPage() {
       }
 
       for (const [id, data] of Object.entries(globalDisciplineStats)) {
-        // CORRECCIÓN CRÍTICA: Se añade "/" a la regex de reemplazo para evitar segmentos impares en la ruta del documento
         const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
         await setDoc(doc(db, 'taxonomy_disciplines', safeId), {
           ...data, id: safeId, name: id, updatedAt: buildMetadata.build_timestamp
@@ -378,11 +414,11 @@ export default function AnalysisPage() {
         await batch.commit();
       }
 
-      toast({ title: "Sincronización Exitosa", description: "Universo normalizado y expedientes vinculados." });
+      toast({ title: "Sincronización Exitosa", description: "Universo normalizado correctamente." });
       fetchOrders('initial');
     } catch (e: any) {
       console.error(e);
-      toast({ variant: "destructive", title: "Error en Sincronización", description: e.message });
+      toast({ variant: "destructive", title: "Error", description: e.message });
     } finally {
       setIsSyncing(false);
       setSyncStep('');
@@ -400,14 +436,23 @@ export default function AnalysisPage() {
             <SidebarTrigger />
             <h1 className="text-xl font-headline font-bold text-slate-800 uppercase">Consola de Control de Universo</h1>
           </div>
-          <Button 
-            onClick={handleDeepSyncAndBackfill} 
-            disabled={isSyncing}
-            className="bg-primary hover:bg-primary/90 rounded-xl gap-2 h-10 px-6 shadow-lg"
-          >
-            {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-            Sincronizar Hitos (Purge & Rebuild)
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button 
+              onClick={() => setIsAddingNew(true)} 
+              variant="outline"
+              className="rounded-xl gap-2 h-10 border-primary/20 text-primary hover:bg-primary/5"
+            >
+              <Plus className="h-4 w-4" /> Nuevo Registro
+            </Button>
+            <Button 
+              onClick={handleDeepSyncAndBackfill} 
+              disabled={isSyncing}
+              className="bg-primary hover:bg-primary/90 rounded-xl gap-2 h-10 px-6 shadow-lg"
+            >
+              {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              Sincronizar Universo
+            </Button>
+          </div>
         </header>
 
         <main className="p-8 space-y-8">
@@ -415,7 +460,7 @@ export default function AnalysisPage() {
             <Card className="p-8 border-none shadow-xl bg-slate-900 text-white space-y-6">
               <div className="flex justify-between items-end">
                 <div className="space-y-1">
-                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Protocolo Forense Activo</p>
+                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Procesando Base de Datos</p>
                   <h3 className="text-2xl font-bold uppercase">{syncStep}</h3>
                 </div>
                 <span className="text-4xl font-black text-accent">{syncProgress}%</span>
@@ -426,36 +471,33 @@ export default function AnalysisPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-primary">
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Universo Base (Orders)</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Registros Totales</p>
               <h2 className="text-3xl font-black">{(globalAgg?.totalOrders || 0).toLocaleString()}</h2>
             </Card>
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-emerald-500">
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impacto Global Acumulado</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impacto Financiero</p>
               <h2 className="text-3xl font-black">${(Number(globalAgg?.totalImpact || 0) / 1000000).toFixed(1)}M</h2>
             </Card>
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-accent">
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estatus de Analítica</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estatus del Sistema</p>
               <div className="flex items-center gap-2 text-emerald-600 font-bold uppercase text-xs">
-                <ShieldCheck className="h-4 w-4" /> SSOT 4.6 Case-Normalized Active
+                <ShieldCheck className="h-4 w-4" /> Operativo y Sincronizado
               </div>
             </Card>
           </div>
 
-          {/* TABLA DE GESTIÓN DE REGISTROS */}
           <Card className="border-none shadow-xl bg-white rounded-[2rem] overflow-hidden">
             <CardHeader className="bg-slate-50/50 border-b p-8">
               <div className="flex justify-between items-center">
                 <div>
                   <CardTitle className="text-sm font-black uppercase text-slate-800 tracking-widest flex items-center gap-3">
-                    <Database className="h-5 w-5 text-primary" /> Gestión del Dataset
+                    <Database className="h-5 w-5 text-primary" /> Explorador de Universo
                   </CardTitle>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Explora, edita o audita registros individuales del universo</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Administración de registros y auditoría individual</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => fetchOrders('initial')} className="rounded-xl h-9 px-4 gap-2">
-                    <RefreshCcw className="h-3.5 w-3.5" /> Refrescar
-                  </Button>
-                </div>
+                <Button variant="outline" size="sm" onClick={() => fetchOrders('initial')} className="rounded-xl h-9 px-4 gap-2">
+                  <RefreshCcw className="h-3.5 w-3.5" /> Refrescar
+                </Button>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -464,7 +506,7 @@ export default function AnalysisPage() {
                   <TableRow>
                     <TableHead className="text-[10px] font-black uppercase pl-8">PID / Proyecto</TableHead>
                     <TableHead className="text-[10px] font-black uppercase">Formato</TableHead>
-                    <TableHead className="text-[10px] font-black uppercase">Disciplina (IA)</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase">Disciplina</TableHead>
                     <TableHead className="text-[10px] font-black uppercase">Monto</TableHead>
                     <TableHead className="text-[10px] font-black uppercase text-right pr-8">Acciones</TableHead>
                   </TableRow>
@@ -474,6 +516,12 @@ export default function AnalysisPage() {
                     <TableRow>
                       <TableCell colSpan={5} className="h-40 text-center">
                         <Loader2 className="h-8 w-8 animate-spin text-slate-200 mx-auto" />
+                      </TableCell>
+                    </TableRow>
+                  ) : orders.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-40 text-center text-slate-400 uppercase font-bold text-xs">
+                        No hay registros disponibles. Inicia una sincronización o carga datos.
                       </TableCell>
                     </TableRow>
                   ) : orders.map((order) => (
@@ -502,6 +550,7 @@ export default function AnalysisPage() {
                             variant="ghost" 
                             size="icon" 
                             className="h-8 w-8 text-primary hover:bg-primary/5"
+                            title="Procesar con IA"
                             onClick={() => handleProcessAI(order)}
                             disabled={isProcessingAI === order.id}
                           >
@@ -531,7 +580,7 @@ export default function AnalysisPage() {
               </Table>
               
               <div className="p-6 border-t bg-slate-50/30 flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase">Página {currentPage} • Mostrando {orders.length} registros</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Página {currentPage} • {orders.length} registros en vista</p>
                 <div className="flex gap-2">
                   <Button 
                     variant="outline" 
@@ -558,7 +607,84 @@ export default function AnalysisPage() {
         </main>
       </SidebarInset>
 
-      {/* DIÁLOGO DE EDICIÓN */}
+      {/* DIÁLOGO: NUEVA ORDEN */}
+      <Dialog open={isAddingNew} onOpenChange={setIsAddingNew}>
+        <DialogContent className="sm:max-w-[500px] rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-headline font-bold uppercase">Nuevo Registro de Obra</DialogTitle>
+            <DialogDescription className="text-xs uppercase font-bold text-slate-400">Ingresa manualmente los datos de la orden</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-6 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="new-pid" className="text-[10px] font-black uppercase text-slate-400">Folio / PID</Label>
+                <Input 
+                  id="new-pid" 
+                  value={newOrder.projectId} 
+                  onChange={(e) => setNewOrder({...newOrder, projectId: e.target.value})}
+                  className="rounded-xl font-bold"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-format" className="text-[10px] font-black uppercase text-slate-400">Formato</Label>
+                <Input 
+                  id="new-format" 
+                  value={newOrder.format} 
+                  onChange={(e) => setNewOrder({...newOrder, format: e.target.value})}
+                  className="rounded-xl font-bold"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-name" className="text-[10px] font-black uppercase text-slate-400">Nombre del Proyecto</Label>
+              <Input 
+                id="new-name" 
+                value={newOrder.projectName} 
+                onChange={(e) => setNewOrder({...newOrder, projectName: e.target.value})}
+                className="rounded-xl font-bold"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="new-impact" className="text-[10px] font-black uppercase text-slate-400">Monto Impacto</Label>
+                <Input 
+                  id="new-impact" 
+                  type="number"
+                  value={newOrder.impactoNeto} 
+                  onChange={(e) => setNewOrder({...newOrder, impactoNeto: Number(e.target.value)})}
+                  className="rounded-xl font-bold font-mono"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-discipline" className="text-[10px] font-black uppercase text-slate-400">Disciplina</Label>
+                <Input 
+                  id="new-discipline" 
+                  value={newOrder.disciplina_normalizada} 
+                  onChange={(e) => setNewOrder({...newOrder, disciplina_normalizada: e.target.value})}
+                  className="rounded-xl font-bold"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-desc" className="text-[10px] font-black uppercase text-slate-400">Descripción</Label>
+              <Input 
+                id="new-desc" 
+                value={newOrder.descripcion} 
+                onChange={(e) => setNewOrder({...newOrder, descripcion: e.target.value})}
+                className="rounded-xl text-sm italic text-slate-600 bg-slate-50"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsAddingNew(false)} className="rounded-xl uppercase text-[10px] font-black">Cancelar</Button>
+            <Button onClick={handleAddOrder} className="bg-primary rounded-xl uppercase text-[10px] font-black gap-2 h-11 px-8">
+              <Save className="h-4 w-4" /> Guardar Registro
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIÁLOGO: EDICIÓN */}
       <Dialog open={!!editingOrder} onOpenChange={(open) => !open && setEditingOrder(null)}>
         <DialogContent className="sm:max-w-[500px] rounded-3xl">
           <DialogHeader>
@@ -602,7 +728,7 @@ export default function AnalysisPage() {
                 id="desc" 
                 value={editingOrder?.descripcion || ''} 
                 onChange={(e) => setEditingOrder({...editingOrder, descripcion: e.target.value})}
-                className="rounded-xl text-xs italic text-slate-600 bg-slate-50"
+                className="rounded-xl text-sm italic text-slate-600 bg-slate-50"
               />
             </div>
           </div>
@@ -615,7 +741,7 @@ export default function AnalysisPage() {
         </DialogContent>
       </Dialog>
 
-      {/* DIÁLOGO DE BORRADO */}
+      {/* DIÁLOGO: BORRADO */}
       <AlertDialog open={!!orderToDelete} onOpenChange={(open) => !open && setOrderToDelete(null)}>
         <AlertDialogContent className="rounded-3xl border-rose-100">
           <AlertDialogHeader>

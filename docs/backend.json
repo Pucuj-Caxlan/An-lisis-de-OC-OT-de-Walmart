@@ -1,4 +1,3 @@
-
 {
   "entities": {
     "Order": {
@@ -17,7 +16,9 @@
         "projectName": { "type": "string" },
         "impactoNeto": { "type": "number" },
         "disciplina_normalizada": { "type": "string" },
-        "classification_status": { "type": "string" }
+        "classification_status": { "type": "string", "enum": ["manual", "auto", "pending"] },
+        "descripcion": { "type": "string" },
+        "processedAt": { "type": "string", "format": "date-time" }
       }
     },
     "HitosAnalytics": {
@@ -46,6 +47,8 @@
     "/taxonomy_formats/{formatId}": { "schema": "object", "description": "Catálogo de formatos" },
     "/taxonomy_coordinators/{coordId}": { "schema": "object", "description": "Catálogo de coordinadores" },
     "/taxonomy_stages/{stageId}": { "schema": "object", "description": "Catálogo de etapas del proyecto" },
-    "/taxonomy_plans/{planId}": { "schema": "object", "description": "Catálogo de planes" }
+    "/taxonomy_plans/{planId}": { "schema": "object", "description": "Catálogo de planes" },
+    "/taxonomy_disciplines/{discId}": { "schema": "object", "description": "Catálogo de disciplinas" },
+    "/audits/{auditId}": { "schema": "object", "description": "Historial de auditorías de anomalías" }
   }
 }
