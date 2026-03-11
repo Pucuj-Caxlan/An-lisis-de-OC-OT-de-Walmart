@@ -17,7 +17,10 @@ import {
   ChevronRight,
   Database,
   AlertTriangle,
-  Save
+  Save,
+  Search,
+  CheckCircle2,
+  XCircle
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useUser, useDoc } from '@/firebase';
@@ -38,7 +41,8 @@ import {
   deleteDoc,
   updateDoc,
   limitToLast,
-  serverTimestamp
+  serverTimestamp,
+  where
 } from 'firebase/firestore';
 import { 
   normalizeFormatName, 
@@ -79,7 +83,7 @@ import { Label } from '@/components/ui/label';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { Badge } from '@/components/ui/badge';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 15;
 
 // Helper para introducir retardos entre lotes
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -99,6 +103,7 @@ export default function AnalysisPage() {
   const [lastDoc, setLastDoc] = useState<any>(null);
   const [firstDoc, setFirstDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   
   // Estados para Edición y Borrado
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -126,12 +131,19 @@ export default function AnalysisPage() {
     if (!db) return;
     setIsLoadingOrders(true);
     try {
-      let q = query(collection(db, 'orders'), orderBy('processedAt', 'desc'), limit(PAGE_SIZE));
+      // Obtenemos el total de registros una sola vez
+      if (direction === 'initial') {
+        const countSnap = await getCountFromServer(collection(db, 'orders'));
+        setTotalCount(countSnap.data().count);
+      }
+
+      // Usamos 'projectId' para el ordenamiento ya que es un campo que seguro existe
+      let q = query(collection(db, 'orders'), orderBy('projectId', 'asc'), limit(PAGE_SIZE));
       
       if (direction === 'next' && lastDoc) {
-        q = query(collection(db, 'orders'), orderBy('processedAt', 'desc'), startAfter(lastDoc), limit(PAGE_SIZE));
+        q = query(collection(db, 'orders'), orderBy('projectId', 'asc'), startAfter(lastDoc), limit(PAGE_SIZE));
       } else if (direction === 'prev' && firstDoc) {
-        q = query(collection(db, 'orders'), orderBy('processedAt', 'desc'), endBefore(firstDoc), limitToLast(PAGE_SIZE));
+        q = query(collection(db, 'orders'), orderBy('projectId', 'asc'), endBefore(firstDoc), limitToLast(PAGE_SIZE));
       }
 
       const snap = await getDocs(q);
@@ -144,16 +156,23 @@ export default function AnalysisPage() {
       } else if (direction === 'initial') {
         setOrders([]);
       }
-    } catch (e) {
-      // Error manejado silenciosamente
+    } catch (e: any) {
+      console.error("Error fetching orders:", e);
+      toast({
+        variant: "destructive",
+        title: "Error al cargar datos",
+        description: "Asegúrate de que los índices de Firestore estén listos. " + e.message
+      });
     } finally {
       setIsLoadingOrders(false);
     }
-  }, [db, lastDoc, firstDoc]);
+  }, [db, lastDoc, firstDoc, toast]);
 
   useEffect(() => {
-    if (db && mounted) fetchOrders();
-  }, [db, mounted, fetchOrders]);
+    if (db && mounted) {
+      fetchOrders('initial');
+    }
+  }, [db, mounted]); // Quitamos fetchOrders de las dependencias para evitar bucles si no es estable
 
   // --- Acciones Individuales ---
   const handleAddOrder = async () => {
@@ -201,7 +220,16 @@ export default function AnalysisPage() {
       });
 
       toast({ title: "Auditoría IA Exitosa", description: `Registro ${order.projectId} reclasificado.` });
-      fetchOrders();
+      
+      // Actualizar el estado local
+      setOrders(prev => prev.map(o => o.id === order.id ? { 
+        ...o, 
+        semanticAnalysis: result, 
+        disciplina_normalizada: result.disciplina_normalizada.toUpperCase().trim(),
+        causa_raiz_normalizada: result.causa_raiz_normalizada,
+        classification_status: 'auto'
+      } : o));
+
     } catch (e: any) {
       toast({ variant: "destructive", title: "Fallo en IA", description: e.message });
     } finally {
@@ -215,7 +243,7 @@ export default function AnalysisPage() {
       await deleteDoc(doc(db, 'orders', orderToDelete));
       toast({ title: "Registro eliminado", description: "El registro ha sido borrado del sistema." });
       setOrderToDelete(null);
-      fetchOrders();
+      fetchOrders('initial');
     } catch (e: any) {
       errorEmitter.emit('permission-error', new FirestorePermissionError({
         path: `orders/${orderToDelete}`,
@@ -237,17 +265,17 @@ export default function AnalysisPage() {
       await updateDoc(doc(db, 'orders', id), data);
       toast({ title: "Cambios guardados", description: `Registro ${data.projectId} actualizado.` });
       setEditingOrder(null);
-      fetchOrders();
+      fetchOrders('initial');
     } catch (e: any) {
       toast({ variant: "destructive", title: "Error al editar", description: e.message });
     }
   };
 
-  // --- Lógica de Sincronización Masiva Mejorada ---
+  // --- Lógica de Sincronización Masiva ---
   const purgeCollectionCompletely = async (db: Firestore, collPath: string) => {
     let hasMore = true;
     while (hasMore) {
-      const snap = await getDocs(query(collection(db, collPath), limit(200))); // Lotes más pequeños
+      const snap = await getDocs(query(collection(db, collPath), limit(100)));
       if (snap.empty) {
         hasMore = false;
         break;
@@ -260,8 +288,8 @@ export default function AnalysisPage() {
           operation: 'delete'
         }));
       });
-      await sleep(100); // Pequeña pausa entre borrados
-      if (snap.size < 200) hasMore = false;
+      await sleep(200); 
+      if (snap.size < 100) hasMore = false;
     }
   };
 
@@ -271,7 +299,7 @@ export default function AnalysisPage() {
     setSyncProgress(0);
 
     try {
-      setSyncStep('Validando Universo Base (orders)...');
+      setSyncStep('Validando Universo Base...');
       const totalSnapshot = await getCountFromServer(collection(db, 'orders'));
       const totalCount = totalSnapshot.data().count;
 
@@ -292,13 +320,13 @@ export default function AnalysisPage() {
       let processed = 0;
       let lastVisible = null;
       let hasMore = true;
-      const CHUNK_SIZE = 250; // Reducido para evitar saturación
+      const CHUNK_SIZE = 150; 
 
       const buildMetadata = {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '5.1.0-throttled-sync'
+        build_version: '6.0.0-resilient'
       };
 
       const globalFormatStats: Record<string, any> = {};
@@ -327,11 +355,12 @@ export default function AnalysisPage() {
           const stage = normalizeStage(data.etapa || data.etapa_proyecto_normalizada);
           const plan = normalizePlan(data.plan || data.plan_nombre_normalizado);
           
-          const date = new Date(data.fecha_oc_ot || data.fechaSolicitud || data.processedAt || new Date().toISOString());
+          const dateStr = data.fecha_oc_ot || data.fechaSolicitud || data.processedAt || new Date().toISOString();
+          const date = new Date(dateStr);
           const year = isNaN(date.getFullYear()) ? 2024 : date.getFullYear();
           const month = isNaN(date.getMonth()) ? 1 : date.getMonth() + 1;
 
-          // Actualizar el documento original
+          // Actualizar el documento original para que los filtros funcionen
           batch.update(doc(db, 'orders', d.id), {
             format_normalized: format,
             coordinador_normalizado: coord,
@@ -370,7 +399,7 @@ export default function AnalysisPage() {
         setSyncProgress(Math.round((processed / Math.max(1, totalCount)) * 100));
         lastVisible = snap.docs[snap.docs.length - 1];
         
-        await sleep(200); // Pausa táctica para evitar 'backoff delay'
+        await sleep(300); // Pausa más larga para seguridad
         if (snap.size < CHUNK_SIZE) hasMore = false;
       }
 
@@ -383,23 +412,14 @@ export default function AnalysisPage() {
         totalProcessed: processed
       });
 
-      // Guardar taxonomías con pequeñas pausas
+      // Guardar taxonomías
       for (const [id, data] of Object.entries(globalFormatStats)) {
-        await setDoc(doc(db, 'taxonomy_formats', id), {
-          ...data, id, name: id, updatedAt: buildMetadata.build_timestamp
-        });
+        await setDoc(doc(db, 'taxonomy_formats', id), { ...data, id, name: id });
       }
-      await sleep(100);
-
       for (const [id, data] of Object.entries(globalDisciplineStats)) {
         const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        await setDoc(doc(db, 'taxonomy_disciplines', safeId), {
-          ...data, id: safeId, name: id, updatedAt: buildMetadata.build_timestamp
-        });
+        await setDoc(doc(db, 'taxonomy_disciplines', safeId), { ...data, id: safeId, name: id });
       }
-      await sleep(100);
-
-      // Guardar otros catálogos...
       for (const coord of Array.from(coordinators)) {
         const safeId = coord.replace(/[\/\s\.]+/g, '_').substring(0, 100);
         await setDoc(doc(db, 'taxonomy_coordinators', safeId), { id: safeId, name: coord });
@@ -415,28 +435,26 @@ export default function AnalysisPage() {
 
       setSyncStep('Finalizando Agregados...');
       const hitosEntries = Object.entries(hitosAgg);
-      for (let i = 0; i < hitosEntries.length; i += 250) {
-        const chunk = hitosEntries.slice(i, i + 250);
+      for (let i = 0; i < hitosEntries.length; i += 200) {
+        const chunk = hitosEntries.slice(i, i + 200);
         const batch = writeBatch(db);
         chunk.forEach(([key, val]) => {
           batch.set(doc(db, 'hitos_analytics', key), { ...val, lastUpdate: buildMetadata.build_timestamp });
         });
         await batch.commit();
-        await sleep(150);
+        await sleep(200);
       }
 
-      toast({ title: "Sincronización Exitosa", description: "Universo normalizado correctamente." });
+      toast({ title: "Sincronización Exitosa", description: "El universo ha sido normalizado y los filtros ya son funcionales." });
       fetchOrders('initial');
     } catch (e: any) {
       console.error(e);
-      toast({ variant: "destructive", title: "Error", description: e.message });
+      toast({ variant: "destructive", title: "Error en sincronización", description: e.message });
     } finally {
       setIsSyncing(false);
       setSyncStep('');
     }
   };
-
-  if (!mounted) return null;
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50/30">
@@ -483,16 +501,16 @@ export default function AnalysisPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-primary">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Registros Totales</p>
-              <h2 className="text-3xl font-black">{(globalAgg?.totalOrders || 0).toLocaleString()}</h2>
+              <h2 className="text-3xl font-black">{(totalCount || 0).toLocaleString()}</h2>
             </Card>
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-emerald-500">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impacto Financiero</p>
               <h2 className="text-3xl font-black">${(Number(globalAgg?.totalImpact || 0) / 1000000).toFixed(1)}M</h2>
             </Card>
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-accent">
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estatus del Sistema</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estado de Salud</p>
               <div className="flex items-center gap-2 text-emerald-600 font-bold uppercase text-xs">
-                <ShieldCheck className="h-4 w-4" /> Operativo y Sincronizado
+                <ShieldCheck className="h-4 w-4" /> Activo y Monitoreado
               </div>
             </Card>
           </div>
@@ -504,10 +522,10 @@ export default function AnalysisPage() {
                   <CardTitle className="text-sm font-black uppercase text-slate-800 tracking-widest flex items-center gap-3">
                     <Database className="h-5 w-5 text-primary" /> Explorador de Universo
                   </CardTitle>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Administración de registros y auditoría individual</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Gestión de base de datos maestra</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => fetchOrders('initial')} className="rounded-xl h-9 px-4 gap-2">
-                  <RefreshCcw className="h-3.5 w-3.5" /> Refrescar
+                  <RefreshCcw className="h-3.5 w-3.5" /> Recargar
                 </Button>
               </div>
             </CardHeader>
@@ -532,15 +550,15 @@ export default function AnalysisPage() {
                   ) : orders.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="h-40 text-center text-slate-400 uppercase font-bold text-xs">
-                        No hay registros disponibles. Inicia una sincronización o carga datos.
+                        No se encontraron registros. Intenta "Sincronizar Universo".
                       </TableCell>
                     </TableRow>
                   ) : orders.map((order) => (
-                    <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors">
+                    <TableRow key={order.id} className="hover:bg-slate-50/50 transition-colors border-b last:border-0">
                       <TableCell className="pl-8 py-4">
                         <div className="space-y-0.5">
                           <p className="text-xs font-black text-slate-800">{order.projectId}</p>
-                          <p className="text-[10px] text-slate-400 uppercase truncate max-w-[200px]">{order.projectName || 'Sin Nombre'}</p>
+                          <p className="text-[10px] text-slate-400 uppercase truncate max-w-[200px]">{order.projectName || 'N/A'}</p>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -561,7 +579,7 @@ export default function AnalysisPage() {
                             variant="ghost" 
                             size="icon" 
                             className="h-8 w-8 text-primary hover:bg-primary/5"
-                            title="Procesar con IA"
+                            title="Auditoría IA"
                             onClick={() => handleProcessAI(order)}
                             disabled={isProcessingAI === order.id}
                           >
@@ -591,7 +609,7 @@ export default function AnalysisPage() {
               </Table>
               
               <div className="p-6 border-t bg-slate-50/30 flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase">Página {currentPage} • {orders.length} registros en vista</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Página {currentPage} • {orders.length} registros mostrados</p>
                 <div className="flex gap-2">
                   <Button 
                     variant="outline" 
@@ -618,7 +636,75 @@ export default function AnalysisPage() {
         </main>
       </SidebarInset>
 
-      {/* DIÁLOGOS OMITIDOS POR BREVEDAD, PERMANECEN IGUAL */}
+      {/* Modals para Edición, Creación y Borrado */}
+      <Dialog open={isAddingNew} onOpenChange={setIsAddingNew}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Añadir Nuevo Registro</DialogTitle>
+            <DialogDescription>Completa la información para crear una nueva orden de cambio manual.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="pid" className="text-right">PID</Label>
+              <Input id="pid" className="col-span-3" value={newOrder.projectId} onChange={(e) => setNewOrder({...newOrder, projectId: e.target.value})} />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="monto" className="text-right">Monto</Label>
+              <Input id="monto" type="number" className="col-span-3" value={newOrder.impactoNeto} onChange={(e) => setNewOrder({...newOrder, impactoNeto: parseFloat(e.target.value)})} />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="desc" className="text-right">Descripción</Label>
+              <Input id="desc" className="col-span-3" value={newOrder.descripcion} onChange={(e) => setNewOrder({...newOrder, descripcion: e.target.value})} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddingNew(false)}>Cancelar</Button>
+            <Button onClick={handleAddOrder}>Crear Registro</Button>
+          </DialogFooter>
+        </Dialog>
+      </Dialog>
+
+      <Dialog open={!!editingOrder} onOpenChange={() => setEditingOrder(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Editar Registro</DialogTitle>
+            <DialogDescription>Modifica los datos del registro seleccionado.</DialogDescription>
+          </DialogHeader>
+          {editingOrder && (
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edit-pid" className="text-right">PID</Label>
+                <Input id="edit-pid" className="col-span-3" value={editingOrder.projectId} onChange={(e) => setEditingOrder({...editingOrder, projectId: e.target.value})} />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edit-monto" className="text-right">Monto</Label>
+                <Input id="edit-monto" type="number" className="col-span-3" value={editingOrder.impactoNeto} onChange={(e) => setEditingOrder({...editingOrder, impactoNeto: parseFloat(e.target.value)})} />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edit-disc" className="text-right">Disciplina</Label>
+                <Input id="edit-disc" className="col-span-3" value={editingOrder.disciplina_normalizada} onChange={(e) => setEditingOrder({...editingOrder, disciplina_normalizada: e.target.value})} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingOrder(null)}>Cancelar</Button>
+            <Button onClick={handleUpdate}>Guardar Cambios</Button>
+          </DialogFooter>
+        </Dialog>
+      </Dialog>
+
+      <AlertDialog open={!!orderToDelete} onOpenChange={() => setOrderToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Confirmas la eliminación?</AlertDialogTitle>
+            <div className="text-sm text-slate-500">Esta acción no se puede deshacer y el registro se borrará permanentemente de la base de datos.</div>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={handleDelete}>Eliminar Registro</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
