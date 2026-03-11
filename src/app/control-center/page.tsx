@@ -30,7 +30,8 @@ import {
   BrainCircuit,
   FileDown,
   Loader2,
-  ChevronRight
+  ChevronRight,
+  RefreshCcw
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -96,10 +97,15 @@ export default function ControlCenterPage() {
   const [mounted, setMounted] = useState(false);
   const [activeSection, setActiveSection] = useState('intro');
   
-  // Filtros
+  // Filtros "Committed" (Los que afectan la data real)
   const [yearFilter, setYearFilter] = useState('2024');
   const [formatFilter, setFormatFilter] = useState('all');
   const [planFilter, setPlanFilter] = useState('all');
+
+  // Filtros "Pending" (Los que el usuario mueve en los selectores antes de darle Actualizar)
+  const [pendingYear, setPendingYear] = useState('2024');
+  const [pendingFormat, setPendingFormat] = useState('all');
+  const [pendingPlan, setPendingPlan] = useState('all');
 
   // IA & Export
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -127,7 +133,19 @@ export default function ControlCenterPage() {
     return q;
   }, [db, yearFilter]);
 
-  const { data: analyticsEntries } = useCollection(analyticsQuery);
+  const { data: analyticsEntries, isLoading: isLoadingAnalytics } = useCollection(analyticsQuery);
+
+  const handleApplyFilters = () => {
+    setYearFilter(pendingYear);
+    setFormatFilter(pendingFormat);
+    setPlanFilter(pendingPlan);
+    setAiMitigation(null); // Reset IA analysis when data changes
+    toast({ 
+      title: "Presentación Actualizada", 
+      description: "Los datos forenses se han sincronizado con los nuevos criterios.",
+      duration: 3000
+    });
+  };
 
   const stats = useMemo(() => {
     if (!analyticsEntries) return null;
@@ -205,7 +223,7 @@ export default function ControlCenterPage() {
     try {
       const result = await analyzeStrategicTrends({
         monthlyData: stats.trendData.map(t => ({ month: t.month, impact: t.impact, count: 0 })),
-        years: [Number(yearFilter)],
+        years: yearFilter === 'all' ? [2023, 2024, 2025] : [Number(yearFilter)],
         totalImpact: stats.totalImpact,
         rootCauseSummary: stats.paretoDiscs.map(p => ({ 
           cause: p.name, 
@@ -272,11 +290,12 @@ export default function ControlCenterPage() {
             {/* FILTROS MULTIDIMENSIONALES */}
             <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
               <CalendarDays className="h-3.5 w-3.5 text-slate-400 ml-2" />
-              <Select value={yearFilter} onValueChange={setYearFilter}>
-                <SelectTrigger className="h-8 w-24 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
+              <Select value={pendingYear} onValueChange={setPendingYear}>
+                <SelectTrigger className="h-8 w-36 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
                   <SelectValue placeholder="Año" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="all">TODOS LOS AÑOS</SelectItem>
                   <SelectItem value="2023">2023</SelectItem>
                   <SelectItem value="2024">2024</SelectItem>
                   <SelectItem value="2025">2025</SelectItem>
@@ -286,7 +305,7 @@ export default function ControlCenterPage() {
 
             <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
               <Target className="h-3.5 w-3.5 text-slate-400 ml-2" />
-              <Select value={planFilter} onValueChange={setPlanFilter}>
+              <Select value={pendingPlan} onValueChange={setPendingPlan}>
                 <SelectTrigger className="h-8 w-32 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
                   <SelectValue placeholder="Plan" />
                 </SelectTrigger>
@@ -301,7 +320,7 @@ export default function ControlCenterPage() {
 
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
               <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
-              <Select value={formatFilter} onValueChange={setFormatFilter}>
+              <Select value={pendingFormat} onValueChange={setPendingFormat}>
                 <SelectTrigger className="h-8 w-40 bg-white border-none text-[10px] font-black uppercase shadow-sm">
                   <SelectValue placeholder="Formato" />
                 </SelectTrigger>
@@ -313,6 +332,15 @@ export default function ControlCenterPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <Button 
+              onClick={handleApplyFilters}
+              disabled={isLoadingAnalytics}
+              className="bg-primary hover:bg-primary/90 text-white rounded-xl gap-2 h-10 px-6 text-[10px] font-black uppercase shadow-lg shadow-primary/20 transition-all active:scale-95"
+            >
+              <RefreshCcw className={`h-3.5 w-3.5 ${isLoadingAnalytics ? 'animate-spin' : ''}`} />
+              Actualizar Presentación
+            </Button>
 
             <Separator orientation="vertical" className="h-8 mx-2" />
             
@@ -379,7 +407,7 @@ export default function ControlCenterPage() {
             <div className="flex justify-between items-end border-b pb-8">
               <div className="space-y-2">
                 <h3 className="text-4xl font-headline font-bold text-slate-800">Universo de Inversión</h3>
-                <p className="text-slate-500 font-medium uppercase text-xs tracking-widest">Base de datos maestra auditada • Filtros: {yearFilter} | {planFilter} | {formatFilter}</p>
+                <p className="text-slate-500 font-medium uppercase text-xs tracking-widest">Base de datos maestra auditada • Filtros: {yearFilter === 'all' ? 'Histórico Total' : yearFilter} | {planFilter === 'all' ? 'Global' : planFilter} | {formatFilter === 'all' ? 'Multiformato' : formatFilter}</p>
               </div>
               <div className="text-right">
                 <p className="text-[10px] font-black text-primary uppercase tracking-widest">Monto de Desviaciones Auditadas</p>
@@ -513,7 +541,7 @@ export default function ControlCenterPage() {
             <div className="text-center space-y-4 max-w-3xl mx-auto">
               <Badge className="bg-emerald-500 text-white rounded-md px-4 py-1 text-xs font-black uppercase tracking-[0.2em]">Decision Dashboard</Badge>
               <h2 className="text-6xl font-headline font-bold leading-none text-slate-900 tracking-tight">Hoja de Ruta Estratégica</h2>
-              <p className="text-xl text-slate-500 italic">Acciones para la contención de desviaciones en el presupuesto {yearFilter}.</p>
+              <p className="text-xl text-slate-500 italic">Acciones para la contención de desviaciones en el presupuesto {yearFilter === 'all' ? 'Histórico' : yearFilter}.</p>
             </div>
 
             <div className="grid grid-cols-1 gap-6">
@@ -549,7 +577,7 @@ export default function ControlCenterPage() {
             <div className="bg-slate-900 p-12 rounded-[4rem] flex flex-col md:flex-row items-center justify-between gap-8 shadow-2xl relative overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-transparent pointer-events-none" />
               <div className="space-y-2 relative z-10">
-                <h5 className="text-3xl font-black text-white uppercase tracking-tighter italic">Potencial de Ahorro {yearFilter}</h5>
+                <h5 className="text-3xl font-black text-white uppercase tracking-tighter italic">Potencial de Ahorro {yearFilter === 'all' ? 'Proyectado' : yearFilter}</h5>
                 <p className="text-slate-400 font-medium max-w-xl">Si se ejecutan los planes de mitigación sobre el Vital Few (Top 80%), la reducción proyectada de variabilidad es de:</p>
               </div>
               <div className="text-right flex items-baseline gap-4 relative z-10">
