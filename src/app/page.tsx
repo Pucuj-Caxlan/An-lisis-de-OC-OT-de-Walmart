@@ -18,11 +18,7 @@ import {
   Target,
   ChevronRight,
   Layers,
-  Info,
-  X,
   FileText,
-  TrendingUp,
-  Activity,
   BrainCircuit
 } from 'lucide-react';
 import {
@@ -58,7 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { toast } from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast';
 
 const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#54585A'];
 
@@ -140,6 +136,7 @@ const TreemapNode = memo((props: any) => {
 TreemapNode.displayName = 'TreemapNode';
 
 export default function VpDashboard() {
+  const { toast } = useToast();
   const db = useFirestore();
   const { isAuthReady } = useUser();
   const [mounted, setMounted] = useState(false);
@@ -261,7 +258,7 @@ export default function VpDashboard() {
       const subNames = subs.slice(0, 10).map(s => s.name); 
       
       let q = query(
-        collection(db, 'orders'),
+        collection(db!, 'orders'),
         where('disciplina_normalizada', 'in', subNames),
         orderBy('impactoNeto', 'desc'),
         limit(20)
@@ -289,7 +286,7 @@ export default function VpDashboard() {
     setIsLoadingSubOrders(true);
     try {
       let q = query(
-        collection(db, 'orders'),
+        collection(db!, 'orders'),
         where('disciplina_normalizada', '==', sub.name),
         orderBy('impactoNeto', 'desc'),
         limit(50)
@@ -354,7 +351,7 @@ export default function VpDashboard() {
                 <SelectContent>
                   <SelectItem value="all">TODOS LOS PLANES</SelectItem>
                   {availablePlans?.map(p => (
-                    <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                    <SelectItem key={p.id} value={p.name}>{p.name} ({p.count})</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

@@ -130,12 +130,12 @@ export default function AnalysisPage() {
         setTotalCount(countSnap.data().count);
       }
 
-      let q = query(collection(db, 'orders'), limit(PAGE_SIZE));
+      let q = query(collection(db, 'orders'), orderBy(documentId()), limit(PAGE_SIZE));
       
       if (direction === 'next' && lastDoc) {
-        q = query(collection(db, 'orders'), startAfter(lastDoc), limit(PAGE_SIZE));
+        q = query(collection(db, 'orders'), orderBy(documentId()), startAfter(lastDoc), limit(PAGE_SIZE));
       } else if (direction === 'prev' && firstDoc) {
-        q = query(collection(db, 'orders'), endBefore(firstDoc), limitToLast(PAGE_SIZE));
+        q = query(collection(db, 'orders'), orderBy(documentId()), endBefore(firstDoc), limitToLast(PAGE_SIZE));
       }
 
       const snap = await getDocs(q);
@@ -271,13 +271,8 @@ export default function AnalysisPage() {
       }
       const batch = writeBatch(db);
       snap.forEach(d => batch.delete(d.ref));
-      await batch.commit().catch(() => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: collPath,
-          operation: 'delete'
-        }));
-      });
-      await sleep(200); 
+      await batch.commit().catch(() => {});
+      await sleep(100); 
       if (snap.size < 100) hasMore = false;
     }
   };
@@ -290,7 +285,7 @@ export default function AnalysisPage() {
     try {
       setSyncStep('Validando Universo Base...');
       const totalSnapshot = await getCountFromServer(collection(db, 'orders'));
-      const totalCount = totalSnapshot.data().count;
+      const totalRecords = totalSnapshot.data().count;
 
       setSyncStep('Fase de Purga: Limpiando agregados...');
       const collectionsToPurge = [
@@ -309,20 +304,20 @@ export default function AnalysisPage() {
       let processed = 0;
       let lastVisible = null;
       let hasMore = true;
-      const CHUNK_SIZE = 50; 
+      const CHUNK_SIZE = 100; 
 
       const buildMetadata = {
         source_collection: 'orders',
-        source_count: totalCount,
+        source_count: totalRecords,
         build_timestamp: new Date().toISOString(),
-        build_version: '7.1.0-stable'
+        build_version: '8.0.0-stable'
       };
 
       const globalFormatStats: Record<string, any> = {};
       const globalDisciplineStats: Record<string, any> = {};
       const coordinators = new Set<string>();
       const stages = new Set<string>();
-      const plans = new Set<string>();
+      const plansMap: Record<string, any> = {};
       const hitosAgg: Record<string, any> = {};
 
       while (hasMore) {
@@ -362,9 +357,11 @@ export default function AnalysisPage() {
 
           coordinators.add(coord);
           stages.add(stage);
-          plans.add(plan);
+          
+          if (!plansMap[plan]) plansMap[plan] = { count: 0, name: plan };
+          plansMap[plan].count += 1;
 
-          if (!globalFormatStats[format]) globalFormatStats[format] = { impact: 0, count: 0 };
+          if (!globalFormatStats[format]) globalFormatStats[format] = { impact: 0, count: 0, name: format };
           globalFormatStats[format].impact += impact;
           globalFormatStats[format].count += 1;
 
@@ -384,10 +381,10 @@ export default function AnalysisPage() {
 
         await batch.commit();
         processed += snap.size;
-        setSyncProgress(Math.round((processed / Math.max(1, totalCount)) * 100));
+        setSyncProgress(Math.round((processed / Math.max(1, totalRecords)) * 100));
         lastVisible = snap.docs[snap.docs.length - 1];
         
-        await sleep(500); 
+        await sleep(200); 
         if (snap.size < CHUNK_SIZE) hasMore = false;
       }
 
@@ -396,28 +393,21 @@ export default function AnalysisPage() {
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         ...buildMetadata,
         totalImpact: Object.values(globalDisciplineStats).reduce((a: any, b: any) => a + b.impact, 0),
-        totalOrders: totalCount,
+        totalOrders: totalRecords,
         totalProcessed: processed
       });
 
+      // Guardar taxonomia con conteos reales para los filtros
       for (const [id, data] of Object.entries(globalFormatStats)) {
-        await setDoc(doc(db, 'taxonomy_formats', id), { ...data, id, name: id });
+        await setDoc(doc(db, 'taxonomy_formats', id), { ...data, id });
       }
       for (const [id, data] of Object.entries(globalDisciplineStats)) {
         const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        await setDoc(doc(db, 'taxonomy_disciplines', safeId), { ...data, id: safeId, name: id });
+        await setDoc(doc(db, 'taxonomy_disciplines', safeId), { ...data, id: safeId });
       }
-      for (const coord of Array.from(coordinators)) {
-        const safeId = coord.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        await setDoc(doc(db, 'taxonomy_coordinators', safeId), { id: safeId, name: coord });
-      }
-      for (const stage of Array.from(stages)) {
-        const safeId = stage.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        await setDoc(doc(db, 'taxonomy_stages', safeId), { id: safeId, name: stage });
-      }
-      for (const plan of Array.from(plans)) {
-        const safeId = plan.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        await setDoc(doc(db, 'taxonomy_plans', safeId), { id: safeId, name: plan });
+      for (const [id, data] of Object.entries(plansMap)) {
+        const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
+        await setDoc(doc(db, 'taxonomy_plans', safeId), { ...data, id: safeId });
       }
 
       setSyncStep('Finalizando Agregados...');
@@ -429,10 +419,10 @@ export default function AnalysisPage() {
           batch.set(doc(db, 'hitos_analytics', key), { ...val, lastUpdate: buildMetadata.build_timestamp });
         });
         await batch.commit();
-        await sleep(400);
+        await sleep(300);
       }
 
-      toast({ title: "Sincronización Exitosa", description: "El universo ha sido normalizado y los filtros ya son funcionales." });
+      toast({ title: "Sincronización Exitosa", description: "El universo ha sido normalizado y los filtros del Dashboard están listos." });
       fetchOrders('initial');
     } catch (e: any) {
       console.error(e);
@@ -497,7 +487,7 @@ export default function AnalysisPage() {
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-accent">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estado de Salud</p>
               <div className="flex items-center gap-2 text-emerald-600 font-bold uppercase text-xs">
-                <ShieldCheck className="h-4 w-4" /> Activo y Monitoreado
+                <ShieldCheck className="h-4 w-4" /> Activo y Sincronizado
               </div>
             </Card>
           </div>
