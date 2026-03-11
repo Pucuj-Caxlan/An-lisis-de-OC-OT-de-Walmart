@@ -16,7 +16,8 @@ import {
   Search,
   CalendarDays,
   Target,
-  ChevronRight
+  ChevronRight,
+  Layers
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -53,19 +54,59 @@ import { toast } from '@/hooks/use-toast';
 const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#54585A'];
 
 /**
- * MAPEO DE RAMOS (MACRO-DISCIPLINAS)
+ * Lógica de agrupación de disciplinas por Ramos (Macro-categorías)
  */
 const GET_RAMO = (discipline: string): string => {
   const d = String(discipline || '').toUpperCase().trim();
-  if (d.includes('CIVIL') || d.includes('ARQUITECT') || d.includes('EDIFICA') || d.includes('TERRACER')) return 'OBRA CIVIL';
-  if (d.includes('INGENIER') || d.includes('DISEÑO') || d.includes('PROYECTO')) return 'INGENIERÍA Y DISEÑO';
-  if (d.includes('ELECTRI') || d.includes('HIDRAU') || d.includes('SANITA') || d.includes('PCI') || d.includes('MECANIC') || d.includes('AIRE') || d.includes('GAS')) return 'INSTALACIONES (MEP)';
-  if (d.includes('REFRIG')) return 'REFRIGERACIÓN';
-  if (d.includes('EQUIPO') || d.includes('MOBILIARIO') || d.includes('COCINA')) return 'EQUIPAMIENTO';
-  if (d.includes('ADMINIST') || d.includes('GESTION') || d.includes('LEGAL')) return 'GESTIÓN Y ADMON';
+  
+  if (d.includes('CIVIL') || d.includes('ARQUITECTÓNICA') || d.includes('TERRACERÍAS') || d.includes('EDIFICACIÓN') || d.includes('OBRA GRIS')) 
+    return 'OBRA CIVIL';
+  
+  if (d.includes('INGENIERÍA') || d.includes('DISEÑO') || d.includes('ARQUITECTURA')) 
+    return 'INGENIERÍA Y DISEÑO';
+  
+  if (d.includes('ELÉCTRICA') || d.includes('HIDRÁULICA') || d.includes('AIRE') || d.includes('REFRIGERACIÓN') || d.includes('SANITARIA') || d.includes('PCI') || d.includes('VOZ') || d.includes('ESPECIALES')) 
+    return 'INSTALACIONES (MEP)';
+  
+  if (d.includes('GESTIÓN') || d.includes('ADMINISTRACIÓN') || d.includes('SUPERVISIÓN') || d.includes('GERENCIA') || d.includes('TRÁMITES') || d.includes('LICENCIAS')) 
+    return 'GESTIÓN Y ADMON';
+  
+  if (d.includes('MOBILIARIO') || d.includes('EQUIPO') || d.includes('COCINA') || d.includes('RACKS') || d.includes('SEÑALIZACIÓN')) 
+    return 'EQUIPAMIENTO';
+
   return 'OTROS';
 };
 
+/**
+ * Componente para el Tooltip del Treemap
+ */
+const CustomTooltip = ({ active, payload }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-slate-900 border border-slate-700 p-3 rounded-lg shadow-xl text-white">
+        <p className="text-[10px] font-black uppercase text-yellow-500 mb-1 tracking-widest">{data.name}</p>
+        <div className="space-y-1">
+          <div className="flex justify-between gap-4">
+            <span className="text-[10px] text-slate-400 font-bold uppercase">Impacto:</span>
+            <span className="text-xs font-black">
+              {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(data.impact)}
+            </span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-[10px] text-slate-400 font-bold uppercase">Participación:</span>
+            <span className="text-xs font-black">{data.percentage}%</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+/**
+ * Nodo personalizado para el Treemap
+ */
 const TreemapNode = memo((props: any) => {
   const { x, y, width, height, name, impact, percentage, color, onClick, formatCurrency } = props;
   if (width < 30 || height < 30) return null;
@@ -96,30 +137,6 @@ const TreemapNode = memo((props: any) => {
 });
 
 TreemapNode.displayName = 'TreemapNode';
-
-const CustomTooltip = ({ active, payload }: any) => {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    return (
-      <div className="bg-slate-900 border border-slate-700 p-3 rounded-lg shadow-xl text-white">
-        <p className="text-[10px] font-black uppercase text-yellow-500 mb-1 tracking-widest">{data.name}</p>
-        <div className="space-y-1">
-          <div className="flex justify-between gap-4">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">Impacto:</span>
-            <span className="text-xs font-black">
-              {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(data.impact)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-4">
-            <span className="text-[10px] text-slate-400 font-bold uppercase">Órdenes:</span>
-            <span className="text-xs font-black">{data.count}</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  return null;
-};
 
 export default function VpDashboard() {
   const db = useFirestore();
@@ -181,7 +198,6 @@ export default function VpDashboard() {
           const existing = ramoMap.get(ramoName);
           existing.impact += impact;
           existing.count += count;
-          // Guardamos las disciplinas hijas para el desglose posterior
           const discName = String(d.discipline).trim().toUpperCase();
           if (!existing.subs[discName]) existing.subs[discName] = { impact: 0, count: 0 };
           existing.subs[discName].impact += impact;
@@ -235,8 +251,7 @@ export default function VpDashboard() {
     })).sort((a, b) => b.impact - a.impact);
 
     try {
-      // Filtrar órdenes por las sub-disciplinas del ramo
-      const subNames = subs.slice(0, 10).map(s => s.name); // Limitamos a 10 por restricciones de 'in'
+      const subNames = subs.slice(0, 10).map(s => s.name); 
       
       let q = query(
         collection(db, 'orders'),
@@ -444,7 +459,7 @@ export default function VpDashboard() {
                 <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest mb-4 flex items-center gap-2">
                   <Search className="h-4 w-4" /> Muestra de Órdenes Críticas
                 </h4>
-                <div className="border rounded-2xl overflow-hidden">
+                <div className="border rounded-2xl overflow-hidden text-slate-900">
                   <Table>
                     <TableHeader className="bg-slate-50">
                       <TableRow>
