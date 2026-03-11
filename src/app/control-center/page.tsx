@@ -2,7 +2,6 @@
 "use client"
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,20 +17,15 @@ import {
   Search,
   Activity,
   ShieldCheck,
-  CheckCircle2,
-  ArrowUpRight,
-  Layout,
-  Layers,
-  Users,
-  Briefcase,
+  CalendarDays,
   FileBarChart,
   Filter,
-  CalendarDays,
   BrainCircuit,
   FileDown,
   Loader2,
-  ChevronRight,
-  RefreshCcw
+  RefreshCcw,
+  Layers,
+  Users
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -47,9 +41,10 @@ import {
   Scatter,
   ZAxis,
   AreaChart,
-  Area
+  Area,
+  Treemap
 } from 'recharts';
-import { useFirestore, useCollection, useMemoFirebase, useUser, useDoc } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
 import { collection, query, orderBy, where, doc } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -68,7 +63,6 @@ import { jsPDF } from 'jspdf';
 
 const CYAN_PRIMARY = "#2962FF";
 const ACCENT_ORANGE = "#FF8F00";
-const WALMART_BLUE = "#0071CE";
 
 const SECTIONS = [
   { id: 'intro', label: '1. ESTRATEGIA' },
@@ -97,12 +91,12 @@ export default function ControlCenterPage() {
   const [mounted, setMounted] = useState(false);
   const [activeSection, setActiveSection] = useState('intro');
   
-  // Filtros "Committed" (Los que afectan la data real)
+  // Filtros "Committed"
   const [yearFilter, setYearFilter] = useState('2024');
   const [formatFilter, setFormatFilter] = useState('all');
   const [planFilter, setPlanFilter] = useState('all');
 
-  // Filtros "Pending" (Los que el usuario mueve en los selectores antes de darle Actualizar)
+  // Filtros "Pending"
   const [pendingYear, setPendingYear] = useState('2024');
   const [pendingFormat, setPendingFormat] = useState('all');
   const [pendingPlan, setPendingPlan] = useState('all');
@@ -118,7 +112,6 @@ export default function ControlCenterPage() {
   const globalAggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(globalAggRef);
 
-  // Catálogos para filtros
   const formatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('name', 'asc')) : null, [db]);
   const plansQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_plans'), orderBy('name', 'asc')) : null, [db]);
   const { data: availableFormats } = useCollection(formatsQuery);
@@ -139,10 +132,10 @@ export default function ControlCenterPage() {
     setYearFilter(pendingYear);
     setFormatFilter(pendingFormat);
     setPlanFilter(pendingPlan);
-    setAiMitigation(null); // Reset IA analysis when data changes
+    setAiMitigation(null);
     toast({ 
       title: "Presentación Actualizada", 
-      description: "Los datos forenses se han sincronizado con los nuevos criterios.",
+      description: "Las 8 pestañas han sido sincronizadas con el nuevo criterio.",
       duration: 3000
     });
   };
@@ -174,9 +167,10 @@ export default function ControlCenterPage() {
         if (!formatMap[fmt].disciplines[ramo]) formatMap[fmt].disciplines[ramo] = 0;
         formatMap[fmt].disciplines[ramo] += entry.impact;
 
-        if (!disciplineMap[ramo]) disciplineMap[ramo] = { name: ramo, impact: 0, count: 0 };
+        if (!disciplineMap[ramo]) disciplineMap[ramo] = { name: ramo, impact: 0, count: 0, value: 0 };
         disciplineMap[ramo].impact += entry.impact;
         disciplineMap[ramo].count += entry.count;
+        disciplineMap[ramo].value += entry.impact;
 
         const coord = entry.coordinator || 'SIN ASIGNAR';
         if (!coordMap[coord]) coordMap[coord] = { name: coord, impact: 0, count: 0 };
@@ -198,6 +192,7 @@ export default function ControlCenterPage() {
     const coordData = Object.values(coordMap).map((c: any) => ({
       x: c.count,
       y: c.impact / 1000000,
+      z: c.impact,
       name: c.name
     }));
 
@@ -249,12 +244,12 @@ export default function ControlCenterPage() {
       const element = presentationRef.current;
       const canvas = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
       const imgData = canvas.toDataURL('image/png', 1.0);
-      const pdf = new jsPDF('l', 'mm', 'a4'); // Paisaje para presentación
+      const pdf = new jsPDF('l', 'mm', 'a4');
       const width = pdf.internal.pageSize.getWidth();
       const height = (canvas.height * width) / canvas.width;
       pdf.addImage(imgData, 'PNG', 0, 0, width, height);
       pdf.save(`Walmart_AltaDireccion_Presentacion_${new Date().getTime()}.pdf`);
-      toast({ title: "Exportación Exitosa", description: "Presentación descargada en formato PDF." });
+      toast({ title: "Exportación Exitosa", description: "Documento descargado en formato PDF (Landscape)." });
     } catch (e) {
       toast({ variant: "destructive", title: "Error al exportar" });
     } finally {
@@ -271,7 +266,7 @@ export default function ControlCenterPage() {
   if (!mounted) return null;
 
   return (
-    <div className="flex min-h-screen w-full bg-slate-50/50 text-slate-900 selection:bg-primary selection:text-white">
+    <div className="flex min-h-screen w-full bg-slate-50/50 text-slate-900">
       <AppSidebar />
       <SidebarInset>
         <header className="flex h-20 shrink-0 items-center justify-between border-b bg-white/80 backdrop-blur-xl px-8 sticky top-0 z-50 shadow-sm">
@@ -287,7 +282,6 @@ export default function ControlCenterPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* FILTROS MULTIDIMENSIONALES */}
             <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
               <CalendarDays className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={pendingYear} onValueChange={setPendingYear}>
@@ -483,7 +477,79 @@ export default function ControlCenterPage() {
             </div>
           </section>
 
-          {/* SECCIÓN 7: MITIGACIÓN (ACTUALIZADA CON IA) */}
+          {/* SECCIÓN 4: MATRIZ DE RIESGO (HEATMAP) */}
+          <section id="heatmap" className={`space-y-12 transition-all duration-700 ${activeSection === 'heatmap' ? 'opacity-100 scale-100' : 'opacity-0 scale-95 hidden'}`}>
+            <div className="space-y-2">
+              <h3 className="text-4xl font-headline font-bold text-slate-800">Mapa de Calor por Ramos</h3>
+              <p className="text-slate-500 font-medium">Densidad de inversión acumulada por especialidad técnica.</p>
+            </div>
+            <div className="h-[600px] w-full bg-white rounded-[3rem] border p-8 shadow-2xl">
+              <ResponsiveContainer width="100%" height="100%">
+                <Treemap
+                  data={stats?.paretoDiscs || []}
+                  dataKey="value"
+                  stroke="#fff"
+                  fill={CYAN_PRIMARY}
+                >
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '16px', border: 'none' }}
+                    formatter={(val: number) => [formatCurrency(val), 'Impacto']}
+                  />
+                </Treemap>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          {/* SECCIÓN 5: DESEMPEÑO DE COORDINACIÓN */}
+          <section id="coordinators" className={`space-y-12 transition-all duration-700 ${activeSection === 'coordinators' ? 'opacity-100 scale-100' : 'opacity-0 scale-95 hidden'}`}>
+            <div className="space-y-2">
+              <h3 className="text-4xl font-headline font-bold text-slate-800">Eficiencia por Coordinación</h3>
+              <p className="text-slate-500 font-medium">Relación entre volumen de órdenes y monto financiero generado.</p>
+            </div>
+            <div className="h-[500px] w-full bg-white rounded-[3rem] border p-10 shadow-2xl">
+              <ResponsiveContainer width="100%" height="100%">
+                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis type="number" dataKey="x" name="Órdenes" unit=" OTs" label={{ value: 'Volumen de Órdenes', position: 'insideBottom', offset: -10 }} />
+                  <YAxis type="number" dataKey="y" name="Impacto" unit="M" label={{ value: 'Impacto (Millones)', angle: -90, position: 'insideLeft' }} />
+                  <ZAxis type="number" dataKey="z" range={[100, 1000]} name="Total" />
+                  <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+                  <Scatter name="Coordinadores" data={stats?.coordData} fill={CYAN_PRIMARY}>
+                    {stats?.coordData.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={entry.y > 10 ? ACCENT_ORANGE : CYAN_PRIMARY} />
+                    ))}
+                  </Scatter>
+                </ScatterChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          {/* SECCIÓN 6: TENDENCIAS MENSUALES */}
+          <section id="trends" className={`space-y-12 transition-all duration-700 ${activeSection === 'trends' ? 'opacity-100 scale-100' : 'opacity-0 scale-95 hidden'}`}>
+            <div className="space-y-2">
+              <h3 className="text-4xl font-headline font-bold text-slate-800">Tendencia de Gasto Mensual</h3>
+              <p className="text-slate-500 font-medium">Evolución estacional de las desviaciones en el presupuesto.</p>
+            </div>
+            <div className="h-[500px] w-full bg-white rounded-[3rem] border p-10 shadow-2xl">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={stats?.trendData}>
+                  <defs>
+                    <linearGradient id="colorImpact" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={CYAN_PRIMARY} stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor={CYAN_PRIMARY} stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="month" />
+                  <YAxis tickFormatter={(v) => `$${v/1000000}M`} />
+                  <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                  <Area type="monotone" dataKey="impact" stroke={CYAN_PRIMARY} strokeWidth={4} fillOpacity={1} fill="url(#colorImpact)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          {/* SECCIÓN 7: MITIGACIÓN (IA) */}
           <section id="action-plan" className={`space-y-12 transition-all duration-700 ${activeSection === 'action-plan' ? 'opacity-100 scale-100' : 'opacity-0 scale-95 hidden'}`}>
             <div className="flex justify-between items-center border-b pb-8">
               <div className="space-y-2">
