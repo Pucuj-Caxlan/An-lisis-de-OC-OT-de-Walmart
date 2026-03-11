@@ -1,4 +1,3 @@
-
 'use server';
 /**
  * @fileOverview Motor de Análisis Semántico y Ponderación para Nube de Palabras Forense.
@@ -58,12 +57,12 @@ DATOS AGREGADOS (TOP CAUSAS POR IMPACTO):
 {{/each}}
 
 TAREAS DE RAZONAMIENTO ESTRATÉGICO:
-1. ANÁLISIS 80/20: Identifica el grupo crítico de causas que concentran la mayor erosión presupuestaria.
-2. DIAGNÓSTICO EJECUTIVO: Explica de forma sobria y técnica por qué estos términos dominan la nube.
+1. ANÁLISIS 80/20: Identifica el grupo crítico de causas que concentran la mayor erosión del presupuesto de construcción.
+2. DIAGNÓSTICO EJECUTIVO: Explica de forma sobria y técnica por qué estos términos dominan la red de desviaciones.
 3. NÚCLEO DEL PROBLEMA: Define en una frase contundente el driver principal del gasto.
 4. RECOMENDACIONES: Propón 3 acciones estratégicas para mitigar el riesgo en las causas dominantes.
 
-Responde con precisión ejecutiva orientada a la Vicepresidencia.`,
+Responde con precisión ejecutiva orientada a la Vicepresidencia. No utilices tecnicismos innecesarios.`,
 });
 
 export async function analyzeWordCloud(input: WordCloudInput): Promise<WordCloudOutput> {
