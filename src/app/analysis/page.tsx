@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -132,11 +133,17 @@ export default function AnalysisPage() {
     if (!db) return;
     setIsLoadingOrders(true);
     try {
+      // 1. Intentar obtener el total de forma independiente
       if (direction === 'initial') {
-        const countSnap = await getCountFromServer(collection(db, 'orders'));
-        setTotalCount(countSnap.data().count);
+        try {
+          const countSnap = await getCountFromServer(collection(db, 'orders'));
+          setTotalCount(countSnap.data().count);
+        } catch (err) {
+          console.warn("Fallo al obtener conteo de registros, continuando carga...", err);
+        }
       }
 
+      // 2. Construir query de paginación
       let q = query(collection(db, 'orders'), orderBy(documentId()), limit(pageSize));
       
       if (direction === 'next' && lastDoc) {
@@ -159,8 +166,8 @@ export default function AnalysisPage() {
       console.error("Error fetching orders:", e);
       toast({
         variant: "destructive",
-        title: "Error al cargar datos",
-        description: e.message || "No se pudieron obtener los registros."
+        title: "Fallo de Conexión",
+        description: "No se pudieron obtener los registros. Verifique su red o intente de nuevo."
       });
     } finally {
       setIsLoadingOrders(false);
@@ -176,7 +183,7 @@ export default function AnalysisPage() {
   const handlePageSizeChange = (value: string) => {
     setPageSize(parseInt(value));
     setCurrentPage(1);
-    // fetchOrders depends on pageSize, so it will refetch when useEffect triggers
+    // fetchOrders se disparará por el cambio de dependencia
   };
 
   const handleAddOrder = async () => {
@@ -411,7 +418,6 @@ export default function AnalysisPage() {
         totalProcessed: processed
       });
 
-      // Guardar taxonomia con conteos reales para que aparezcan en los selectores del Dashboard
       for (const [id, data] of Object.entries(globalFormatStats)) {
         await setDoc(doc(db, 'taxonomy_formats', id), { ...data, id, name: id });
       }
