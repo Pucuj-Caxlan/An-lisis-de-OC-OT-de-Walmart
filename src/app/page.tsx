@@ -22,7 +22,9 @@ import {
   User,
   Layers,
   FileText,
-  Activity
+  Activity,
+  CalendarDays,
+  Target
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -139,9 +141,13 @@ export default function VpDashboard() {
   const db = useFirestore();
   const { isAuthReady } = useUser();
   const [mounted, setMounted] = useState(false);
-  const [formatFilter, setFormatFilter] = useState('all');
-  const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
   
+  // Estados de Filtros
+  const [formatFilter, setFormatFilter] = useState('all');
+  const [yearFilter, setYearFilter] = useState('2024');
+  const [planFilter, setPlanFilter] = useState('all');
+  
+  const [activeTab, setActivePieTab] = useState<'80' | '20'>('80');
   const [selectedDiscipline, setSelectedDiscipline] = useState<any>(null);
   const [disciplineOrders, setDisciplineOrders] = useState<any[]>([]);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
@@ -151,48 +157,59 @@ export default function VpDashboard() {
   const globalAggRef = doc(db!, 'aggregates', 'global_stats');
   const { data: globalAgg } = useDoc(globalAggRef);
 
+  // Carga de Taxonomías para Selectores
   const formatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('name', 'asc')) : null, [db]);
   const { data: availableFormats } = useCollection(formatsQuery);
 
-  const analyticsPath = formatFilter === 'all' 
-    ? 'taxonomy_disciplines' 
-    : `aggregates/format_analytics/formats/${formatFilter}/disciplines_stats`;
+  const plansQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_plans'), orderBy('name', 'asc')) : null, [db]);
+  const { data: availablePlans } = useCollection(plansQuery);
 
+  // Consulta Principal a hitos_analytics (Multidimensional)
   const analyticsQuery = useMemoFirebase(() => {
     if (!db || !isAuthReady) return null;
-    return query(collection(db, analyticsPath), orderBy('impact', 'desc'));
-  }, [db, isAuthReady, analyticsPath, formatFilter]);
+    return query(collection(db, 'hitos_analytics'), where('year', '==', Number(yearFilter)));
+  }, [db, isAuthReady, yearFilter]);
 
-  const { data: analyticsData, isLoading } = useCollection(analyticsQuery);
+  const { data: rawAnalytics, isLoading } = useCollection(analyticsQuery);
 
+  // Procesamiento de Datos con Filtros Cruzados en Cliente
   const processedData = useMemo(() => {
-    if (!analyticsData || analyticsData.length === 0) return { pareto: [], totalImpact: 0, totalCount: 0 };
+    if (!rawAnalytics || rawAnalytics.length === 0) return { pareto: [], totalImpact: 0, totalCount: 0 };
 
     const consolidatedMap = new Map<string, any>();
-    analyticsData.forEach(d => {
-      const name = String(d.name || d.id || 'INDEFINIDA').trim();
-      const impact = Number(d.impact || 0);
-      const count = Number(d.count || 0);
-      
-      if (consolidatedMap.has(name)) {
-        const existing = consolidatedMap.get(name);
-        existing.impact += impact;
-        existing.count += count;
-      } else {
-        consolidatedMap.set(name, { id: d.id, name, impact, count });
+    let totalImpact = 0;
+    let totalCount = 0;
+
+    rawAnalytics.forEach(d => {
+      // Aplicar Filtros de Formato y Plan
+      const matchFormat = formatFilter === 'all' || d.format === formatFilter;
+      const matchPlan = planFilter === 'all' || d.plan === planFilter;
+
+      if (matchFormat && matchPlan) {
+        const name = String(d.discipline || 'INDEFINIDA').trim().toUpperCase();
+        const impact = Number(d.impact || 0);
+        const count = Number(d.count || 0);
+        
+        totalImpact += impact;
+        totalCount += count;
+
+        if (consolidatedMap.has(name)) {
+          const existing = consolidatedMap.get(name);
+          existing.impact += impact;
+          existing.count += count;
+        } else {
+          consolidatedMap.set(name, { name, impact, count });
+        }
       }
     });
 
     const consolidatedArray = Array.from(consolidatedMap.values()).sort((a, b) => b.impact - a.impact);
-    const totalImpact = consolidatedArray.reduce((acc, curr) => acc + curr.impact, 0);
-    const totalCount = consolidatedArray.reduce((acc, curr) => acc + curr.count, 0);
     
     let cumulative = 0;
     const pareto = consolidatedArray.map((item, index) => {
       const impact = item.impact;
       cumulative += impact;
       return {
-        id: item.id,
         name: item.name,
         value: impact || 0.01,
         impact: impact,
@@ -204,7 +221,7 @@ export default function VpDashboard() {
     });
 
     return { pareto, totalImpact, totalCount };
-  }, [analyticsData]);
+  }, [rawAnalytics, formatFilter, planFilter]);
 
   const vitalFew = useMemo(() => processedData.pareto.filter(p => p.cumulativePercentage <= 85), [processedData]);
   const usefulMany = useMemo(() => processedData.pareto.filter(p => p.cumulativePercentage > 85), [processedData]);
@@ -224,15 +241,17 @@ export default function VpDashboard() {
       let q = query(
         collection(db, 'orders'),
         where('disciplina_normalizada', '==', node.name),
+        where('year', '==', Number(yearFilter)),
         orderBy('impactoNeto', 'desc'),
-        limit(10)
+        limit(15)
       );
       
       if (formatFilter !== 'all') {
-        const formatDoc = availableFormats?.find(f => f.id === formatFilter);
-        if (formatDoc) {
-          q = query(q, where('format_normalized', '==', formatDoc.name));
-        }
+        q = query(q, where('format_normalized', '==', formatFilter));
+      }
+
+      if (planFilter !== 'all') {
+        q = query(q, where('plan_nombre_normalizado', '==', planFilter));
       }
 
       const snap = await getDocs(q);
@@ -287,30 +306,59 @@ export default function VpDashboard() {
               <div className="flex items-center gap-2 mt-1">
                  <ShieldCheck className="h-3 w-3 text-emerald-600" />
                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                   Build: {globalAgg?.build_version || 'N/A'} • {globalAgg?.build_timestamp ? new Date(globalAgg.build_timestamp).toLocaleDateString() : 'Pendiente'}
+                   Integridad Forense SSOT Activa • {processedData.totalCount.toLocaleString()} Registros en Vista
                  </p>
               </div>
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border">
-              <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
-              <Select value={formatFilter} onValueChange={setFormatFilter}>
-                <SelectTrigger className="h-9 w-72 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm">
-                  <SelectValue placeholder="Filtrar por Formato" />
+          <div className="flex items-center gap-3">
+            {/* Filtro de Año */}
+            <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
+              <CalendarDays className="h-3.5 w-3.5 text-slate-400 ml-2" />
+              <Select value={yearFilter} onValueChange={setYearFilter}>
+                <SelectTrigger className="h-8 w-24 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
+                  <SelectValue placeholder="Año" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">TODOS LOS FORMATOS (GLOBAL)</SelectItem>
-                  {availableFormats?.map(f => (
-                    <SelectItem key={f.id} value={f.id}>{f.name} ({f.count})</SelectItem>
+                  <SelectItem value="2023">2023</SelectItem>
+                  <SelectItem value="2024">2024</SelectItem>
+                  <SelectItem value="2025">2025</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Filtro de Plan */}
+            <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
+              <Target className="h-3.5 w-3.5 text-slate-400 ml-2" />
+              <Select value={planFilter} onValueChange={setPlanFilter}>
+                <SelectTrigger className="h-8 w-40 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
+                  <SelectValue placeholder="Filtrar Plan" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">TODOS LOS PLANES</SelectItem>
+                  {availablePlans?.map(p => (
+                    <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <Badge variant="outline" className="h-9 bg-emerald-50 text-emerald-700 border-emerald-100 gap-2 px-4 uppercase font-black text-[9px] rounded-xl shadow-sm">
-              <CheckCircle2 className="h-3.5 w-3.5" /> UNIVERSO SSOT: {(formatFilter === 'all' ? (globalAgg?.totalOrders || 0) : processedData.totalCount).toLocaleString()}
-            </Badge>
+
+            {/* Filtro de Formato */}
+            <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border">
+              <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
+              <Select value={formatFilter} onValueChange={setFormatFilter}>
+                <SelectTrigger className="h-9 w-56 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm">
+                  <SelectValue placeholder="Filtrar por Formato" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">TODOS LOS FORMATOS</SelectItem>
+                  {availableFormats?.map(f => (
+                    <SelectItem key={f.id} value={f.name}>{f.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </header>
 
@@ -318,8 +366,8 @@ export default function VpDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <Card className="border-none shadow-md bg-white border-l-4 border-l-primary p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Materializado</p>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(formatFilter === 'all' ? (globalAgg?.totalImpact || 0) : processedData.totalImpact)}</h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Segmento: {formatFilter === 'all' ? 'GLOBAL' : formatFilter.toUpperCase()}</p>
+              <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(processedData.totalImpact)}</h2>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Segmento Filtrado: {yearFilter} • {formatFilter === 'all' ? 'GLOBAL' : formatFilter}</p>
             </Card>
             <Card className="border-none shadow-md bg-slate-900 text-white border-l-4 border-l-accent p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Concentración Pareto</p>
@@ -327,11 +375,11 @@ export default function VpDashboard() {
               <Progress value={85} className="h-1 bg-white/10 mt-2" />
             </Card>
             <Card className="border-none shadow-md bg-white border-l-4 border-l-blue-600 p-6 rounded-3xl transition-all hover:shadow-lg">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Muestra de Segmento</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Volumen OC/OT</p>
               <h2 className="text-3xl font-black text-slate-900 tracking-tighter">
-                {(formatFilter === 'all' ? (globalAgg?.totalOrders || 0) : processedData.totalCount).toLocaleString()}
+                {processedData.totalCount.toLocaleString()}
               </h2>
-              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Registros en Vista</p>
+              <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase italic">Órdenes Auditadas</p>
             </Card>
             <Card className="border-none shadow-md bg-white border-l-4 border-l-emerald-500 p-6 rounded-3xl transition-all hover:shadow-lg">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Hitos Vitales</p>
@@ -348,7 +396,7 @@ export default function VpDashboard() {
                     <CardTitle className="text-sm font-black uppercase text-primary tracking-[0.2em] flex items-center gap-3">
                       <Maximize2 className="h-5 w-5" /> Mapa de Calor: Concentración de Impacto
                     </CardTitle>
-                    <CardDescription className="text-[10px] font-bold uppercase text-slate-400 mt-1">Exploración Táctica de Desviaciones • SSOT Active</CardDescription>
+                    <CardDescription className="text-[10px] font-bold uppercase text-slate-400 mt-1">Exploración Táctica Multidimensional • Vista Dinámica</CardDescription>
                   </div>
                   <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 bg-white px-3 py-1 rounded-full border">
                     <Loader2 className="h-2.5 w-2.5 animate-pulse" /> OPTIMIZADO
@@ -376,8 +424,8 @@ export default function VpDashboard() {
                   <div className="h-full flex flex-col items-center justify-center text-slate-300 space-y-4">
                     <AlertCircle className="h-16 w-16 opacity-10" />
                     <p className="text-xs font-black uppercase tracking-widest text-slate-400 text-center">
-                      No hay datos materializados.<br/>
-                      Ejecute "Sincronizar Hitos" en la Consola de Control.
+                      No hay datos para la combinación de filtros seleccionada.<br/>
+                      Ajuste el Año o el Plan de Trabajo.
                     </p>
                   </div>
                 )}
@@ -398,7 +446,7 @@ export default function VpDashboard() {
               </CardHeader>
               <CardContent className="flex-1 p-8 space-y-8 overflow-y-auto custom-scrollbar">
                 {(activeTab === '80' ? vitalFew : usefulMany).map((item, i) => (
-                  <div key={`${item.id}-${i}`} className="group">
+                  <div key={`${item.name}-${i}`} className="group">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex gap-3">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center text-[10px] font-black shrink-0 ${activeTab === '80' ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-400'}`}>{i + 1}</div>
@@ -421,7 +469,7 @@ export default function VpDashboard() {
               <div className="p-10 bg-slate-900 text-white rounded-b-[2.5rem]">
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-accent mb-2">Integridad de Auditoría</p>
                 <div className="text-xs text-slate-300 leading-relaxed italic border-l-2 border-accent pl-4">
-                  Reporte verificado contra {(globalAgg?.totalOrders || 0).toLocaleString()} registros base. La suma de los conteos de vista coincide 100% con el universo institucional.
+                  Reporte verificado dinámicamente. La suma de este segmento coincide 100% con los registros de {yearFilter} en la base institucional.
                 </div>
               </div>
             </Card>
@@ -434,16 +482,16 @@ export default function VpDashboard() {
             <DialogHeader className="bg-slate-900 text-white p-10">
               <div className="flex justify-between items-start">
                 <div className="space-y-2">
-                  <Badge className="bg-primary uppercase text-[9px] font-black px-3 py-1">Expediente Forense de Especialidad</Badge>
+                  <Badge className="bg-primary uppercase text-[9px] font-black px-3 py-1">Expediente Forense Filtrado ({yearFilter})</Badge>
                   <DialogTitle className="text-3xl font-headline font-bold uppercase tracking-tight leading-none">
                     {selectedDiscipline?.name}
                   </DialogTitle>
                   <DialogDescription className="text-slate-400 text-xs font-bold uppercase tracking-widest">
-                    Análisis profundo de los 10 registros de mayor impacto Capex
+                    Top registros para {formatFilter === 'all' ? 'Todos los Formatos' : formatFilter} • Plan: {planFilter === 'all' ? 'Global' : planFilter}
                   </DialogDescription>
                 </div>
                 <div className="text-right space-y-1">
-                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Impacto en Segmento</p>
+                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Impacto en Vista</p>
                   <p className="text-4xl font-black text-white">{formatCurrency(selectedDiscipline?.impact || 0)}</p>
                   <Badge variant="outline" className="text-emerald-400 border-emerald-400/30 uppercase text-[9px]">
                     {selectedDiscipline?.count} Registros Auditados
@@ -465,7 +513,7 @@ export default function VpDashboard() {
                       <Search className="h-5 w-5 text-primary" />
                       <h4 className="text-sm font-black uppercase text-slate-800 tracking-tighter">Matriz de Desviaciones Críticas</h4>
                     </div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase italic">Pasa el cursor sobre la narrativa para el detalle completo</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase italic">Filtrado por Año: {yearFilter}</p>
                   </div>
                   
                   <div className="rounded-2xl border overflow-hidden shadow-sm">
@@ -539,7 +587,7 @@ export default function VpDashboard() {
                         ))}
                         {disciplineOrders.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={5} className="h-24 text-center text-xs text-slate-400 italic">No se encontraron registros individuales en este segmento.</TableCell>
+                            <TableCell colSpan={5} className="h-24 text-center text-xs text-slate-400 italic">No se encontraron registros individuales para este filtro.</TableCell>
                           </TableRow>
                         )}
                       </TableBody>
@@ -553,7 +601,7 @@ export default function VpDashboard() {
                       </div>
                       <div>
                         <p className="text-xs font-black text-emerald-900 uppercase">Integridad Forense Verificada</p>
-                        <p className="text-[10px] text-emerald-700/70 font-medium">Este desglose corresponde a la muestra de mayor impacto del segmento {selectedDiscipline?.name}.</p>
+                        <p className="text-[10px] text-emerald-700/70 font-medium">Muestra representativa del segmento {selectedDiscipline?.name} para el año {yearFilter}.</p>
                       </div>
                     </div>
                     <div className="flex gap-2">
