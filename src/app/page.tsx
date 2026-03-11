@@ -87,8 +87,8 @@ const CustomTooltip = ({ active, payload }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div className="bg-slate-900 border border-slate-700 p-3 rounded-lg shadow-xl text-white z-50">
-        <p className="text-[10px] font-black uppercase text-yellow-500 mb-1 tracking-widest">{data.name}</p>
+      <div className="bg-white border border-slate-200 p-3 rounded-lg shadow-xl text-slate-900 z-50">
+        <p className="text-[10px] font-black uppercase text-primary mb-1 tracking-widest">{data.name}</p>
         <div className="space-y-1">
           <div className="flex justify-between gap-4">
             <span className="text-[10px] text-slate-400 font-bold uppercase">Impacto:</span>
@@ -153,7 +153,6 @@ export default function VpDashboard() {
   const [ramoDetails, setRamoDetails] = useState<{subDisciplines: any[], orders: any[]}>({ subDisciplines: [], orders: [] });
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
-  // Estados para nuevas ventanas de detalle
   const [selectedSubDiscipline, setSelectedSubDiscipline] = useState<any>(null);
   const [subDisciplineOrders, setSubDisciplineOrders] = useState<any[]>([]);
   const [isLoadingSubOrders, setIsLoadingSubOrders] = useState(false);
@@ -551,7 +550,7 @@ export default function VpDashboard() {
 
         {/* DIÁLOGO: DETALLE DE SUB-DISCIPLINA */}
         <Dialog open={!!selectedSubDiscipline} onOpenChange={(open) => !open && setSelectedSubDiscipline(null)}>
-          <DialogContent className="sm:max-w-[900px] max-h-[85vh] flex flex-col rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
+          <DialogContent className="sm:max-w-[900px] max-h-[85vh] flex flex-col rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl text-slate-900">
             <DialogHeader className="bg-primary text-white p-8 shrink-0">
               <div className="flex justify-between items-end">
                 <div>
@@ -564,7 +563,7 @@ export default function VpDashboard() {
                 </div>
               </div>
             </DialogHeader>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto bg-white">
               <Table>
                 <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                   <TableRow>
@@ -593,14 +592,14 @@ export default function VpDashboard() {
               </Table>
             </div>
             <DialogFooter className="p-4 bg-slate-50 border-t shrink-0">
-              <Button variant="ghost" onClick={() => setSelectedSubDiscipline(null)} className="uppercase font-black text-[9px]">Regresar</Button>
+              <Button variant="ghost" onClick={() => setSelectedSubDiscipline(null)} className="uppercase font-black text-[9px] text-slate-600">Regresar</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* DIÁLOGO: FICHA TÉCNICA DE REGISTRO */}
         <Dialog open={!!selectedOrderDetail} onOpenChange={(open) => !open && setSelectedOrderDetail(null)}>
-          <DialogContent className="sm:max-w-[600px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
+          <DialogContent className="sm:max-w-[600px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl text-slate-900">
             <DialogHeader className="bg-slate-900 text-white p-8">
               <div className="flex justify-between items-start">
                 <div className="space-y-1">

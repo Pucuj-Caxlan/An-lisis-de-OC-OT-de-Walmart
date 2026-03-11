@@ -16,11 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  AlertTriangle,
-  Save,
-  Search,
-  CheckCircle2,
-  XCircle
+  FileText
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useUser, useDoc } from '@/firebase';
@@ -41,8 +37,7 @@ import {
   deleteDoc,
   updateDoc,
   limitToLast,
-  serverTimestamp,
-  where
+  serverTimestamp
 } from 'firebase/firestore';
 import { 
   normalizeFormatName, 
@@ -85,7 +80,6 @@ import { Badge } from '@/components/ui/badge';
 
 const PAGE_SIZE = 15;
 
-// Helper para introducir retardos entre lotes
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export default function AnalysisPage() {
@@ -97,7 +91,6 @@ export default function AnalysisPage() {
   const [syncStep, setSyncStep] = useState<string>('');
   const [mounted, setMounted] = useState(false);
 
-  // Estados para la Tabla de Gestión
   const [orders, setOrders] = useState<any[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
   const [lastDoc, setLastDoc] = useState<any>(null);
@@ -105,13 +98,11 @@ export default function AnalysisPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   
-  // Estados para Edición y Borrado
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [editingOrder, setEditingOrder] = useState<any>(null);
   const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
   const [isProcessingAI, setIsProcessingAI] = useState<string | null>(null);
 
-  // Estado para el formulario de nueva orden
   const [newOrder, setNewOrder] = useState({
     projectId: '',
     projectName: '',
@@ -126,18 +117,15 @@ export default function AnalysisPage() {
   const aggRef = doc(db!, 'aggregates', 'global_stats');
   const { data: globalAgg } = useDoc(aggRef);
 
-  // --- Lógica de Carga de Registros ---
   const fetchOrders = useCallback(async (direction: 'next' | 'prev' | 'initial' = 'initial') => {
     if (!db) return;
     setIsLoadingOrders(true);
     try {
-      // Obtenemos el total de registros una sola vez
       if (direction === 'initial') {
         const countSnap = await getCountFromServer(collection(db, 'orders'));
         setTotalCount(countSnap.data().count);
       }
 
-      // Usamos 'projectId' para el ordenamiento ya que es un campo que seguro existe
       let q = query(collection(db, 'orders'), orderBy('projectId', 'asc'), limit(PAGE_SIZE));
       
       if (direction === 'next' && lastDoc) {
@@ -161,7 +149,7 @@ export default function AnalysisPage() {
       toast({
         variant: "destructive",
         title: "Error al cargar datos",
-        description: "Asegúrate de que los índices de Firestore estén listos. " + e.message
+        description: "No se pudieron obtener los registros de la base de datos."
       });
     } finally {
       setIsLoadingOrders(false);
@@ -172,9 +160,8 @@ export default function AnalysisPage() {
     if (db && mounted) {
       fetchOrders('initial');
     }
-  }, [db, mounted]); // Quitamos fetchOrders de las dependencias para evitar bucles si no es estable
+  }, [db, mounted, fetchOrders]);
 
-  // --- Acciones Individuales ---
   const handleAddOrder = async () => {
     if (!db) return;
     try {
@@ -221,7 +208,6 @@ export default function AnalysisPage() {
 
       toast({ title: "Auditoría IA Exitosa", description: `Registro ${order.projectId} reclasificado.` });
       
-      // Actualizar el estado local
       setOrders(prev => prev.map(o => o.id === order.id ? { 
         ...o, 
         semanticAnalysis: result, 
@@ -271,7 +257,6 @@ export default function AnalysisPage() {
     }
   };
 
-  // --- Lógica de Sincronización Masiva ---
   const purgeCollectionCompletely = async (db: Firestore, collPath: string) => {
     let hasMore = true;
     while (hasMore) {
@@ -320,13 +305,13 @@ export default function AnalysisPage() {
       let processed = 0;
       let lastVisible = null;
       let hasMore = true;
-      const CHUNK_SIZE = 150; 
+      const CHUNK_SIZE = 100; 
 
       const buildMetadata = {
         source_collection: 'orders',
         source_count: totalCount,
         build_timestamp: new Date().toISOString(),
-        build_version: '6.0.0-resilient'
+        build_version: '7.0.0-stable'
       };
 
       const globalFormatStats: Record<string, any> = {};
@@ -360,7 +345,6 @@ export default function AnalysisPage() {
           const year = isNaN(date.getFullYear()) ? 2024 : date.getFullYear();
           const month = isNaN(date.getMonth()) ? 1 : date.getMonth() + 1;
 
-          // Actualizar el documento original para que los filtros funcionen
           batch.update(doc(db, 'orders', d.id), {
             format_normalized: format,
             coordinador_normalizado: coord,
@@ -399,7 +383,7 @@ export default function AnalysisPage() {
         setSyncProgress(Math.round((processed / Math.max(1, totalCount)) * 100));
         lastVisible = snap.docs[snap.docs.length - 1];
         
-        await sleep(300); // Pausa más larga para seguridad
+        await sleep(400); 
         if (snap.size < CHUNK_SIZE) hasMore = false;
       }
 
@@ -412,7 +396,6 @@ export default function AnalysisPage() {
         totalProcessed: processed
       });
 
-      // Guardar taxonomías
       for (const [id, data] of Object.entries(globalFormatStats)) {
         await setDoc(doc(db, 'taxonomy_formats', id), { ...data, id, name: id });
       }
@@ -442,7 +425,7 @@ export default function AnalysisPage() {
           batch.set(doc(db, 'hitos_analytics', key), { ...val, lastUpdate: buildMetadata.build_timestamp });
         });
         await batch.commit();
-        await sleep(200);
+        await sleep(300);
       }
 
       toast({ title: "Sincronización Exitosa", description: "El universo ha sido normalizado y los filtros ya son funcionales." });
@@ -501,7 +484,7 @@ export default function AnalysisPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-primary">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Registros Totales</p>
-              <h2 className="text-3xl font-black">{(totalCount || 0).toLocaleString()}</h2>
+              <h2 className="text-3xl font-black">{totalCount.toLocaleString()}</h2>
             </Card>
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-emerald-500">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impacto Financiero</p>
@@ -636,7 +619,6 @@ export default function AnalysisPage() {
         </main>
       </SidebarInset>
 
-      {/* Modals para Edición, Creación y Borrado */}
       <Dialog open={isAddingNew} onOpenChange={setIsAddingNew}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
