@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
@@ -18,7 +17,8 @@ import {
   CalendarDays,
   Focus,
   Activity,
-  RefreshCcw
+  RefreshCcw,
+  CheckCircle2
 } from 'lucide-react';
 import {
   XAxis,
@@ -31,17 +31,17 @@ import {
   ComposedChart,
   Line
 } from 'recharts';
-import { useFirestore, useCollection, useMemoFirebase, useUser, useDoc } from '@/firebase';
-import { collection, query, doc, orderBy } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
+import { collection, query, doc } from 'firebase/firestore';
 import { analyzeStrategicTrends, TrendAnalysisOutput } from '@/ai/flows/trend-analysis-flow';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
-const CORE_COLOR = '#2962FF'; // Azul Vital Few
-const MUTED_COLOR = '#E2E8F0'; // Gris Useful Many
-const ACCENT_COLOR = '#FF8F00'; // Naranja Curva
+const CORE_COLOR = '#2962FF'; // Azul Vital Few (80%)
+const MUTED_COLOR = '#E2E8F0'; // Gris Useful Many (20%)
+const ACCENT_COLOR = '#FF8F00'; // Naranja Curva Pareto
 
 const GET_RAMO = (discipline: string): string => {
   const d = String(discipline || '').toUpperCase().trim();
@@ -106,31 +106,32 @@ export default function TrendsPage() {
       .sort((a, b) => b.impact - a.impact);
 
     let cumulative = 0;
-    return sortedRamos.map(item => {
+    return sortedRamos.map((item, index) => {
       cumulative += item.impact;
       return {
         ...item,
         percentage: Number(((item.impact / (totalImpact || 1)) * 100).toFixed(1)),
-        cumulativePercentage: (cumulative / (totalImpact || 1)) * 100
+        cumulativePercentage: (cumulative / (totalImpact || 1)) * 100,
+        isVital: (cumulative / (totalImpact || 1)) * 100 <= 85 || index === 0
       };
     });
   }, [analyticsDocs]);
 
-  const vitalFew = useMemo(() => paretoData.filter(p => p.cumulativePercentage <= 85 || paretoData.indexOf(p) === 0), [paretoData]);
+  const vitalFew = useMemo(() => paretoData.filter(p => p.isVital), [paretoData]);
 
   const runAiTrendAnalysis = async () => {
     if (paretoData.length === 0) return;
     setIsAnalyzing(true);
     try {
       const result = await analyzeStrategicTrends({
-        monthlyData: [], // Simplificado para enfoque en Ramos
+        monthlyData: [], 
         years: selectedYears,
         totalImpact: globalAgg?.totalImpact || 0,
         rootCauseSummary: paretoData.map(p => ({ cause: p.name, impact: p.impact, count: p.count, percentage: p.percentage })),
         paretoTop80: vitalFew.map(p => p.name)
       });
       setAiInsight(result);
-      toast({ title: "Acción Plan Generado", description: "Estrategia de mitigación basada en Ramos lista." });
+      toast({ title: "Plan de Acción Generado", description: "Estrategia de mitigación basada en Ramos lista." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Fallo en IA", description: error.message });
     } finally {
@@ -235,7 +236,7 @@ export default function TrendsPage() {
                         {paretoData.map((entry, index) => (
                           <Cell 
                             key={`cell-${index}`} 
-                            fill={entry.cumulativePercentage <= 85 || index === 0 ? CORE_COLOR : MUTED_COLOR} 
+                            fill={entry.isVital ? CORE_COLOR : MUTED_COLOR} 
                           />
                         ))}
                       </Bar>
