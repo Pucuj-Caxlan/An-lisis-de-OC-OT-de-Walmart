@@ -44,7 +44,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
-        { "fieldPath": "format_normalized", "order": "ASCENDING" },
+        { "fieldPath": "year", "order": "ASCENDING" },
         { "fieldPath": "impactoNeto", "order": "DESCENDING" }
       ]
     },
@@ -54,6 +54,7 @@
       "fields": [
         { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
         { "fieldPath": "year", "order": "ASCENDING" },
+        { "fieldPath": "format_normalized", "order": "ASCENDING" },
         { "fieldPath": "impactoNeto", "order": "DESCENDING" }
       ]
     },
@@ -64,16 +65,6 @@
         { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
         { "fieldPath": "year", "order": "ASCENDING" },
         { "fieldPath": "plan_nombre_normalizado", "order": "ASCENDING" },
-        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "orders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
-        { "fieldPath": "year", "order": "ASCENDING" },
-        { "fieldPath": "format_normalized", "order": "ASCENDING" },
         { "fieldPath": "impactoNeto", "order": "DESCENDING" }
       ]
     },
