@@ -22,7 +22,8 @@ import {
   X,
   FileText,
   TrendingUp,
-  Activity
+  Activity,
+  BrainCircuit
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -34,6 +35,7 @@ import { collection, query, orderBy, doc, where, limit, getDocs } from 'firebase
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -332,7 +334,7 @@ export default function VpDashboard() {
             <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
               <CalendarDays className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={yearFilter} onValueChange={setYearFilter}>
-                <SelectTrigger className="h-8 w-32 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
+                <SelectTrigger className="h-8 w-32 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0 text-slate-900">
                   <SelectValue placeholder="Año" />
                 </SelectTrigger>
                 <SelectContent>
@@ -347,7 +349,7 @@ export default function VpDashboard() {
             <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
               <Target className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={planFilter} onValueChange={setPlanFilter}>
-                <SelectTrigger className="h-8 w-40 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
+                <SelectTrigger className="h-8 w-40 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0 text-slate-900">
                   <SelectValue placeholder="Plan" />
                 </SelectTrigger>
                 <SelectContent>
@@ -362,7 +364,7 @@ export default function VpDashboard() {
             <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border">
               <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
               <Select value={formatFilter} onValueChange={setFormatFilter}>
-                <SelectTrigger className="h-9 w-64 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm">
+                <SelectTrigger className="h-9 w-64 bg-white border-none text-[10px] font-black uppercase rounded-xl shadow-sm text-slate-900">
                   <SelectValue placeholder="Formato" />
                 </SelectTrigger>
                 <SelectContent>
@@ -454,8 +456,8 @@ export default function VpDashboard() {
 
         {/* DIÁLOGO: DESGLOSE DE RAMO */}
         <Dialog open={!!selectedRamo} onOpenChange={(open) => !open && setSelectedRamo(null)}>
-          <DialogContent className="sm:max-w-[1000px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
-            <DialogHeader className="bg-slate-900 text-white p-10">
+          <DialogContent className="sm:max-w-[1000px] max-h-[90vh] flex flex-col rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
+            <DialogHeader className="bg-slate-900 text-white p-10 shrink-0">
               <div className="flex justify-between items-start">
                 <div className="space-y-2">
                   <Badge className="bg-primary uppercase text-[9px] font-black px-3 py-1">Desglose de Ramo</Badge>
@@ -468,7 +470,7 @@ export default function VpDashboard() {
               </div>
             </DialogHeader>
 
-            <div className="p-8 space-y-8 bg-white">
+            <div className="p-8 space-y-8 bg-white flex-1 overflow-y-auto">
               <section>
                 <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest mb-4 flex items-center gap-2">
                   <Layers className="h-4 w-4 text-primary" /> Composición del Grupo (Sub-disciplinas)
@@ -503,9 +505,9 @@ export default function VpDashboard() {
                   </h4>
                   <Badge variant="outline" className="text-[9px] font-black uppercase">Muestra de Impacto</Badge>
                 </div>
-                <div className="border rounded-2xl overflow-hidden text-slate-900 border-slate-100 shadow-sm max-h-[300px] overflow-y-auto">
+                <div className="border rounded-2xl overflow-hidden text-slate-900 border-slate-100 shadow-sm">
                   <Table>
-                    <TableHeader className="bg-slate-50 sticky top-0 z-10">
+                    <TableHeader className="bg-slate-50">
                       <TableRow>
                         <TableHead className="text-[9px] font-black uppercase h-10">PID</TableHead>
                         <TableHead className="text-[9px] font-black uppercase h-10">Sub-Disciplina</TableHead>
@@ -539,9 +541,9 @@ export default function VpDashboard() {
                 </div>
               </section>
             </div>
-            <DialogFooter className="p-6 bg-slate-50 border-t">
+            <DialogFooter className="p-6 bg-slate-50 border-t shrink-0">
               <Button variant="outline" onClick={() => setSelectedRamo(null)} className="rounded-xl px-8 uppercase font-black text-[10px] tracking-widest h-10">
-                <X className="h-4 w-4 mr-2" /> Cerrar Vista
+                Cerrar Vista
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -549,27 +551,27 @@ export default function VpDashboard() {
 
         {/* DIÁLOGO: DETALLE DE SUB-DISCIPLINA */}
         <Dialog open={!!selectedSubDiscipline} onOpenChange={(open) => !open && setSelectedSubDiscipline(null)}>
-          <DialogContent className="sm:max-w-[900px] rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
-            <DialogHeader className="bg-primary text-white p-8">
+          <DialogContent className="sm:max-w-[900px] max-h-[85vh] flex flex-col rounded-[2rem] p-0 overflow-hidden border-none shadow-2xl">
+            <DialogHeader className="bg-primary text-white p-8 shrink-0">
               <div className="flex justify-between items-end">
                 <div>
                   <Badge className="bg-white/20 text-white mb-2 uppercase text-[9px]">Análisis de Especialidad</Badge>
-                  <DialogTitle className="text-2xl font-headline font-bold uppercase">{selectedSubDiscipline?.name}</DialogTitle>
+                  <DialogTitle className="text-2xl font-headline font-bold uppercase text-white">{selectedSubDiscipline?.name}</DialogTitle>
                 </div>
                 <div className="text-right">
                   <p className="text-[9px] font-black uppercase opacity-70">Impacto Acumulado</p>
-                  <p className="text-3xl font-black">{formatCurrency(selectedSubDiscipline?.impact || 0)}</p>
+                  <p className="text-3xl font-black text-white">{formatCurrency(selectedSubDiscipline?.impact || 0)}</p>
                 </div>
               </div>
             </DialogHeader>
-            <div className="p-0">
+            <div className="flex-1 overflow-y-auto">
               <Table>
-                <TableHeader className="bg-slate-50">
+                <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                   <TableRow>
-                    <TableHead className="text-[9px] font-black uppercase">PID</TableHead>
-                    <TableHead className="text-[9px] font-black uppercase">Causa Raíz</TableHead>
-                    <TableHead className="text-[9px] font-black uppercase">Descripción</TableHead>
-                    <TableHead className="text-[9px] font-black uppercase text-right">Monto</TableHead>
+                    <TableHead className="text-[9px] font-black uppercase text-slate-900">PID</TableHead>
+                    <TableHead className="text-[9px] font-black uppercase text-slate-900">Causa Raíz</TableHead>
+                    <TableHead className="text-[9px] font-black uppercase text-slate-900">Descripción</TableHead>
+                    <TableHead className="text-[9px] font-black uppercase text-right text-slate-900">Monto</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -581,16 +583,16 @@ export default function VpDashboard() {
                       className="hover:bg-slate-50/50 cursor-pointer"
                       onClick={() => setSelectedOrderDetail(o)}
                     >
-                      <TableCell className="text-[10px] font-black">{o.projectId}</TableCell>
+                      <TableCell className="text-[10px] font-black text-slate-900">{o.projectId}</TableCell>
                       <TableCell className="text-[9px] font-bold text-slate-500 uppercase">{o.causa_raiz_normalizada || 'N/A'}</TableCell>
                       <TableCell className="text-[10px] text-slate-600 truncate max-w-[300px]">"{o.descripcion}"</TableCell>
-                      <TableCell className="text-right text-[10px] font-black">{formatCurrency(o.impactoNeto)}</TableCell>
+                      <TableCell className="text-right text-[10px] font-black text-slate-900">{formatCurrency(o.impactoNeto)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
-            <DialogFooter className="p-4 bg-slate-50 border-t">
+            <DialogFooter className="p-4 bg-slate-50 border-t shrink-0">
               <Button variant="ghost" onClick={() => setSelectedSubDiscipline(null)} className="uppercase font-black text-[9px]">Regresar</Button>
             </DialogFooter>
           </DialogContent>
@@ -603,13 +605,13 @@ export default function VpDashboard() {
               <div className="flex justify-between items-start">
                 <div className="space-y-1">
                   <Badge className="bg-accent text-white uppercase text-[9px]">Ficha Técnica de Registro</Badge>
-                  <DialogTitle className="text-2xl font-headline font-bold">{selectedOrderDetail?.projectId}</DialogTitle>
+                  <DialogTitle className="text-2xl font-headline font-bold text-white">{selectedOrderDetail?.projectId}</DialogTitle>
                   <p className="text-xs text-slate-400 font-medium uppercase">{selectedOrderDetail?.projectName}</p>
                 </div>
                 <FileText className="h-10 w-10 text-white/20" />
               </div>
             </DialogHeader>
-            <div className="p-8 space-y-6">
+            <div className="p-8 space-y-6 bg-white">
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Monto de Operación</p>
@@ -617,7 +619,7 @@ export default function VpDashboard() {
                 </div>
                 <div>
                   <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estatus Clasificación</p>
-                  <Badge variant="outline" className="uppercase text-[9px] font-black">{selectedOrderDetail?.classification_status}</Badge>
+                  <Badge variant="outline" className="uppercase text-[9px] font-black text-slate-900">{selectedOrderDetail?.classification_status}</Badge>
                 </div>
               </div>
               
@@ -654,7 +656,7 @@ export default function VpDashboard() {
             </div>
             <DialogFooter className="p-6 bg-slate-50 border-t">
               <Button onClick={() => setSelectedOrderDetail(null)} className="w-full rounded-xl uppercase font-black text-[10px] tracking-widest h-10">
-                Entendido
+                Cerrar Detalle
               </Button>
             </DialogFooter>
           </DialogContent>
