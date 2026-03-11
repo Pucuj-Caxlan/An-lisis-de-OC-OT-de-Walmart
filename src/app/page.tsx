@@ -3,25 +3,17 @@
 import React, { useState, useMemo, useEffect, memo } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { 
   Building2, 
-  CheckCircle2, 
   Focus,
   PieChart as PieIcon,
   Maximize2,
   Filter,
-  AlertCircle,
   Loader2,
   ShieldCheck,
   Search,
-  ArrowRight,
-  Info,
-  User,
-  Layers,
-  FileText,
-  Activity,
   CalendarDays,
   Target,
   ChevronRight
@@ -47,7 +39,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Table,
@@ -57,22 +48,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from '@/hooks/use-toast';
 
 const COLORS = ['#002D72', '#0071CE', '#FFC220', '#041E42', '#44883E', '#F47321', '#E31837', '#54585A'];
 
 /**
  * MAPEO DE RAMOS (MACRO-DISCIPLINAS)
- * Define cómo se agrupan las disciplinas individuales en grupos mayores.
  */
 const GET_RAMO = (discipline: string): string => {
-  const d = discipline.toUpperCase();
+  const d = String(discipline || '').toUpperCase().trim();
   if (d.includes('CIVIL') || d.includes('ARQUITECT') || d.includes('EDIFICA') || d.includes('TERRACER')) return 'OBRA CIVIL';
   if (d.includes('INGENIER') || d.includes('DISEÑO') || d.includes('PROYECTO')) return 'INGENIERÍA Y DISEÑO';
   if (d.includes('ELECTRI') || d.includes('HIDRAU') || d.includes('SANITA') || d.includes('PCI') || d.includes('MECANIC') || d.includes('AIRE') || d.includes('GAS')) return 'INSTALACIONES (MEP)';
@@ -112,6 +96,30 @@ const TreemapNode = memo((props: any) => {
 });
 
 TreemapNode.displayName = 'TreemapNode';
+
+const CustomTooltip = ({ active, payload }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-slate-900 border border-slate-700 p-3 rounded-lg shadow-xl text-white">
+        <p className="text-[10px] font-black uppercase text-yellow-500 mb-1 tracking-widest">{data.name}</p>
+        <div className="space-y-1">
+          <div className="flex justify-between gap-4">
+            <span className="text-[10px] text-slate-400 font-bold uppercase">Impacto:</span>
+            <span className="text-xs font-black">
+              {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(data.impact)}
+            </span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-[10px] text-slate-400 font-bold uppercase">Órdenes:</span>
+            <span className="text-xs font-black">{data.count}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
 
 export default function VpDashboard() {
   const db = useFirestore();
@@ -220,7 +228,6 @@ export default function VpDashboard() {
     setSelectedRamo(ramo);
     setIsLoadingDetails(true);
     
-    // Preparar el desglose de sub-disciplinas
     const subs = Object.entries(ramo.subs).map(([name, data]: any) => ({
       name,
       ...data,
@@ -228,20 +235,19 @@ export default function VpDashboard() {
     })).sort((a, b) => b.impact - a.impact);
 
     try {
-      // Para mostrar órdenes, como son de varias disciplinas, consultamos las del Ramo
-      // Nota: Para simplificar y no requerir el operador 'in' (que requiere índices específicos),
-      // Mostraremos las órdenes de la sub-disciplina más importante de este ramo primero.
-      const mainSub = subs[0].name;
+      // Filtrar órdenes por las sub-disciplinas del ramo
+      const subNames = subs.slice(0, 10).map(s => s.name); // Limitamos a 10 por restricciones de 'in'
       
       let q = query(
         collection(db, 'orders'),
-        where('disciplina_normalizada', '==', mainSub),
+        where('disciplina_normalizada', 'in', subNames),
         orderBy('impactoNeto', 'desc'),
         limit(20)
       );
 
       if (yearFilter !== 'all') q = query(q, where('year', '==', Number(yearFilter)));
       if (formatFilter !== 'all') q = query(q, where('format_normalized', '==', formatFilter));
+      if (planFilter !== 'all') q = query(q, where('plan_nombre_normalizado', '==', planFilter));
 
       const snap = await getDocs(q);
       setRamoDetails({
@@ -354,6 +360,10 @@ export default function VpDashboard() {
               <CardContent className="h-[550px] p-8">
                 {isLoading ? (
                   <div className="h-full flex items-center justify-center"><Loader2 className="h-12 w-12 animate-spin text-slate-200" /></div>
+                ) : processedData.ramos.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                    <p className="text-sm font-bold uppercase">Sin datos para los filtros seleccionados</p>
+                  </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <Treemap 
@@ -445,7 +455,15 @@ export default function VpDashboard() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {ramoDetails.orders.map((o) => (
+                      {isLoadingDetails ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="h-32 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-200" /></TableCell>
+                        </TableRow>
+                      ) : ramoDetails.orders.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="h-32 text-center text-[10px] font-bold uppercase text-slate-400">Sin órdenes detalladas para este ramo en los filtros actuales.</TableCell>
+                        </TableRow>
+                      ) : ramoDetails.orders.map((o) => (
                         <TableRow key={o.id}>
                           <TableCell className="text-[10px] font-black">{o.projectId}</TableCell>
                           <TableCell className="text-[9px] font-bold uppercase text-slate-500">{o.disciplina_normalizada}</TableCell>
