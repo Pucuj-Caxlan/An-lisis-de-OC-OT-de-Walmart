@@ -144,13 +144,25 @@ export default function TrendsPage() {
     setIsExporting(true);
     try {
       const element = reportRef.current;
-      const canvas = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+      const canvas = await html2canvas(element, { 
+        scale: 2, 
+        useCORS: true, 
+        backgroundColor: '#ffffff',
+        logging: false
+      });
+      
       const imgData = canvas.toDataURL('image/png', 1.0);
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      pdf.addImage(imgData, 'PNG', 0, 0, pdf.internal.pageSize.getWidth(), (canvas.height * pdf.internal.pageSize.getWidth()) / canvas.width);
-      pdf.save(`Walmart_Ramos_Strategic_Plan_${new Date().getTime()}.pdf`);
-      toast({ title: "Reporte Exportado" });
+      const imgWidth = 210; // A4 width in mm
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      
+      // Creamos un PDF con el tamaño exacto del contenido para evitar cortes
+      const pdf = new jsPDF('p', 'mm', [imgWidth, imgHeight]);
+      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      pdf.save(`Walmart_Strategic_Analysis_${new Date().getTime()}.pdf`);
+      
+      toast({ title: "Reporte Exportado", description: "Se ha generado el documento con el análisis completo." });
     } catch (error) {
+      console.error("PDF Export Error:", error);
       toast({ variant: "destructive", title: "Error al exportar" });
     } finally {
       setIsExporting(false);
@@ -184,7 +196,7 @@ export default function TrendsPage() {
           </div>
           <div className="flex items-center gap-3">
             <Button variant="outline" onClick={handleDownloadPdf} disabled={isExporting || !aiInsight} className="gap-2 border-slate-200 text-slate-600 h-10 shadow-sm rounded-xl text-[10px] font-black uppercase">
-              {isExporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />} Exportar PDF
+              {isExporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />} Exportar Análisis PDF
             </Button>
             <Button onClick={runAiTrendAnalysis} disabled={isAnalyzing || paretoData.length === 0} className="bg-primary hover:bg-primary/90 gap-2 shadow-lg h-10 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest">
               {isAnalyzing ? <Loader2 className="h-3 w-3 animate-spin" /> : <BrainCircuit className="h-3 w-3" />} Generar Mitigación IA
@@ -194,7 +206,7 @@ export default function TrendsPage() {
 
         <main className="p-8 space-y-8">
           <div className="max-w-[1200px] mx-auto">
-            <div ref={reportRef} className="space-y-10 bg-white p-12 rounded-[40px] border shadow-2xl overflow-hidden min-h-screen">
+            <div ref={reportRef} className="space-y-10 bg-white p-12 rounded-[40px] border shadow-2xl overflow-hidden">
               
               <div className="flex flex-col md:flex-row md:items-end justify-between border-b-2 border-slate-900 pb-8 gap-6">
                  <div className="space-y-4">
@@ -203,7 +215,7 @@ export default function TrendsPage() {
                         <Building2 className="text-white h-8 w-8" />
                       </div>
                       <div>
-                        <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none">Walmart International</h2>
+                        <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none">Walmart</h2>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1">Real Estate Forensic Unit</p>
                       </div>
                     </div>
