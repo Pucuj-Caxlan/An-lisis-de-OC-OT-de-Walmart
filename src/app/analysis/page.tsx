@@ -17,7 +17,8 @@ import {
   ChevronRight,
   Database,
   Eye,
-  FileText
+  FileText,
+  List
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, useUser, useDoc } from '@/firebase';
@@ -74,14 +75,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { analyzeOrderSemantically } from '@/ai/flows/semantic-analysis-flow';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-
-const PAGE_SIZE = 15;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -100,6 +106,7 @@ export default function AnalysisPage() {
   const [firstDoc, setFirstDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [pageSize, setPageSize] = useState(100);
   
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [editingOrder, setEditingOrder] = useState<any>(null);
@@ -130,13 +137,12 @@ export default function AnalysisPage() {
         setTotalCount(countSnap.data().count);
       }
 
-      // Consulta estable por ID de documento para asegurar que los 10,900 registros carguen
-      let q = query(collection(db, 'orders'), orderBy(documentId()), limit(PAGE_SIZE));
+      let q = query(collection(db, 'orders'), orderBy(documentId()), limit(pageSize));
       
       if (direction === 'next' && lastDoc) {
-        q = query(collection(db, 'orders'), orderBy(documentId()), startAfter(lastDoc), limit(PAGE_SIZE));
+        q = query(collection(db, 'orders'), orderBy(documentId()), startAfter(lastDoc), limit(pageSize));
       } else if (direction === 'prev' && firstDoc) {
-        q = query(collection(db, 'orders'), orderBy(documentId()), endBefore(firstDoc), limitToLast(PAGE_SIZE));
+        q = query(collection(db, 'orders'), orderBy(documentId()), endBefore(firstDoc), limitToLast(pageSize));
       }
 
       const snap = await getDocs(q);
@@ -159,13 +165,19 @@ export default function AnalysisPage() {
     } finally {
       setIsLoadingOrders(false);
     }
-  }, [db, lastDoc, firstDoc, toast]);
+  }, [db, lastDoc, firstDoc, toast, pageSize]);
 
   useEffect(() => {
     if (db && mounted) {
       fetchOrders('initial');
     }
   }, [db, mounted, fetchOrders]);
+
+  const handlePageSizeChange = (value: string) => {
+    setPageSize(parseInt(value));
+    setCurrentPage(1);
+    // fetchOrders depends on pageSize, so it will refetch when useEffect triggers
+  };
 
   const handleAddOrder = async () => {
     if (!db) return;
@@ -596,15 +608,32 @@ export default function AnalysisPage() {
                 </TableBody>
               </Table>
               
-              <div className="p-6 border-t bg-slate-50/30 flex items-center justify-between">
-                <p className="text-[10px] font-black text-slate-400 uppercase">Página {currentPage} • {orders.length} registros mostrados</p>
+              <div className="p-6 border-t bg-slate-50/30 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-6">
+                  <p className="text-[10px] font-black text-slate-400 uppercase">Página {currentPage} • {orders.length} registros mostrados de {totalCount.toLocaleString()}</p>
+                  <div className="flex items-center gap-2">
+                    <List className="h-3.5 w-3.5 text-slate-400" />
+                    <span className="text-[10px] font-black text-slate-400 uppercase">Filas:</span>
+                    <Select value={pageSize.toString()} onValueChange={handlePageSizeChange}>
+                      <SelectTrigger className="h-8 w-24 bg-white text-[10px] font-black uppercase rounded-lg border-slate-200">
+                        <SelectValue placeholder="100" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="100">100</SelectItem>
+                        <SelectItem value="300">300</SelectItem>
+                        <SelectItem value="500">500</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                
                 <div className="flex gap-2">
                   <Button 
                     variant="outline" 
                     size="sm" 
                     onClick={() => { fetchOrders('prev'); setCurrentPage(p => Math.max(1, p - 1)); }}
                     disabled={currentPage === 1 || isLoadingOrders}
-                    className="rounded-xl h-9 gap-2"
+                    className="rounded-xl h-9 gap-2 text-[10px] font-black uppercase px-4"
                   >
                     <ChevronLeft className="h-4 w-4" /> Anterior
                   </Button>
@@ -612,8 +641,8 @@ export default function AnalysisPage() {
                     variant="outline" 
                     size="sm" 
                     onClick={() => { fetchOrders('next'); setCurrentPage(p => p + 1); }}
-                    disabled={orders.length < PAGE_SIZE || isLoadingOrders}
-                    className="rounded-xl h-9 gap-2"
+                    disabled={orders.length < pageSize || isLoadingOrders}
+                    className="rounded-xl h-9 gap-2 text-[10px] font-black uppercase px-4"
                   >
                     Siguiente <ChevronRight className="h-4 w-4" />
                   </Button>
