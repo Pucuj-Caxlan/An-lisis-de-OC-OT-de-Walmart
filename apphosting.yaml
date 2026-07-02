@@ -12,3 +12,6 @@ runConfig:
 env:
   - variable: NODE_ENV
     value: production
+buildConfig:
+  beforeBuild:
+    - npm install --legacy-peer-deps
