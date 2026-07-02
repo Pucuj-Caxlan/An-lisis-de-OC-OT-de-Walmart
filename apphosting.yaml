@@ -1,3 +1,6 @@
 env:
   - variable: NODE_ENV
     value: production
+buildConfig:
+  beforeBuild:
+    - npm install tailwindcss postcss autoprefixer --legacy-peer-deps --no-audit --no-fund
