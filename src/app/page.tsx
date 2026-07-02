@@ -105,7 +105,8 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { detectAnomalies, AnomalyDetectionOutput } from '@/ai/flows/anomaly-detection-flow';
 
-const GEO_URL = "/mexico.json";
+// Línea original: const GEO_URL = "";
+const GEO_URL = "https://raw.githubusercontent.com/Anvito/geo-mexico/master/maps/mexico_estates.json";
 
 const CHIP_COLORS = [
   'border-blue-400 text-blue-600',
