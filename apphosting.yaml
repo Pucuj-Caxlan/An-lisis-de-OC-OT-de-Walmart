@@ -1,3 +1,4 @@
-env:
-  - variable: NODE_ENV
-    value: production
+- variable: NODE_ENV
+  value: production
+  availability:
+  - RUNTIME
