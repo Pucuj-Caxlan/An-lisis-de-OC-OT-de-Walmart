@@ -1,6 +1,7 @@
+
 "use client"
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppSidebar } from '@/components/AppSidebar';
 import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -40,7 +41,12 @@ import {
   normalizeFormatName, 
   normalizeCoordinator, 
   normalizeStage,
-  normalizePlan
+  normalizePlan,
+  normalizeDiscipline,
+  normalizeSubCause,
+  normalizeState,
+  normalizeMunicipality,
+  normalizeRootCause
 } from '@/lib/excel-processor';
 import { Progress } from '@/components/ui/progress';
 import { 
@@ -77,14 +83,15 @@ export default function AnalysisPage() {
   const db = useFirestore();
   const { user } = useUser();
   const [isSyncing, setIsSyncing] = useState(false);
+  const isProcessingRef = useRef(false);
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncStep, setSyncStep] = useState<string>('');
   const [mounted, setMounted] = useState(false);
 
   const [orders, setOrders] = useState<any[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
-  const [lastDoc, setLastDoc] = useState<any>(null);
-  const [firstDoc, setFirstDoc] = useState<any>(null);
+  const lastDocRef = useRef<any>(null);
+  const firstDocRef = useRef<any>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [pageSize, setPageSize] = useState(100);
@@ -98,21 +105,20 @@ export default function AnalysisPage() {
   const { data: globalAgg } = useDoc(aggRef);
 
   const fetchOrders = useCallback(async (direction: 'next' | 'prev' | 'initial' = 'initial') => {
-    if (!db) return;
+    if (!db || isLoadingOrders) return;
     setIsLoadingOrders(true);
     try {
       if (direction === 'initial') {
-        getCountFromServer(collection(db, 'orders'))
-          .then(snap => setTotalCount(snap.data().count))
-          .catch(() => console.warn("Error en conteo, continuando..."));
+        const countSnap = await getCountFromServer(collection(db, 'orders'));
+        setTotalCount(countSnap.data().count);
       }
 
       let q = query(collection(db, 'orders'), orderBy(documentId()), limit(pageSize));
       
-      if (direction === 'next' && lastDoc) {
-        q = query(collection(db, 'orders'), orderBy(documentId()), startAfter(lastDoc), limit(pageSize));
-      } else if (direction === 'prev' && firstDoc) {
-        q = query(collection(db, 'orders'), orderBy(documentId()), endBefore(firstDoc), limitToLast(pageSize));
+      if (direction === 'next' && lastDocRef.current) {
+        q = query(collection(db, 'orders'), orderBy(documentId()), startAfter(lastDocRef.current), limit(pageSize));
+      } else if (direction === 'prev' && firstDocRef.current) {
+        q = query(collection(db, 'orders'), orderBy(documentId()), endBefore(firstDocRef.current), limitToLast(pageSize));
       }
 
       const snap = await getDocs(q);
@@ -120,8 +126,8 @@ export default function AnalysisPage() {
       
       if (results.length > 0) {
         setOrders(results);
-        setFirstDoc(snap.docs[0]);
-        setLastDoc(snap.docs[snap.docs.length - 1]);
+        firstDocRef.current = snap.docs[0];
+        lastDocRef.current = snap.docs[snap.docs.length - 1];
       } else if (direction === 'initial') {
         setOrders([]);
       }
@@ -135,19 +141,19 @@ export default function AnalysisPage() {
     } finally {
       setIsLoadingOrders(false);
     }
-  }, [db, lastDoc, firstDoc, toast, pageSize]);
+  }, [db, toast, pageSize]);
 
   useEffect(() => {
-    if (db && mounted) {
+    if (db && mounted && !isSyncing) {
       fetchOrders('initial');
     }
-  }, [db, mounted, pageSize]);
+  }, [db, mounted, pageSize, isSyncing, fetchOrders]);
 
   const handlePageSizeChange = (value: string) => {
     setPageSize(parseInt(value));
     setCurrentPage(1);
-    setFirstDoc(null);
-    setLastDoc(null);
+    firstDocRef.current = null;
+    lastDocRef.current = null;
   };
 
   const handleProcessAI = async (order: any) => {
@@ -157,20 +163,28 @@ export default function AnalysisPage() {
         descripcion: order.descripcion || order.descriptionSection?.description || ""
       });
 
+      const subNormalized = normalizeSubCause(result.subcausa_normalizada);
+      const normalizedDisc = normalizeDiscipline(result.disciplina_normalizada, subNormalized);
+      const homogenizedCause = normalizeRootCause(result.causa_raiz_normalizada);
+
       await updateDoc(doc(db!, 'orders', order.id), {
-        semanticAnalysis: result,
-        disciplina_normalizada: result.disciplina_normalizada.toUpperCase().trim(),
-        causa_raiz_normalizada: result.causa_raiz_normalizada,
+        causaRaizOriginal: order.causaRaiz || order.causa_raiz_normalizada || "",
+        semanticAnalysis: { ...result, subcausa_normalizada: subNormalized, causa_raiz_normalizada: homogenizedCause },
+        disciplina_normalizada: normalizedDisc,
+        causa_raiz_normalizada: homogenizedCause,
+        subcausa_normalizada: subNormalized,
         classification_status: 'auto'
       });
 
-      toast({ title: "Auditoría IA Exitosa", description: `Registro ${order.projectId} reclasificado.` });
+      toast({ title: "Auditoría IA Exitosa", description: `Registro ${order.projectId} clasificado y homologado.` });
       
       setOrders(prev => prev.map(o => o.id === order.id ? { 
         ...o, 
-        semanticAnalysis: result, 
-        disciplina_normalizada: result.disciplina_normalizada.toUpperCase().trim(),
-        causa_raiz_normalizada: result.causa_raiz_normalizada,
+        causaRaizOriginal: order.causaRaiz || order.causa_raiz_normalizada || "",
+        semanticAnalysis: { ...result, subcausa_normalizada: subNormalized, causa_raiz_normalizada: homogenizedCause }, 
+        disciplina_normalizada: normalizedDisc,
+        causa_raiz_normalizada: homogenizedCause,
+        subcausa_normalizada: subNormalized,
         classification_status: 'auto'
       } : o));
 
@@ -183,22 +197,26 @@ export default function AnalysisPage() {
 
   const purgeCollectionCompletely = async (db: Firestore, collPath: string) => {
     let hasMore = true;
+    const PURGE_CHUNK = 40;
     while (hasMore) {
-      const snap = await getDocs(query(collection(db, collPath), limit(100)));
+      const snap = await getDocs(query(collection(db, collPath), limit(PURGE_CHUNK)));
       if (snap.empty) {
         hasMore = false;
         break;
       }
       const batch = writeBatch(db);
-      snap.forEach(d => batch.delete(d.ref));
-      await batch.commit().catch(() => {});
-      await sleep(100); 
-      if (snap.size < 100) hasMore = false;
+      for (const d of snap.docs) {
+        batch.delete(d.ref);
+      }
+      await batch.commit();
+      await sleep(6500); 
+      if (snap.size < PURGE_CHUNK) hasMore = false;
     }
   };
 
   const handleDeepSyncAndBackfill = async () => {
-    if (!db || !user) return;
+    if (!db || !user || isProcessingRef.current) return;
+    isProcessingRef.current = true;
     setIsSyncing(true);
     setSyncProgress(0);
 
@@ -211,33 +229,35 @@ export default function AnalysisPage() {
       const collectionsToPurge = [
         'taxonomy_formats', 
         'taxonomy_disciplines', 
+        'taxonomy_causes',
         'hitos_analytics',
         'taxonomy_coordinators',
         'taxonomy_stages',
-        'taxonomy_plans'
+        'taxonomy_plans',
+        'taxonomy_states'
       ];
       for (const coll of collectionsToPurge) {
         await purgeCollectionCompletely(db, coll);
       }
 
-      setSyncStep('Fase de Backfill & Normalización...');
+      setSyncStep('Fase de Coherencia Taxonómica...');
       let processed = 0;
       let lastVisible = null;
       let hasMore = true;
-      const CHUNK_SIZE = 100; 
+      const CHUNK_SIZE = 40; 
 
       const buildMetadata = {
         source_collection: 'orders',
         source_count: totalRecords,
         build_timestamp: new Date().toISOString(),
-        build_version: '10.0.0-stable'
+        build_version: '15.6.0-catalog-homologated'
       };
 
       const globalFormatStats: Record<string, any> = {};
       const globalDisciplineStats: Record<string, any> = {};
-      const coordinators = new Set<string>();
-      const stages = new Set<string>();
+      const globalCauseStats: Record<string, any> = {};
       const plansMap: Record<string, any> = {};
+      const statesMap: Record<string, any> = {};
       const hitosAgg: Record<string, any> = {};
 
       while (hasMore) {
@@ -249,15 +269,22 @@ export default function AnalysisPage() {
 
         const batch = writeBatch(db);
         
-        snap.forEach(d => {
+        for (const d of snap.docs) {
           const data = d.data();
           const impact = Number(data.impactoNeto || 0);
-          
           const format = normalizeFormatName(data.format || data.format_normalized || data.format_origin || 'OTRO');
-          const disc = String(data.disciplina_normalizada || data.semanticAnalysis?.disciplina_normalizada || 'PENDIENTE').trim().toUpperCase();
+          
+          let subCause = normalizeSubCause(data.subcausa_normalizada || data.semanticAnalysis?.subcausa_normalizada || 'SIN CLASIFICAR');
+          const disc = normalizeDiscipline(data.disciplina_normalizada || data.semanticAnalysis?.disciplina_normalizada || data.disciplina || 'PENDIENTE', subCause);
+          
+          const rawCause = data.causa_raiz_normalizada || data.causaRaiz || data.causaRaizOriginal || 'ERRORES / OMISIONES';
+          const cause = normalizeRootCause(rawCause);
+          
           const coord = normalizeCoordinator(data.coordinador || data.coordinador_normalizado);
           const stage = normalizeStage(data.etapa || data.etapa_proyecto_normalizada);
           const plan = normalizePlan(data.plan || data.plan_nombre_normalizado);
+          const state = normalizeState(data.state_normalized || data.state || data.estado);
+          const mun = normalizeMunicipality(data.municipality_normalized || data.municipality || data.municipio);
           
           const dateStr = data.fecha_oc_ot || data.fechaSolicitud || data.processedAt || new Date().toISOString();
           const date = new Date(dateStr);
@@ -270,17 +297,23 @@ export default function AnalysisPage() {
             etapa_proyecto_normalizada: stage,
             plan_nombre_normalizado: plan,
             disciplina_normalizada: disc,
+            causaRaizOriginal: String(rawCause).trim(),
+            causa_raiz_normalizada: cause,
+            subcausa_normalizada: subCause,
+            state_normalized: state,
+            municipality_normalized: mun,
             year,
             month,
             lastSync: buildMetadata.build_timestamp
           });
 
-          coordinators.add(coord);
-          stages.add(stage);
-          
           if (!plansMap[plan]) plansMap[plan] = { count: 0, name: plan, impact: 0 };
           plansMap[plan].count += 1;
           plansMap[plan].impact += impact;
+
+          if (!statesMap[state]) statesMap[state] = { count: 0, name: state, impact: 0 };
+          statesMap[state].count += 1;
+          statesMap[state].impact += impact;
 
           if (!globalFormatStats[format]) globalFormatStats[format] = { impact: 0, count: 0, name: format };
           globalFormatStats[format].impact += impact;
@@ -290,65 +323,87 @@ export default function AnalysisPage() {
           globalDisciplineStats[disc].impact += impact;
           globalDisciplineStats[disc].count += 1;
 
-          const aggKey = `${year}_${month}_${format}_${coord.replace(/[\/\s\.]+/g, '_')}_${stage.replace(/[\/\s\.]+/g, '_')}_${plan.replace(/[\/\s\.]+/g, '_')}_${disc.replace(/[\/\s\.]+/g, '_')}`.substring(0, 500);
+          if (!globalCauseStats[cause]) globalCauseStats[cause] = { impact: 0, count: 0, name: cause };
+          globalCauseStats[cause].impact += impact;
+          globalCauseStats[cause].count += 1;
+
+          const aggKey = `${year}_${month}_${format}_${coord.replace(/[\/\s\.]+/g, '_')}_${stage.replace(/[\/\s\.]+/g, '_')}_${plan.replace(/[\/\s\.]+/g, '_')}_${disc.replace(/[\/\s\.]+/g, '_')}_${cause.replace(/[\/\s\.]+/g, '_')}_${subCause.replace(/[\/\s\.]+/g, '_')}_${state.replace(/[\/\s\.]+/g, '_')}_${mun.replace(/[\/\s\.]+/g, '_')}`.substring(0, 500);
           if (!hitosAgg[aggKey]) {
             hitosAgg[aggKey] = { 
-              impact: 0, count: 0, year, month, format, coordinator: coord, stage, plan, discipline: disc 
+              impact: 0, count: 0, year, month, format, coordinator: coord, stage, plan, discipline: disc, cause, subcause: subCause, state, municipality: mun
             };
           }
           hitosAgg[aggKey].impact += impact;
           hitosAgg[aggKey].count += 1;
-        });
+        }
 
         await batch.commit();
         processed += snap.size;
         setSyncProgress(Math.round((processed / Math.max(1, totalRecords)) * 100));
         lastVisible = snap.docs[snap.docs.length - 1];
         
-        await sleep(200); 
+        if (processed % (CHUNK_SIZE * 5) === 0) {
+          setSyncStep(`Enfriamiento profundo de red (${processed}/${totalRecords})...`);
+          await sleep(25000); 
+          setSyncStep('Fase de Coherencia Taxonómica...');
+        } else {
+          await sleep(7500); 
+        }
         if (snap.size < CHUNK_SIZE) hasMore = false;
       }
 
-      setSyncStep('Guardando Vistas Materializadas...');
+      setSyncStep('Guardando Vistas Congruentes...');
       
       await setDoc(doc(db, 'aggregates', 'global_stats'), {
         ...buildMetadata,
-        totalImpact: Object.values(globalDisciplineStats).reduce((a: any, b: any) => a + b.impact, 0),
+        totalImpact: Object.values(globalCauseStats).reduce((a: any, b: any) => a + b.impact, 0),
         totalOrders: totalRecords,
-        totalProcessed: processed
+        totalProcessed: processed,
+        lastUpdate: buildMetadata.build_timestamp
       });
 
-      for (const [id, data] of Object.entries(globalFormatStats)) {
-        await setDoc(doc(db, 'taxonomy_formats', id), { ...data, id, name: id });
-      }
-      for (const [id, data] of Object.entries(globalDisciplineStats)) {
-        const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        await setDoc(doc(db, 'taxonomy_disciplines', safeId), { ...data, id: safeId, name: id });
-      }
-      for (const [id, data] of Object.entries(plansMap)) {
-        const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
-        await setDoc(doc(db, 'taxonomy_plans', safeId), { ...data, id: safeId, name: id });
-      }
+      const saveTaxonomyInBatches = async (map: Record<string, any>, coll: string) => {
+        const entries = Object.entries(map);
+        const SAVE_CHUNK = 40;
+        for (let i = 0; i < entries.length; i += SAVE_CHUNK) {
+          const chunk = entries.slice(i, i + SAVE_CHUNK);
+          const b = writeBatch(db);
+          for (const [id, data] of chunk) {
+            const safeId = id.replace(/[\/\s\.]+/g, '_').substring(0, 100);
+            b.set(doc(db, coll, safeId), { ...data, id: safeId, name: data.name || id });
+          }
+          await b.commit();
+          await sleep(8000);
+        }
+      };
 
-      setSyncStep('Finalizando Agregados...');
+      await saveTaxonomyInBatches(globalFormatStats, 'taxonomy_formats');
+      await saveTaxonomyInBatches(globalDisciplineStats, 'taxonomy_disciplines');
+      await saveTaxonomyInBatches(globalCauseStats, 'taxonomy_causes');
+      await saveTaxonomyInBatches(plansMap, 'taxonomy_plans');
+      await saveTaxonomyInBatches(statesMap, 'taxonomy_states');
+
+      setSyncStep('Finalizando Agregados Estratégicos...');
       const hitosEntries = Object.entries(hitosAgg);
-      for (let i = 0; i < hitosEntries.length; i += 100) {
-        const chunk = hitosEntries.slice(i, i + 100);
+      const HITOS_CHUNK = 30;
+      for (let i = 0; i < hitosEntries.length; i += HITOS_CHUNK) { 
+        const chunk = hitosEntries.slice(i, i + HITOS_CHUNK);
         const batch = writeBatch(db);
-        chunk.forEach(([key, val]) => {
+        for (const [key, val] of chunk) {
           batch.set(doc(db, 'hitos_analytics', key), { ...val, lastUpdate: buildMetadata.build_timestamp });
-        });
+        }
         await batch.commit();
-        await sleep(300);
+        await sleep(9000); 
       }
 
-      toast({ title: "Sincronización Exitosa", description: "El universo ha sido normalizado y los filtros del Dashboard están listos." });
+      toast({ title: "Sincronización Exitosa", description: "El universo ha sido homologado bajo protocolo de catálogo maestro." });
       fetchOrders('initial');
     } catch (e: any) {
       console.error(e);
       toast({ variant: "destructive", title: "Error en sincronización", description: e.message });
     } finally {
       setIsSyncing(false);
+      isProcessingRef.current = false;
       setSyncStep('');
     }
   };
@@ -379,7 +434,7 @@ export default function AnalysisPage() {
             <Card className="p-8 border-none shadow-xl bg-slate-900 text-white space-y-6">
               <div className="flex justify-between items-end">
                 <div className="space-y-1">
-                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Procesando Base de Datos</p>
+                  <p className="text-[10px] font-black text-accent uppercase tracking-widest">Procesando Base de Datos Homologada (Catálogo Maestro)</p>
                   <h3 className="text-2xl font-bold uppercase">{syncStep}</h3>
                 </div>
                 <span className="text-4xl font-black text-accent">{syncProgress}%</span>
@@ -400,7 +455,7 @@ export default function AnalysisPage() {
             <Card className="p-6 border-none shadow-md bg-white border-l-4 border-l-accent">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estado de Salud</p>
               <div className="flex items-center gap-2 text-emerald-600 font-bold uppercase text-xs">
-                <ShieldCheck className="h-4 w-4" /> Activo y Sincronizado
+                <ShieldCheck className="h-4 w-4" /> Catálogo Homologado
               </div>
             </Card>
           </div>
@@ -412,7 +467,7 @@ export default function AnalysisPage() {
                   <CardTitle className="text-sm font-black uppercase text-slate-800 tracking-widest flex items-center gap-3">
                     <Database className="h-5 w-5 text-primary" /> Explorador de Universo
                   </CardTitle>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Gestión de base de datos maestra</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Gestión de base de datos maestra con trazabilidad</p>
                 </div>
               </div>
             </CardHeader>
@@ -422,7 +477,7 @@ export default function AnalysisPage() {
                   <TableRow>
                     <TableHead className="text-[10px] font-black uppercase pl-8">PID / Proyecto</TableHead>
                     <TableHead className="text-[10px] font-black uppercase">Formato</TableHead>
-                    <TableHead className="text-[10px] font-black uppercase">Disciplina</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase">Causa Raíz (Homologada)</TableHead>
                     <TableHead className="text-[10px] font-black uppercase">Monto</TableHead>
                     <TableHead className="text-[10px] font-black uppercase text-right pr-8">Acciones</TableHead>
                   </TableRow>
@@ -453,8 +508,8 @@ export default function AnalysisPage() {
                       </TableCell>
                       <TableCell>
                         <div className="space-y-0.5">
-                          <p className="text-[10px] font-bold text-slate-700 uppercase">{order.disciplina_normalizada || 'PENDIENTE'}</p>
-                          <p className="text-[9px] text-slate-400 italic truncate max-w-[200px] leading-tight">"{order.descripcion}"</p>
+                          <p className="text-[10px] font-bold text-slate-700 uppercase">{order.causa_raiz_normalizada || 'SIN CLASIFICAR'}</p>
+                          <p className="text-[8px] text-slate-400 uppercase italic">Original: "{order.causaRaizOriginal || order.causaRaiz || 'N/A'}"</p>
                         </div>
                       </TableCell>
                       <TableCell className="font-mono text-xs font-bold text-slate-900">
@@ -573,6 +628,18 @@ export default function AnalysisPage() {
                   <div>
                     <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Disciplina</p>
                     <p className="text-sm font-bold uppercase">{viewingOrder.disciplina_normalizada || 'PENDIENTE'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Causa Raíz (Homologada)</p>
+                    <p className="text-sm font-bold uppercase text-primary">{viewingOrder.causa_raiz_normalizada || 'SIN CLASIFICAR'}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Valor Original (Trazabilidad)</p>
+                    <p className="text-[11px] text-slate-600 font-medium">"{viewingOrder.causaRaizOriginal || viewingOrder.causaRaiz || 'N/A'}"</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Sub-Causa Técnica</p>
+                    <p className="text-sm font-bold uppercase">{viewingOrder.subcausa_normalizada || 'N/A'}</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Plan de Inversión</p>

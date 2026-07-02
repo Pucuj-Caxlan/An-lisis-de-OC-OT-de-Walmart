@@ -36,7 +36,8 @@ const WordCloudOutputSchema = z.object({
   coreProblem: z.string().describe("Identificación del factor principal que afecta la productividad."),
   concentrationPercentage: z.number().describe("Porcentaje de impacto concentrado en los top 5 conceptos."),
   strategicRecommendations: z.array(z.string()).describe("Acciones prioritarias basadas en la visualización."),
-  concepts: z.array(WordConceptSchema).optional().describe("Conceptos refinados por la IA si es necesario.")
+  concepts: z.array(WordConceptSchema).optional().describe("Conceptos refinados por la IA si es necesario."),
+  error: z.string().optional()
 });
 export type WordCloudOutput = z.infer<typeof WordCloudOutputSchema>;
 
@@ -66,12 +67,27 @@ Responde con precisión ejecutiva orientada a la Vicepresidencia. No utilices te
 });
 
 export async function analyzeWordCloud(input: WordCloudInput): Promise<WordCloudOutput> {
-  const {output} = await wordCloudPrompt(input);
-  if (!output) throw new Error("Fallo al generar inteligencia semántica de nube.");
-  return {
-    ...output,
-    concepts: output.concepts || []
-  };
+  try {
+    const {output} = await wordCloudPrompt(input);
+    if (!output) throw new Error("Fallo al generar inteligencia semántica de nube.");
+    return {
+      ...output,
+      concepts: output.concepts || []
+    };
+  } catch (error: any) {
+    console.error("Word Cloud Flow Error:", error);
+    const isConfigError = error.message?.includes('API key') || error.message?.includes('FAILED_PRECONDITION');
+    return {
+      executiveDiagnosis: isConfigError 
+        ? "Diagnóstico no disponible: Falta configurar GEMINI_API_KEY en App Hosting." 
+        : "Error técnico al generar el diagnóstico semántico.",
+      coreProblem: "Servicio de IA desconectado",
+      concentrationPercentage: 0,
+      strategicRecommendations: ["Verificar conexión con Google AI Studio", "Reintentar en unos minutos"],
+      concepts: [],
+      error: error.message
+    };
+  }
 }
 
 const wordCloudAnalysisFlow = ai.defineFlow(

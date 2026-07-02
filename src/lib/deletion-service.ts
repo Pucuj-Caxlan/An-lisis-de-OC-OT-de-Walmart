@@ -4,6 +4,8 @@
 import { Firestore, writeBatch, doc, collection, query, where, getDocs, deleteDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export type DeletionMode = 'single' | 'bulk' | 'all';
 
 export interface DeletionJob {
@@ -43,29 +45,21 @@ export async function executeDeletion(
   });
 
   let totalDeleted = 0;
-  let totalImpact = 0;
 
   try {
-    // 2. Resolve IDs if mode is 'all' (filtered)
     let targetIds = [...ids];
-    if (mode === 'all') {
-      // Logic for all would query Firestore based on filters
-      // For this MVP, we rely on the IDs passed from the filtered UI view
-      // targetIds = await resolveFilteredIds(db, filters);
-    }
-
     const total = targetIds.length;
     
-    // 3. Batch Process
-    const batchSize = 400; // Safe limit for Firestore (max 500)
+    // 3. Batch Process con Protocolo de Latencia Conservadora
+    const batchSize = 40; // Reducido para evitar backoff del backend
     for (let i = 0; i < targetIds.length; i += batchSize) {
       const chunk = targetIds.slice(i, i + batchSize);
       const batch = writeBatch(db);
       
-      chunk.forEach(id => {
+      for (const id of chunk) {
         const docRef = doc(db, 'orders', id);
         batch.delete(docRef);
-      });
+      }
 
       await batch.commit();
       totalDeleted += chunk.length;
@@ -75,6 +69,13 @@ export async function executeDeletion(
         progress: Math.round((totalDeleted / total) * 100),
         deletedCount: totalDeleted
       });
+
+      // Throttling Estratégico Extendido
+      if (totalDeleted % 200 === 0) {
+        await sleep(25000); // 25s enfriamiento profundo cada 200 deletes
+      } else {
+        await sleep(7500); // 7.5s entre lotes
+      }
     }
 
     // 4. Audit Log

@@ -5,36 +5,7 @@
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "format_normalized", "order": "ASCENDING" },
-        { "fieldPath": "year", "order": "ASCENDING" },
-        { "fieldPath": "month", "order": "ASCENDING" },
-        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "orders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "coordinador_normalizado", "order": "ASCENDING" },
-        { "fieldPath": "year", "order": "ASCENDING" },
-        { "fieldPath": "month", "order": "ASCENDING" },
-        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "orders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "etapa_proyecto_normalizada", "order": "ASCENDING" },
-        { "fieldPath": "year", "order": "ASCENDING" },
-        { "fieldPath": "month", "order": "ASCENDING" },
-        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "orders",
-      "queryScope": "COLLECTION",
-      "fields": [
+        { "fieldPath": "causa_raiz_normalizada", "order": "ASCENDING" },
         { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
         { "fieldPath": "impactoNeto", "order": "DESCENDING" }
       ]
@@ -44,7 +15,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
-        { "fieldPath": "year", "order": "ASCENDING" },
+        { "fieldPath": "causa_raiz_normalizada", "order": "ASCENDING" },
         { "fieldPath": "impactoNeto", "order": "DESCENDING" }
       ]
     },
@@ -53,8 +24,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
-        { "fieldPath": "year", "order": "ASCENDING" },
-        { "fieldPath": "format_normalized", "order": "ASCENDING" },
+        { "fieldPath": "subcausa_normalizada", "order": "ASCENDING" },
         { "fieldPath": "impactoNeto", "order": "DESCENDING" }
       ]
     },
@@ -62,9 +32,9 @@
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "causa_raiz_normalizada", "order": "ASCENDING" },
         { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
         { "fieldPath": "year", "order": "ASCENDING" },
-        { "fieldPath": "plan_nombre_normalizado", "order": "ASCENDING" },
         { "fieldPath": "impactoNeto", "order": "DESCENDING" }
       ]
     },
@@ -72,10 +42,24 @@
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "disciplina_normalizada", "order": "ASCENDING" },
         { "fieldPath": "year", "order": "ASCENDING" },
-        { "fieldPath": "format_normalized", "order": "ASCENDING" },
-        { "fieldPath": "plan_nombre_normalizado", "order": "ASCENDING" },
+        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "subcausa_normalizada", "order": "ASCENDING" },
+        { "fieldPath": "impactoNeto", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "subcausa_normalizada", "order": "ASCENDING" },
+        { "fieldPath": "year", "order": "ASCENDING" },
         { "fieldPath": "impactoNeto", "order": "DESCENDING" }
       ]
     },

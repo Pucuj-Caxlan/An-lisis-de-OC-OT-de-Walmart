@@ -33,6 +33,7 @@ import { collection, query, where, getDocs, doc } from 'firebase/firestore';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { setDocumentNonBlocking, updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
+import { normalizeSubCause, normalizeDiscipline } from '@/lib/excel-processor';
 
 export default function UploadPdfPage() {
   const { toast } = useToast();
@@ -85,6 +86,8 @@ export default function UploadPdfPage() {
         } as any
       });
 
+      const subNormalized = normalizeSubCause(semantic.subcausa_normalizada);
+      const discNormalized = normalizeDiscipline(semantic.disciplina_normalizada, subNormalized);
       const completeness = calculateCompleteness(extracted.extractedData);
 
       // Sanitizamos el ID para evitar errores de ruta en Firestore
@@ -100,9 +103,9 @@ export default function UploadPdfPage() {
         descripcion: extracted.extractedData.technicalJustification?.description || "",
         fechaSolicitud: extracted.extractedData.header?.requestDate || new Date().toISOString(),
         isSigned: extracted.extractedData.governance?.isSigned || false,
-        semanticAnalysis: semantic,
-        // NORMALIZACIÓN CRÍTICA: Disciplina en MAYÚSCULAS al guardar registro individual
-        disciplina_normalizada: String(semantic.disciplina_normalizada).trim().toUpperCase(),
+        semanticAnalysis: { ...semantic, subcausa_normalizada: subNormalized, disciplina_normalizada: discNormalized },
+        disciplina_normalizada: discNormalized,
+        subcausa_normalizada: subNormalized,
         processedAt: new Date().toISOString(),
         classification_status: 'auto'
       };

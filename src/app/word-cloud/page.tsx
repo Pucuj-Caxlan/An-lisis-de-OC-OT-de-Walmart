@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -22,7 +21,9 @@ import {
   ArrowRightLeft,
   Filter,
   Maximize2,
-  Focus
+  Focus,
+  AlertTriangle,
+  Loader2
 } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
 import { collection, query, doc, where, getDocs, limit, orderBy } from 'firebase/firestore';
@@ -39,12 +40,12 @@ import {
 } from "@/components/ui/tooltip";
 
 const COLORS = {
-  root: '#002D72', // Azul Walmart Deep
-  format: '#0071CE', // Azul Walmart Bright
-  plan: '#FFC220', // Amarillo Walmart
-  discipline: '#2962FF', // Azul Eléctrico
-  cause: '#FF8F00', // Naranja Alerta
-  coordinator: '#44883E', // Verde Gestión
+  root: '#002D72', 
+  format: '#0071CE', 
+  plan: '#FFC220', 
+  discipline: '#2962FF', 
+  cause: '#FF8F00', 
+  coordinator: '#44883E', 
   accent: '#10B981'
 };
 
@@ -86,7 +87,6 @@ export default function WordCloudPage() {
   const aggRef = useMemoFirebase(() => db ? doc(db, 'aggregates', 'global_stats') : null, [db]);
   const { data: globalAgg } = useDoc(aggRef);
 
-  // Carga de Taxonomías para construcción de Grafo Inicial
   const formatsQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_formats'), orderBy('impact', 'desc'), limit(6)) : null, [db]);
   const discQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_disciplines'), orderBy('impact', 'desc'), limit(10)) : null, [db]);
   const plansQuery = useMemoFirebase(() => db ? query(collection(db, 'taxonomy_plans'), orderBy('impact', 'desc'), limit(5)) : null, [db]);
@@ -106,7 +106,6 @@ export default function WordCloudPage() {
     }
 
     setIsLoadingSub(node.id);
-    // Simulación de descubrimiento de relaciones profundas (Relaciones N-N)
     setTimeout(() => {
       setExpandedNodes(prev => new Set(prev).add(node.id));
       setIsLoadingSub(null);
@@ -126,7 +125,6 @@ export default function WordCloudPage() {
     const centerY = 350;
     const totalImpact = globalAgg.totalImpact || 1;
 
-    // 1. NODO MAESTRO
     nodes.push({
       id: 'root',
       label: 'WALMART MÉXICO',
@@ -139,7 +137,6 @@ export default function WordCloudPage() {
       color: COLORS.root
     });
 
-    // 2. NIVEL 1: FORMATOS (Capa de Negocio)
     if (formatsDocs && activeFilters.includes('format')) {
       const radius = 160;
       formatsDocs.forEach((f, i) => {
@@ -171,7 +168,6 @@ export default function WordCloudPage() {
       });
     }
 
-    // 3. NIVEL 2: DISCIPLINAS (Capa Técnica)
     if (disciplinesDocs && activeFilters.includes('discipline')) {
       const radius = 280;
       disciplinesDocs.forEach((d, i) => {
@@ -194,7 +190,6 @@ export default function WordCloudPage() {
         };
         nodes.push(node);
         
-        // Conexión central
         edges.push({ 
           from: 'root', 
           to: node.id, 
@@ -203,7 +198,6 @@ export default function WordCloudPage() {
           opacity: 0.1 + impactRatio * 0.3 
         });
 
-        // Relaciones transversales sugeridas (Cercanía semántica)
         if (i % 3 === 0 && nodes.length > 5) {
           const target = nodes[Math.floor(Math.random() * 5) + 1];
           edges.push({ 
@@ -217,7 +211,6 @@ export default function WordCloudPage() {
       });
     }
 
-    // 4. NIVEL 3: PLANES DE INVERSIÓN (Capa Estratégica)
     if (plansDocs && activeFilters.includes('plan')) {
       const radius = 360;
       plansDocs.forEach((p, i) => {
@@ -268,9 +261,18 @@ export default function WordCloudPage() {
         totalOrders: globalAgg?.totalOrders || 0
       });
       setCloudData(result);
-      toast({ title: "Inteligencia Semántica Generada", description: "Gemini ha analizado el mapa de calor de las relaciones técnicas." });
+      
+      if (result.error) {
+        toast({
+          variant: "destructive",
+          title: "Servicio de IA Desconectado",
+          description: "No se pudo realizar el análisis profundo por falta de credenciales API.",
+        });
+      } else {
+        toast({ title: "Inteligencia Semántica Generada", description: "Gemini ha analizado el mapa de calor de las relaciones técnicas." });
+      }
     } catch (e: any) { 
-      toast({ variant: "destructive", title: "Error en IA", description: e.message }); 
+      toast({ variant: "destructive", title: "Error en IA", description: "Fallo al conectar con el servidor de inteligencia." }); 
     } finally { 
       setIsAnalyzing(false); 
     }
@@ -314,7 +316,7 @@ export default function WordCloudPage() {
               disabled={isAnalyzing} 
               className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-xl shadow-md h-10 px-6 text-[10px] font-black uppercase tracking-widest"
             >
-              {isAnalyzing ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
+              {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
               Diagnóstico Gemini
             </Button>
           </div>
@@ -323,9 +325,7 @@ export default function WordCloudPage() {
         <main className="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             
-            {/* GRAPH VISUALIZATION CANVAS */}
             <Card className="lg:col-span-8 border-none shadow-2xl bg-white rounded-[3rem] overflow-hidden min-h-[800px] flex flex-col relative group">
-              {/* Obsidian-style background pattern */}
               <div className="absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:24px_24px] opacity-20 pointer-events-none" />
               
               <CardHeader className="bg-slate-50/80 backdrop-blur-md border-b p-8 relative z-10">
@@ -352,7 +352,6 @@ export default function WordCloudPage() {
 
               <CardContent className="flex-1 relative z-10 p-0 overflow-hidden cursor-grab active:cursor-grabbing">
                 <svg viewBox="0 0 800 700" className="w-full h-full select-none">
-                  {/* Edges with Force Visualization (Line weights) */}
                   {graphData.edges.map((edge, i) => {
                     const from = graphData.nodes.find(n => n.id === edge.from);
                     const to = graphData.nodes.find(n => n.id === edge.to);
@@ -382,7 +381,6 @@ export default function WordCloudPage() {
                     );
                   })}
 
-                  {/* Nodes with Obsidian Aesthetics */}
                   {graphData.nodes.map((node) => {
                     const isHovered = hoveredNode?.id === node.id;
                     const isExpanded = expandedNodes.has(node.id);
@@ -397,7 +395,6 @@ export default function WordCloudPage() {
                         onMouseLeave={() => setHoveredNode(null)}
                         onClick={() => node.isExpandable && toggleNodeExpansion(node)}
                       >
-                        {/* Glow and Shadow */}
                         <circle 
                           r={node.r + (isHovered ? 10 : 0)} 
                           fill={node.color} 
@@ -405,7 +402,6 @@ export default function WordCloudPage() {
                           className="transition-all duration-500"
                         />
                         
-                        {/* Core Node */}
                         <circle 
                           r={node.r} 
                           fill={node.color} 
@@ -415,7 +411,6 @@ export default function WordCloudPage() {
                           className="transition-all duration-300 shadow-xl"
                         />
 
-                        {/* Label - Dynamic Sizing */}
                         <text 
                           dy={node.r + 18} 
                           textAnchor="middle" 
@@ -427,14 +422,12 @@ export default function WordCloudPage() {
                           {node.label.length > 20 && !isHovered ? `${node.label.substring(0, 17)}...` : node.label}
                         </text>
 
-                        {/* Expandable Indicator */}
                         {node.isExpandable && (
                           <g transform={`translate(0, ${-node.r - 5})`}>
                             <circle r={4} fill={isExpanded ? COLORS.accent : "white"} stroke={COLORS.accent} strokeWidth={1} />
                           </g>
                         )}
 
-                        {/* Loading Spinner */}
                         {isProcessing && (
                           <circle r={node.r + 6} fill="none" stroke={COLORS.accent} strokeWidth="2" strokeDasharray="4 4" className="animate-spin" />
                         )}
@@ -443,7 +436,6 @@ export default function WordCloudPage() {
                   })}
                 </svg>
 
-                {/* HUD: NODE INSIGHTS (Neo4j Style Sidebar overlay) */}
                 {hoveredNode && (
                   <div className="absolute top-8 left-8 w-72 bg-white/90 backdrop-blur-xl border border-slate-200 p-6 rounded-[2.5rem] animate-in fade-in slide-in-from-left-4 duration-300 shadow-2xl z-50">
                     <div className="flex items-center gap-2 mb-4">
@@ -465,13 +457,12 @@ export default function WordCloudPage() {
 
                     <div className="mt-6 p-4 bg-slate-50 rounded-2xl border border-slate-100">
                       <p className="text-[9px] font-bold text-slate-500 uppercase leading-relaxed">
-                        Este nodo representa el {((hoveredNode.impact / globalAgg!.totalImpact) * 100).toFixed(1)}% de la inversión total bajo escrutinio forense.
+                        Este nodo representa el {((hoveredNode.impact / (globalAgg?.totalImpact || 1)) * 100).toFixed(1)}% de la inversión total bajo escrutinio forense.
                       </p>
                     </div>
                   </div>
                 )}
 
-                {/* Legend / Tooltip Bottom */}
                 <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur-md border border-white/10 px-8 py-4 rounded-full flex items-center gap-4 shadow-2xl pointer-events-none">
                   <div className="bg-primary/20 p-2 rounded-full"><MousePointerClick className="h-4 w-4 text-primary" /></div>
                   <span className="text-[10px] font-black text-white uppercase tracking-widest leading-none">Navega la red relacional • Los nodos se atraen según su impacto compartido</span>
@@ -479,7 +470,6 @@ export default function WordCloudPage() {
               </CardContent>
             </Card>
 
-            {/* AI STRATEGIC DIAGNOSIS (Neo4j Style Analysis) */}
             <div className="lg:col-span-4 space-y-8">
               <Card className="border-none shadow-2xl bg-white rounded-[3rem] overflow-hidden flex flex-col">
                 <CardHeader className="p-8 bg-slate-900 text-white relative">
@@ -507,6 +497,16 @@ export default function WordCloudPage() {
                     </div>
                   ) : (
                     <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-1000">
+                      {cloudData.error && (
+                        <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl flex gap-3 items-start">
+                          <AlertTriangle className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <p className="text-xs font-black text-rose-900 uppercase">Diagnóstico Limitado</p>
+                            <p className="text-[10px] text-rose-700 leading-tight">La inteligencia artificial no está configurada correctamente en el servidor. Revise las credenciales de API.</p>
+                          </div>
+                        </div>
+                      )}
+                      
                       <div className="space-y-3">
                         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none flex items-center gap-2">
                           <Target className="h-3.5 w-3.5" /> Nodo de Máxima Fricción
@@ -566,7 +566,6 @@ export default function WordCloudPage() {
             </div>
           </div>
 
-          {/* DATA INTEGRITY & SYNC STATUS */}
           <div className="bg-white border-2 border-slate-100 p-12 rounded-[4rem] text-slate-900 flex flex-col md:flex-row items-center justify-between shadow-xl relative overflow-hidden group">
              <div className="absolute top-0 left-0 w-2 h-full bg-primary" />
              <div className="flex items-center gap-10 relative z-10">

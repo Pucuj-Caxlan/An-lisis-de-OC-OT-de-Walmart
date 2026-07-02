@@ -269,23 +269,23 @@ export default function ControlCenterPage() {
     <div className="flex min-h-screen w-full bg-slate-50/50 text-slate-900">
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-20 shrink-0 items-center justify-between border-b bg-white/80 backdrop-blur-xl px-8 sticky top-0 z-50 shadow-sm">
-          <div className="flex items-center gap-6">
-            <SidebarTrigger className="text-slate-600" />
-            <div className="flex flex-col">
-              <h1 className="text-xl font-black uppercase tracking-tighter font-headline flex items-center gap-3 text-slate-800">
-                <Presentation className="h-5 w-5 text-primary" />
-                Alta Dirección: Análisis Forense
+        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white/80 backdrop-blur-xl px-4 sticky top-0 z-50 shadow-sm">
+          <div className="flex items-center gap-2 min-w-0">
+            <SidebarTrigger className="text-slate-600 shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <h1 className="text-base font-black uppercase tracking-tight font-headline flex items-center gap-2 text-slate-800 truncate">
+                <Presentation className="h-4 w-4 text-primary shrink-0" />
+                Dirección: Análisis Forense
               </h1>
-              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.3em]">Walmart Real Estate Forensic Unit • SSOT Active</p>
+              <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider truncate">Walmart Real Estate Forensic Unit • SSOT Active</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
-              <CalendarDays className="h-3.5 w-3.5 text-slate-400 ml-2" />
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
+              <CalendarDays className="h-3 w-3 text-slate-400 ml-1" />
               <Select value={pendingYear} onValueChange={setPendingYear}>
-                <SelectTrigger className="h-8 w-36 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
+                <SelectTrigger className="h-7 w-28 bg-transparent border-none text-[9px] font-black uppercase shadow-none focus:ring-0">
                   <SelectValue placeholder="Año" />
                 </SelectTrigger>
                 <SelectContent>
@@ -297,10 +297,10 @@ export default function ControlCenterPage() {
               </Select>
             </div>
 
-            <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
-              <Target className="h-3.5 w-3.5 text-slate-400 ml-2" />
+            <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
+              <Target className="h-3 w-3 text-slate-400 ml-1" />
               <Select value={pendingPlan} onValueChange={setPendingPlan}>
-                <SelectTrigger className="h-8 w-32 bg-transparent border-none text-[10px] font-black uppercase shadow-none focus:ring-0">
+                <SelectTrigger className="h-7 w-24 bg-transparent border-none text-[9px] font-black uppercase shadow-none focus:ring-0">
                   <SelectValue placeholder="Plan" />
                 </SelectTrigger>
                 <SelectContent>
@@ -312,10 +312,10 @@ export default function ControlCenterPage() {
               </Select>
             </div>
 
-            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
-              <Filter className="h-3.5 w-3.5 text-slate-400 ml-2" />
+            <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
+              <Filter className="h-3 w-3 text-slate-400 ml-1" />
               <Select value={pendingFormat} onValueChange={setPendingFormat}>
-                <SelectTrigger className="h-8 w-40 bg-white border-none text-[10px] font-black uppercase shadow-sm">
+                <SelectTrigger className="h-7 w-32 bg-transparent border-none text-[9px] font-black uppercase shadow-none focus:ring-0">
                   <SelectValue placeholder="Formato" />
                 </SelectTrigger>
                 <SelectContent>
@@ -330,34 +330,34 @@ export default function ControlCenterPage() {
             <Button 
               onClick={handleApplyFilters}
               disabled={isLoadingAnalytics}
-              className="bg-primary hover:bg-primary/90 text-white rounded-xl gap-2 h-10 px-6 text-[10px] font-black uppercase shadow-lg shadow-primary/20 transition-all active:scale-95"
+              className="bg-primary hover:bg-primary/90 text-white rounded-lg gap-1.5 h-8 px-3 text-[9px] font-black uppercase shadow-md transition-all active:scale-95"
             >
-              <RefreshCcw className={`h-3.5 w-3.5 ${isLoadingAnalytics ? 'animate-spin' : ''}`} />
-              Actualizar Presentación
+              <RefreshCcw className={`h-3 w-3 ${isLoadingAnalytics ? 'animate-spin' : ''}`} />
+              Actualizar
             </Button>
 
-            <Separator orientation="vertical" className="h-8 mx-2" />
+            <Separator orientation="vertical" className="h-6 mx-1" />
             
             <Button 
               variant="outline" 
               onClick={handleExportPresentation}
               disabled={isExporting}
-              className="border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl gap-2 h-10 px-6 text-[10px] font-black uppercase"
+              className="border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg gap-1.5 h-8 px-3 text-[9px] font-black uppercase"
             >
-              {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />} 
-              Exportar Presentación
+              {isExporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />} 
+              Exportar
             </Button>
           </div>
         </header>
 
-        <div className="bg-white border-b sticky top-20 z-40 px-8 py-3 overflow-x-auto scrollbar-hide flex gap-2">
+        <div className="bg-white border-b sticky top-16 z-40 px-4 py-2 overflow-x-auto scrollbar-hide flex gap-1.5">
           {SECTIONS.map(s => (
             <button
               key={s.id}
               onClick={() => setActiveSection(s.id)}
-              className={`px-5 py-2.5 rounded-full text-[10px] font-black uppercase whitespace-nowrap transition-all border ${
+              className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase whitespace-nowrap transition-all border ${
                 activeSection === s.id 
-                ? 'bg-primary border-primary text-white shadow-lg shadow-primary/20' 
+                ? 'bg-primary border-primary text-white shadow-md' 
                 : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-slate-300'
               }`}
             >

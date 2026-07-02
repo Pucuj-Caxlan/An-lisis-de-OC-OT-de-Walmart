@@ -1,3 +1,4 @@
+
 {
   "entities": {
     "Order": {
@@ -10,12 +11,17 @@
         "coordinador_normalizado": { "type": "string" },
         "etapa_proyecto_normalizada": { "type": "string" },
         "plan_nombre_normalizado": { "type": "string" },
+        "region_normalized": { "type": "string" },
+        "state_normalized": { "type": "string" },
+        "municipality_normalized": { "type": "string" },
         "year": { "type": "number" },
         "month": { "type": "number" },
         "projectId": { "type": "string" },
         "projectName": { "type": "string" },
         "impactoNeto": { "type": "number" },
         "disciplina_normalizada": { "type": "string" },
+        "causa_raiz_normalizada": { "type": "string" },
+        "subcausa_normalizada": { "type": "string" },
         "classification_status": { "type": "string", "enum": ["manual", "auto", "pending"] },
         "descripcion": { "type": "string" },
         "processedAt": { "type": "string", "format": "date-time" }
@@ -32,6 +38,10 @@
         "stage": { "type": "string" },
         "plan": { "type": "string" },
         "discipline": { "type": "string" },
+        "cause": { "type": "string" },
+        "subcause": { "type": "string" },
+        "state": { "type": "string" },
+        "municipality": { "type": "string" },
         "impact": { "type": "number" },
         "count": { "type": "number" },
         "lastUpdate": { "type": "string", "format": "date-time" }
@@ -49,6 +59,9 @@
     "/taxonomy_stages/{stageId}": { "schema": "object", "description": "Catálogo de etapas del proyecto" },
     "/taxonomy_plans/{planId}": { "schema": "object", "description": "Catálogo de planes" },
     "/taxonomy_disciplines/{discId}": { "schema": "object", "description": "Catálogo de disciplinas" },
+    "/taxonomy_causes/{causeId}": { "schema": "object", "description": "Catálogo de causas raíz" },
+    "/taxonomy_regions/{regionId}": { "schema": "object", "description": "Catálogo de regiones geográficas" },
+    "/taxonomy_states/{stateId}": { "schema": "object", "description": "Catálogo de estados" },
     "/audits/{auditId}": { "schema": "object", "description": "Historial de auditorías de anomalías" }
   }
 }
